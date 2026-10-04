@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "h3-lowpoints"
+version = "0.0.1"
+description = "Drainage low-point detection indexed on H3 cells"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "pandas", "rasterio", "pyproj", "requests", "h3>=4", "numba"]
+
+[project.optional-dependencies]
+viz = ["pydeck"]
+dev = ["pytest", "ruff"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/h3lowpoints"]
