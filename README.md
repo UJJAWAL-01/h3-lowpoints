@@ -1,16 +1,34 @@
 # h3-lowpoints
 
-**Experimental.** Finds closed depressions ("low points") in a lidar elevation model and describes
-them on H3 cells, with optional storm-drain context. Developed and tested on central Austin, Texas.
+**Experimental research prototype.** Finds closed depressions ("low points") in a lidar elevation
+model and describes them on H3 hexagon cells, with optional storm-drain context. Developed and
+tested on central Austin, Texas.
 
-<!-- After taking a screenshot of docs/demo/pilot_depressions.html, save it as docs/img/pilot.png
-     and uncomment the next line:
-![Depressions in a 12 km2 pilot area, H3 res 11](docs/img/pilot.png)
--->
+> Research output, **not a flood-risk map**. It says nothing about any specific property.
 
-Interactive demo (GitHub Pages): https://UJJAWAL-01.github.io/h3-lowpoints/demo/pilot_depressions.html
+## Sample output (pilot area, about 12 km2, H3 resolution 11)
 
-> This is research output, **not a flood-risk map**. It says nothing about any specific property.
+Interactive versions: [terrain](https://ujjawal-01.github.io/h3-lowpoints/demo/terrain.html) |
+[slope](https://ujjawal-01.github.io/h3-lowpoints/demo/slope.html) |
+[depressions](https://ujjawal-01.github.io/h3-lowpoints/demo/pilot_depressions.html)
+
+### 1. Terrain
+![Terrain](docs/img/terrain.png)
+
+Mean ground elevation per cell, extruded 3x. Used as a sanity check that the lidar, projection and
+H3 conversion line up with real geography (the low-lying valley corridor is visible).
+
+### 2. Slope
+![Slope](docs/img/slope.png)
+
+Mean slope per cell (scale 0 to 15 percent; darker red is steeper). Pale cells are flat ground,
+where water drains poorly.
+
+### 3. Depressions
+![Depressions](docs/img/depressions.png)
+
+Closed depressions of at least 0.15 m depth, in cells with at least 20 m2 of depression; darker and
+taller means deeper. These include ponds, excavations and street sags, not only drainage problems.
 
 ## What it does
 
@@ -32,9 +50,15 @@ Pass `drains_xy=` (an array of x, y in the DEM's CRS) to add drain context.
 
 ## What we measured (and what we didn't)
 
-Validated against Austin 311 tickets in three adjacent 12 km2 areas, using the thresholds fixed in
-advance (significant = depth >= 0.3 m and area >= 150 m2). Flooding and standing-water tickets fall
-within 10 m of a significant depression about **1.7 to 3.7 times as often** as other 311 tickets.
+Validated against Austin 311 tickets in three adjacent areas of about 12 km2 each, with thresholds
+fixed in advance (significant = depth >= 0.3 m and area >= 150 m2). Share of tickets within 10 m of
+a significant depression:
+
+| Area | Flood / standing-water tickets | Flood tickets within 10 m (95% interval) | Other 311 tickets within 10 m | Ratio |
+|---|---|---|---|---|
+| Pilot | 476 | 13.9% (10.9 to 17.0) | 3.8% | 3.7x |
+| East | 381 | 9.7% (6.8 to 12.6) | 5.7% | 1.7x |
+| North | 441 | 7.3% (4.8 to 9.8) | 4.3% | 1.7x |
 
 Limits:
 
@@ -42,6 +66,7 @@ Limits:
 - Having a recorded drain nearby did **not** make a depression less likely to have flood tickets.
 - All three areas are in one city, one lidar project and one asset schema. Nothing here shows it works elsewhere.
 - 311 tickets reflect where people live and report. They are context, not ground truth.
+- The lidar was flown in 2017 and the City asset records are current, so recent construction can differ.
 
 ## Data and licensing
 
