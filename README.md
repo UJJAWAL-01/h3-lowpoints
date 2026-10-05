@@ -8,7 +8,7 @@ them on H3 cells, with optional storm-drain context. Developed and tested on cen
 ![Depressions in a 12 km2 pilot area, H3 res 11](docs/img/pilot.png)
 -->
 
-Interactive demo (GitHub Pages): https://YOUR_USERNAME.github.io/h3-lowpoints/demo/pilot_depressions.html
+Interactive demo (GitHub Pages): https://UJJAWAL-01.github.io/h3-lowpoints/demo/pilot_depressions.html
 
 > This is research output, **not a flood-risk map**. It says nothing about any specific property.
 
