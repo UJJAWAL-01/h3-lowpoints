@@ -15,3 +15,6 @@ dev = ["pytest", "ruff"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/h3lowpoints"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

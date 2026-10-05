@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+data_tiles.json
+*.html
+outputs/
+!docs/**/*.html
+
+# generated data, downloads and large files (never commit these)
+data/
+*.tif
+
+# but keep the demo maps under docs/
+!docs/**/*.html
