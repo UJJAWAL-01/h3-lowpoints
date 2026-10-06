@@ -48,6 +48,16 @@ res.save("outputs/my_area")
 
 Pass `drains_xy=` (an array of x, y in the DEM's CRS) to add drain context. Pass `buildings=` (footprints in the same CRS) to add `building_overlap` and `likely_building_artifact`.
 
+## Command line
+
+```
+h3lowpoints analyze dem.tif --drains drains.csv --buildings buildings.gpkg --out results/
+```
+
+Drains: a point file (GeoPackage, GeoJSON, Shapefile) or a CSV with `x,y` (in the DEM's CRS) or
+`lon,lat` columns. Buildings: a polygon file. The DEM must be in a projected CRS with metres.
+Outputs: `depressions.csv`, `cells.csv` and `meta.json` (parameters and versions).
+
 ## What we measured (and what we didn't)
 
 Validated against Austin 311 tickets in three adjacent areas of about 12 km2 each, with thresholds

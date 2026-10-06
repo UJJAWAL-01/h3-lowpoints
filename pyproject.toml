@@ -15,6 +15,9 @@ sources = ["geopandas", "pyogrio", "shapely", "requests"]
 viz = ["pydeck"]
 dev = ["pytest", "ruff"]
 
+[project.scripts]
+h3lowpoints = "h3lowpoints.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/ujjawal-01/h3-lowpoints"
 

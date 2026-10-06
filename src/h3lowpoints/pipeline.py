@@ -49,6 +49,12 @@ def analyze(dem_path, drains_xy=None, res=11, min_depth=0.15, core_frac=0.8, rad
     """
     with rasterio.open(dem_path) as src:
         arr, nodata, transform, crs = src.read(1), src.nodata, src.transform, src.crs
+    units = (crs.linear_units or "").lower() if crs is not None and crs.is_projected else ""
+    if units not in ("metre", "meter"):
+        raise ValueError(
+            f"The DEM needs a projected CRS in metres (for example a UTM zone), got {crs}. "
+            "Reproject it first, for example with gdalwarp -t_srs EPSG:xxxxx."
+        )
     invalid = np.isnan(arr)
     if nodata is not None:
         invalid |= arr == nodata
