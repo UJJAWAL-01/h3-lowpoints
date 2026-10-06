@@ -25,6 +25,9 @@ def build_parser():
     a.add_argument("--out", default="h3lowpoints_out", help="output folder (default h3lowpoints_out)")
     a.add_argument("--res", type=int, default=11, help="H3 resolution (default 11)")
     a.add_argument("--min-depth", type=float, default=0.15, help="minimum depression depth in metres")
+    a.add_argument("--tile", type=int, default=0,
+                   help="process in tiles of this many cells (for large DEMs); 0 = whole raster")
+    a.add_argument("--buffer", type=int, default=256, help="tile overlap in cells (default 256)")
     return parser
 
 
@@ -38,8 +41,15 @@ def main(argv=None):
             crs = src.crs
         drains = read_drains(args.drains, crs) if args.drains else None
         buildings = read_buildings(args.buildings, crs) if args.buildings else None
-        result = analyze(args.dem, drains_xy=drains, res=args.res,
-                         min_depth=args.min_depth, buildings=buildings)
+        if args.tile:
+            from .tiling import analyze_tiled
+
+            result = analyze_tiled(args.dem, drains_xy=drains, buildings=buildings,
+                                   tile=args.tile, buffer=args.buffer, res=args.res,
+                                   min_depth=args.min_depth)
+        else:
+            result = analyze(args.dem, drains_xy=drains, res=args.res,
+                             min_depth=args.min_depth, buildings=buildings)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc
 
