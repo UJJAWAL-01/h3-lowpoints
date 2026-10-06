@@ -23,3 +23,17 @@ def test_unexplained_then_drained(tmp_path):
     res2 = analyze(str(p), drains_xy=np.array([[500027.5, 3349972.5]]))
     assert res2.depressions.iloc[0]["cls"] == "drained"
     assert len(res2.cells) >= 1
+
+
+def test_building_overlap(tmp_path):
+    from shapely.geometry import box
+
+    p = tmp_path / "dem.tif"
+    _make_dem(p)
+    res = analyze(str(p), buildings=[box(500018, 3349962, 500038, 3349982)])
+    row = res.depressions.iloc[0]
+    assert row["building_overlap"] > 0.99
+    assert bool(row["likely_building_artifact"])
+    res2 = analyze(str(p))
+    assert res2.depressions["building_overlap"].isna().all()
+    assert not res2.depressions["likely_building_artifact"].any()

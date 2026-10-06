@@ -6,15 +6,26 @@ build-backend = "hatchling.build"
 name = "h3-lowpoints"
 version = "0.0.1"
 description = "Drainage low-point detection indexed on H3 cells"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numpy", "scipy", "pandas", "rasterio", "pyproj", "requests", "h3>=4", "numba"]
+dependencies = ["numpy", "scipy", "pandas", "rasterio", "pyproj", "h3>=4", "numba", "shapely"]
 
 [project.optional-dependencies]
+sources = ["geopandas", "pyogrio", "shapely", "requests"]
 viz = ["pydeck"]
 dev = ["pytest", "ruff"]
 
+[project.urls]
+Homepage = "https://github.com/ujjawal-01/h3-lowpoints"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/h3lowpoints"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

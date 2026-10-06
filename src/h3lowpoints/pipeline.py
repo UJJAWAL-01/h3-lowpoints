@@ -11,12 +11,14 @@ from pyproj import Transformer
 from scipy import ndimage
 from scipy.spatial import cKDTree
 
+from .buildings import building_overlap
 from .classify import CODES, classify, serving_drains, touches_edge
 from .h3agg.aggregate import depression_cells
 from .hydro.depressions import depth_from_array, label_depressions
 
 DEP_COLS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint",
-            "dist_to_drain_m", "drain_at_core", "significant", "suspect_pit", "edge", "cls"]
+            "dist_to_drain_m", "drain_at_core", "significant", "suspect_pit", "edge", "cls",
+            "building_overlap", "likely_building_artifact"]
 
 
 @dataclass
@@ -39,7 +41,7 @@ class Result:
 
 
 def analyze(dem_path, drains_xy=None, res=11, min_depth=0.15, core_frac=0.8, radius=5,
-            sig_depth=0.3, sig_area=150.0, pit_depth=1.5, pit_area=150.0):
+            sig_depth=0.3, sig_area=150.0, pit_depth=1.5, pit_area=150.0, buildings=None):
     """Find depressions in a DEM and describe them on H3 cells.
 
     drains_xy: optional (n, 2) array of drain locations in the DEM's CRS.
@@ -88,6 +90,11 @@ def analyze(dem_path, drains_xy=None, res=11, min_depth=0.15, core_frac=0.8, rad
         "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
         "dist_to_drain_m": dist, "drain_at_core": served, "significant": significant,
         "suspect_pit": pit, "edge": edge, "cls": cls})
+    if buildings is not None:
+        deps["building_overlap"] = building_overlap(labels, ids, buildings, transform, arr.shape)
+    else:
+        deps["building_overlap"] = np.nan
+    deps["likely_building_artifact"] = deps["building_overlap"].fillna(0.0) >= 0.5
 
     code_by_label = np.zeros(int(labels.max()) + 1)
     code_by_label[ids] = [CODES[c] for c in cls]

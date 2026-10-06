@@ -46,7 +46,7 @@ res.cells.head()                      # one row per H3 cell
 res.save("outputs/my_area")
 ```
 
-Pass `drains_xy=` (an array of x, y in the DEM's CRS) to add drain context.
+Pass `drains_xy=` (an array of x, y in the DEM's CRS) to add drain context. Pass `buildings=` (footprints in the same CRS) to add `building_overlap` and `likely_building_artifact`.
 
 ## What we measured (and what we didn't)
 
@@ -60,8 +60,16 @@ a significant depression:
 | East | 381 | 9.7% (6.8 to 12.6) | 5.7% | 1.7x |
 | North | 441 | 7.3% (4.8 to 9.8) | 4.3% | 1.7x |
 
+Robustness check (building confound): flood tickets and lidar artifacts could both concentrate
+at buildings, so we repeated the test using only depressions with under 10% of their area inside
+a building footprint and only tickets within 10 m of a building. Flood tickets were 2.3x to 6.4x
+as likely as other 311 tickets to be within 10 m of such a depression (about 3.7x pooled). The
+criterion was fixed before the run; the north area passed narrowly (interval lower bound about
+equal to the control rate). Footprints are City of Austin data of mixed vintage (imagery 2012 to 2017).
+
 Limits:
 
+- Depressions mostly under building footprints are likely lidar artifacts (about 7 to 17% of significant depressions in the three areas). Pass `buildings=` to flag them.
 - Most flood tickets are *not* near any detected depression, so recall is low.
 - Having a recorded drain nearby did **not** make a depression less likely to have flood tickets.
 - All three areas are in one city, one lidar project and one asset schema. Nothing here shows it works elsewhere.

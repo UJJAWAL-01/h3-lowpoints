@@ -67,31 +67,6 @@ def mosaic(paths, out_path):
 
 
 def crop_mosaic(paths, out_path, bbox_lonlat):
-    """Merge tiles but keep only bbox_lonlat (minx, miny, maxx, maxy in lon/lat)."""
-    from rasterio.warp import transform_bounds
-
-    srcs = [rasterio.open(p) for p in paths]
-    crs = {str(s.crs) for s in srcs}
-    if len(crs) != 1:
-        raise ValueError(f"Tiles use different CRS: {crs}")
-    bounds = transform_bounds("EPSG:4326", srcs[0].crs, *bbox_lonlat)
-    arr, transform = merge(srcs, bounds=bounds)
-    meta = srcs[0].meta.copy()
-    meta.update(
-        driver="GTiff",
-        height=arr.shape[1],
-        width=arr.shape[2],
-        transform=transform,
-        compress="deflate",
-    )
-    with rasterio.open(out_path, "w", **meta) as dst:
-        dst.write(arr)
-    for s in srcs:
-        s.close()
-    return out_path
-
-
-def crop_mosaic(paths, out_path, bbox_lonlat):
     """Crop to bbox_lonlat (minx, miny, maxx, maxy in lon/lat) and stitch tiles on a 1 m grid."""
     import math
 

@@ -1,2 +1,5 @@
+import importlib
+
+
 def test_import():
-    import h3lowpoints
+    assert importlib.import_module("h3lowpoints")
