@@ -4,12 +4,20 @@ from scipy import ndimage
 CODES = {"minor": 1, "drained": 2, "suspect_pit": 3, "unexplained": 4}
 
 
-def touches_edge(labels, ids):
-    """True for depressions that touch the raster border (their true extent is cut off)."""
+def touches_edge(labels, ids, margin=1):
+    """True for depressions within `margin` cells of the raster border.
+
+    The fill algorithm treats the border as a drain, so border cells never hold depth: a
+    depression whose true extent is cut off by the border shows up one cell inside it.
+    """
     h, w = labels.shape
     objs = ndimage.find_objects(labels)
-    return np.array([objs[i - 1][0].start == 0 or objs[i - 1][1].start == 0 or
-                     objs[i - 1][0].stop == h or objs[i - 1][1].stop == w for i in ids], dtype=bool)
+    out = []
+    for i in ids:
+        rows, cols = objs[i - 1]
+        out.append(rows.start <= margin or cols.start <= margin
+                   or rows.stop >= h - margin or cols.stop >= w - margin)
+    return np.array(out, dtype=bool)
 
 
 def serving_drains(labels, depth, ids, max_depth, drains_xy, transform, core_frac=0.8, radius=5):
