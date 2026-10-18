@@ -1,5 +1,6 @@
 import argparse
 from importlib import metadata
+from pathlib import Path
 
 import rasterio
 
@@ -20,11 +21,18 @@ def build_parser():
     sub = parser.add_subparsers(dest="command", required=True)
     a = sub.add_parser("analyze", help="analyze a DEM")
     a.add_argument("dem", help="GeoTIFF in a projected CRS with metre units")
+    a.add_argument("--reproject", action="store_true",
+                   help="reproject a DEM in geographic coordinates to its UTM zone first")
     a.add_argument("--drains", help="inlet/grate points: GeoPackage, GeoJSON, Shapefile or CSV")
     a.add_argument("--buildings", help="building footprint polygons")
     a.add_argument("--out", default="h3lowpoints_out", help="output folder (default h3lowpoints_out)")
     a.add_argument("--res", type=int, default=11, help="H3 resolution (default 11)")
     a.add_argument("--min-depth", type=float, default=0.15, help="minimum depression depth in metres")
+    wl = a.add_mutually_exclusive_group()
+    wl.add_argument("--waterlogging", dest="waterlogging", action="store_true", default=None,
+                    help="add waterlogging classes (default: only for DEMs of 2 m or finer)")
+    wl.add_argument("--no-waterlogging", dest="waterlogging", action="store_false",
+                    help="depressions and cells only, no waterlogging classes")
     a.add_argument("--tile", type=int, default=0,
                    help="process in tiles of this many cells (for large DEMs); 0 = whole raster")
     a.add_argument("--buffer", type=int, default=256, help="tile overlap in cells (default 256)")
@@ -33,23 +41,30 @@ def build_parser():
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    from .context.readers import read_buildings, read_drains
     from .pipeline import analyze
-    from .readers import read_buildings, read_drains
 
     try:
-        with rasterio.open(args.dem) as src:
+        dem = args.dem
+        if args.reproject:
+            import tempfile
+
+            from .dem_io import reproject_to_utm
+
+            dem = reproject_to_utm(args.dem, Path(tempfile.mkdtemp()) / "dem_utm.tif")
+        with rasterio.open(dem) as src:
             crs = src.crs
         drains = read_drains(args.drains, crs) if args.drains else None
         buildings = read_buildings(args.buildings, crs) if args.buildings else None
         if args.tile:
             from .tiling import analyze_tiled
 
-            result = analyze_tiled(args.dem, drains_xy=drains, buildings=buildings,
+            result = analyze_tiled(dem, drains_xy=drains, buildings=buildings,
                                    tile=args.tile, buffer=args.buffer, res=args.res,
-                                   min_depth=args.min_depth)
+                                   min_depth=args.min_depth, waterlogging=args.waterlogging)
         else:
-            result = analyze(args.dem, drains_xy=drains, res=args.res,
-                             min_depth=args.min_depth, buildings=buildings)
+            result = analyze(dem, drains_xy=drains, res=args.res, min_depth=args.min_depth,
+                             buildings=buildings, waterlogging=args.waterlogging)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc
 

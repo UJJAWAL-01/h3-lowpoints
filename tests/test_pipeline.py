@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
@@ -17,7 +18,8 @@ def _make_dem(path):
 def test_unexplained_then_drained(tmp_path):
     p = tmp_path / "dem.tif"
     _make_dem(p)
-    res = analyze(str(p))
+    with pytest.warns(UserWarning, match="No drain data"):
+        res = analyze(str(p))
     assert len(res.depressions) == 1
     assert res.depressions.iloc[0]["cls"] == "unexplained"
     res2 = analyze(str(p), drains_xy=np.array([[500027.5, 3349972.5]]))
@@ -34,6 +36,5 @@ def test_building_overlap(tmp_path):
     row = res.depressions.iloc[0]
     assert row["building_overlap"] > 0.99
     assert bool(row["likely_building_artifact"])
-    res2 = analyze(str(p))
-    assert res2.depressions["building_overlap"].isna().all()
-    assert not res2.depressions["likely_building_artifact"].any()
+    res2 = analyze(str(p), waterlogging=False)
+    assert "building_overlap" not in res2.depressions   # no footprints given: no claim made

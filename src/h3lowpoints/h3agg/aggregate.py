@@ -1,68 +1,68 @@
 import h3
 import numpy as np
 import pandas as pd
-import rasterio
+from h3.api import numpy_int
 from pyproj import Transformer
 
-
-def pixels_to_h3(values, transform, crs, res=11, step=1):
-    """Assign every `step`-th pixel with a valid (non-NaN) value to an H3 cell."""
-    rows = np.arange(0, values.shape[0], step)
-    cols = np.arange(0, values.shape[1], step)
-    rr, cc = np.meshgrid(rows, cols, indexing="ij")
-    rr, cc = rr.ravel(), cc.ravel()
-    v = values[rr, cc]
-    ok = ~np.isnan(v)
-    rr, cc, v = rr[ok], cc[ok], v[ok]
-    xs, ys = rasterio.transform.xy(transform, rr, cc)
-    to_ll = Transformer.from_crs(crs, 4326, always_xy=True)
-    lon, lat = to_ll.transform(np.asarray(xs), np.asarray(ys))
-    cells = [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)]
-    return pd.DataFrame({"h3": cells, "v": v})
+CELL_COLUMNS = ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3"]
 
 
-def build_cell_table(dem_path, depth, transform, crs, res=11,
-                     min_depth=0.15, flat_relief=0.3, terrain_step=4):
-    with rasterio.open(dem_path) as src:
-        elev = src.read(1).astype("float64")
-        if src.nodata is not None:
-            elev[elev == src.nodata] = np.nan
-    cell_area = abs(transform.a * transform.e)
+def pixel_centers(transform, rows, cols):
+    """Map coordinates of pixel centres, vectorised."""
+    x, y = transform @ (np.asarray(cols) + 0.5, np.asarray(rows) + 0.5)
+    return np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64")
 
-    terr = pixels_to_h3(elev, transform, crs, res, step=terrain_step)
-    terr = terr.groupby("h3")["v"].agg(
-        mean_elev="mean", relief=lambda x: x.max() - x.min()
-    ).reset_index()
-    terr["flat"] = terr["relief"] < flat_relief
 
-    d = np.where(depth >= min_depth, depth, np.nan)
-    dep = pixels_to_h3(d, transform, crs, res, step=1)
-    dep = dep.groupby("h3")["v"].agg(
-        max_depth="max", n_pix="count", depth_sum="sum"
-    ).reset_index()
-    dep["depress_area_m2"] = dep["n_pix"] * cell_area
-    dep["depress_volume_m3"] = dep["depth_sum"] * cell_area
-    dep = dep.drop(columns=["n_pix", "depth_sum"])
+def lonlat(crs, x, y):
+    return Transformer.from_crs(crs, 4326, always_xy=True).transform(x, y)
 
-    cells = terr.merge(dep, on="h3", how="outer")
-    for col in ("max_depth", "depress_area_m2", "depress_volume_m3"):
-        cells[col] = cells[col].fillna(0.0)
-    cells["flat"] = cells["flat"].fillna(False).astype(bool)
-    return cells
+
+def h3_ids(lat, lon, res):
+    """H3 cell ids (as integers) for arrays of latitude and longitude."""
+    return np.fromiter((numpy_int.latlng_to_cell(a, b, res) for a, b in zip(lat, lon)),
+                       dtype=np.uint64, count=len(lat))
 
 
 def depression_cells(depth, labels, code_by_label, transform, crs, res=11):
-    """One row per H3 cell that contains depression pixels."""
+    """One row per H3 cell that contains depression pixels.
+
+    Each pixel belongs to the cell containing its centre. Area and volume are sums over those
+    pixels and depth is their maximum, so results can be rolled up to coarser resolutions with
+    `rollup` without loss. `code_by_label` is None, or an array giving a class code per label.
+    """
+    columns = CELL_COLUMNS + (["code"] if code_by_label is not None else [])
     rr, cc = np.nonzero(labels > 0)
     if len(rr) == 0:
-        return pd.DataFrame(columns=["h3", "max_depth_m", "code", "depress_area_m2", "depress_volume_m3"])
-    xs, ys = rasterio.transform.xy(transform, rr, cc)
-    lon, lat = Transformer.from_crs(crs, 4326, always_xy=True).transform(np.asarray(xs), np.asarray(ys))
-    cells = [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)]
-    df = pd.DataFrame({"h3": cells, "depth": depth[rr, cc], "code": code_by_label[labels[rr, cc]]})
+        return pd.DataFrame(columns=columns)
+    lon, lat = lonlat(crs, *pixel_centers(transform, rr, cc))
+    df = pd.DataFrame({"cell": h3_ids(lat, lon, res), "depth": depth[rr, cc]})
+    spec = {"max_depth_m": ("depth", "max"), "n_pix": ("depth", "size"),
+            "depth_sum": ("depth", "sum")}
+    if code_by_label is not None:
+        df["code"] = code_by_label[labels[rr, cc]]
+        spec["code"] = ("code", "max")
+    out = df.groupby("cell").agg(**spec).reset_index()
     cell_area = abs(transform.a * transform.e)
-    out = df.groupby("h3").agg(max_depth_m=("depth", "max"), n_pix=("depth", "size"),
-                               depth_sum=("depth", "sum"), code=("code", "max")).reset_index()
+    out["h3"] = [numpy_int.int_to_str(int(c)) for c in out["cell"]]
     out["depress_area_m2"] = out["n_pix"] * cell_area
     out["depress_volume_m3"] = out["depth_sum"] * cell_area
-    return out.drop(columns=["n_pix", "depth_sum"])
+    return out[columns]
+
+
+def rollup(cells, res):
+    """Aggregate a cell table to a coarser H3 resolution.
+
+    Depth and class code take the maximum of the children; area and volume add up.
+    """
+    if len(cells) == 0:
+        return cells.copy()
+    src = h3.get_resolution(cells["h3"].iloc[0])
+    if not 0 <= res <= src:
+        raise ValueError(f"Can only roll up to a coarser resolution than {src}, got {res}")
+    parent = {c: h3.cell_to_parent(c, res) for c in cells["h3"].unique()}
+    spec = {"max_depth_m": ("max_depth_m", "max"),
+            "depress_area_m2": ("depress_area_m2", "sum"),
+            "depress_volume_m3": ("depress_volume_m3", "sum")}
+    if "code" in cells:
+        spec["code"] = ("code", "max")
+    return (cells.assign(h3=cells["h3"].map(parent)).groupby("h3", as_index=False).agg(**spec))

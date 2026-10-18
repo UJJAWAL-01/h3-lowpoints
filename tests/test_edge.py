@@ -1,7 +1,6 @@
 import numpy as np
 
-from h3lowpoints.classify import touches_edge
-from h3lowpoints.hydro.depressions import depth_from_array, label_depressions
+from h3lowpoints.hydro.depressions import depth_from_array, label_depressions, touches_edge
 
 
 def test_edge_adjacent_depression_is_flagged():

@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "h3-lowpoints"
+type: software
+authors:
+  - family-names: "Patel"
+    given-names: "Ujjawal"
+repository-code: "https://github.com/UJJAWAL-01/h3-lowpoints"
+license: Apache-2.0
+version: "0.0.1"
+abstract: "Find closed depressions in elevation models and map them on H3 cells, with an optional waterlogging screen."

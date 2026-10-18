@@ -5,9 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "h3-lowpoints"
 version = "0.0.1"
-description = "Drainage low-point detection indexed on H3 cells"
+description = "Find closed depressions in elevation models and map them on H3 cells, with an optional waterlogging screen"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["h3", "dem", "lidar", "depressions", "hydrology", "flooding", "gis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Programming Language :: Python :: 3",
+]
 dependencies = ["numpy", "scipy", "pandas", "rasterio", "pyproj", "h3>=4", "numba", "shapely"]
 
 [project.optional-dependencies]
