@@ -1,18 +1,16 @@
 import json
 
 import numpy as np
-import pandas as pd
 import pytest
 import rasterio
 from rasterio.transform import from_origin
 
 from h3lowpoints import analyze, reproject_to_utm, rollup
-from h3lowpoints.cli import main
 from h3lowpoints.viz.deck import cells_to_geojson, colour_ramp
 
 
 def test_rollup_conserves_area_and_volume(dem_path):
-    res = analyze(dem_path, res=12, waterlogging=False)
+    res = analyze(dem_path, res=12)
     coarse = res.at_resolution(10)
     assert len(coarse) < len(res.cells)
     assert coarse["depress_area_m2"].sum() == pytest.approx(res.cells["depress_area_m2"].sum())
@@ -22,26 +20,20 @@ def test_rollup_conserves_area_and_volume(dem_path):
 
 
 def test_rollup_matches_analysis_at_the_coarse_resolution(dem_path):
-    rolled = analyze(dem_path, res=12, waterlogging=False).at_resolution(10)
-    direct = analyze(dem_path, res=10, waterlogging=False).cells
+    rolled = analyze(dem_path, res=12).at_resolution(10)
+    direct = analyze(dem_path, res=10).cells
     # Both assign each pixel to the cell holding its centre, so the totals agree exactly.
     assert rolled["depress_area_m2"].sum() == pytest.approx(direct["depress_area_m2"].sum())
 
 
 def test_rollup_rejects_a_finer_resolution(dem_path):
-    cells = analyze(dem_path, res=10, waterlogging=False).cells
+    cells = analyze(dem_path, res=10).cells
     with pytest.raises(ValueError, match="coarser"):
         rollup(cells, 12)
 
 
-def test_class_codes_survive_rollup(dem_path):
-    res = analyze(dem_path, res=12)
-    assert "code" in res.at_resolution(9)
-    assert res.meta["class_codes"]["unexplained"] == 4
-
-
 def test_geojson_export(dem_path, tmp_path):
-    cells = analyze(dem_path, res=11, waterlogging=False).cells
+    cells = analyze(dem_path, res=11).cells
     out = cells_to_geojson(cells, tmp_path / "cells.geojson")
     assert len(out["features"]) == len(cells)
     f = out["features"][0]
@@ -58,7 +50,7 @@ def test_colour_ramp_runs_light_to_dark():
 
 def test_deck_builds_without_a_browser(dem_path):
     pytest.importorskip("pydeck")
-    deck = analyze(dem_path, res=11, waterlogging=False).to_deck()
+    deck = analyze(dem_path, res=11).to_deck()
     assert "H3HexagonLayer" in deck.to_json()
 
 
@@ -72,19 +64,11 @@ def test_reproject_geographic_dem_to_utm(tmp_path):
     with rasterio.open(src, "w", **prof) as dst:
         dst.write(arr, 1)
     with pytest.raises(ValueError, match="projected CRS"):
-        analyze(str(src), waterlogging=False)
+        analyze(str(src))
     out = reproject_to_utm(src, tmp_path / "utm.tif")
     with rasterio.open(out) as r:
         assert r.crs.to_epsg() == 32614   # UTM zone 14N
-    assert len(analyze(str(out), waterlogging=False).depressions) == 1
-
-
-def test_cli_waterlogging_flags(dem_path, tmp_path):
-    main(["analyze", dem_path, "--no-waterlogging", "--out", str(tmp_path / "a")])
-    assert "cls" not in pd.read_csv(tmp_path / "a" / "depressions.csv")
-    with pytest.warns(UserWarning):
-        main(["analyze", dem_path, "--waterlogging", "--out", str(tmp_path / "b")])
-    assert "cls" in pd.read_csv(tmp_path / "b" / "depressions.csv")
+    assert len(analyze(str(out)).depressions) == 1
 
 
 def test_quickstart_example_runs(tmp_path):
@@ -98,4 +82,5 @@ def test_quickstart_example_runs(tmp_path):
     res = mod.main(tmp_path)
     assert len(res.depressions) == 3
     assert res.depressions["likely_building_artifact"].sum() == 1
+    assert res.depressions["drain_at_core"].sum() == 1
     assert (tmp_path / "cells.csv").exists()

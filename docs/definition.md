@@ -38,28 +38,28 @@ Two flags describe depressions the data cannot fully describe. They mean differe
 
 **`edge`**: the depression lies within one cell of the data border (the raster border, or the
 border of a tile's window). The border is an outlet, so the true depression is cut off there.
-Depressions with `edge = True` are never classed as significant or suspect pits.
+Treat their area and volume as lower bounds.
 
 **`level_uncertain`**: only in tiled runs. A tile treats its border as an outlet, so a lake that
 really spills beyond the buffer is seen at a lower level, and one depression can come back as
 several pieces. A depression is flagged when its water level was set through a path to a tile
 border that is not a real edge of the data. This is a *could differ* flag, not a *does differ*
-flag: it marks everything that more data might change, so it is conservative and does not
-suppress any class. Whole-raster runs never set it.
+flag: it marks everything that more data might change, so it is conservative. Whole-raster
+runs never set it.
 
-How conservative? On the Austin pilot area (3368 x 3884 cells, tiles of 1500), against a
+How conservative? On a 1 m lidar test DEM (3368 x 3884 cells, tiles of 1500), against a
 whole-raster run:
 
-| buffer | flagged `level_uncertain` | depressions that actually differ | classes that differ |
-|---|---|---|---|
-| 64 | 1238 of 1629 | 2 changed values, 4 extra fragments (all flagged) | 0 |
-| 256 | 1179 of 1625 | 0 | 0 |
+| buffer | flagged `level_uncertain` | depressions that actually differ |
+|---|---|---|
+| 64 | 1238 of 1629 | 2 changed values, 4 extra fragments (all flagged) |
+| 256 | 1179 of 1625 | 0 |
 
 So at the default buffer nearly everything is flagged although nothing changed. Treat the flag as
 a bound, and use the buffer to tighten it: with a buffer wider than every lake, a tiled run
 equals `analyze` exactly (`tests/test_tiling.py`), and unflagged depressions are never wrong
 (`test_narrow_buffer_never_returns_a_wrong_unflagged_depression`). An exact tiled algorithm that
-removes the need for a buffer is on the roadmap (see CONTRIBUTING.md).
+removes the need for a buffer is on the roadmap (see [roadmap.md](roadmap.md)).
 
 ## H3 assignment
 
@@ -71,5 +71,5 @@ resolution exactly. A depression that spans several cells contributes to each of
 ## What it cannot tell you
 
 A depression is a feature of the elevation model. It does not know whether water collects there,
-whether a culvert the DEM misses drains it, or whether it is a pond. See
-[waterlogging.md](waterlogging.md) for the optional screen built on top.
+whether a culvert the DEM misses drains it, or whether it is a pond. The planned susceptibility
+layer (see [roadmap.md](roadmap.md)) is the step towards that question.

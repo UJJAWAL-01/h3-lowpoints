@@ -23,25 +23,21 @@ def h3_ids(lat, lon, res):
                        dtype=np.uint64, count=len(lat))
 
 
-def depression_cells(depth, labels, code_by_label, transform, crs, res=11):
+def depression_cells(depth, labels, transform, crs, res=11):
     """One row per H3 cell that contains depression pixels.
 
     Each pixel belongs to the cell containing its centre. Area and volume are sums over those
     pixels and depth is their maximum, so results can be rolled up to coarser resolutions with
-    `rollup` without loss. `code_by_label` is None, or an array giving a class code per label.
+    `rollup` without loss.
     """
-    columns = CELL_COLUMNS + (["code"] if code_by_label is not None else [])
+    columns = CELL_COLUMNS
     rr, cc = np.nonzero(labels > 0)
     if len(rr) == 0:
         return pd.DataFrame(columns=columns)
     lon, lat = lonlat(crs, *pixel_centers(transform, rr, cc))
     df = pd.DataFrame({"cell": h3_ids(lat, lon, res), "depth": depth[rr, cc]})
-    spec = {"max_depth_m": ("depth", "max"), "n_pix": ("depth", "size"),
-            "depth_sum": ("depth", "sum")}
-    if code_by_label is not None:
-        df["code"] = code_by_label[labels[rr, cc]]
-        spec["code"] = ("code", "max")
-    out = df.groupby("cell").agg(**spec).reset_index()
+    out = df.groupby("cell").agg(max_depth_m=("depth", "max"), n_pix=("depth", "size"),
+                                 depth_sum=("depth", "sum")).reset_index()
     cell_area = abs(transform.a * transform.e)
     out["h3"] = [numpy_int.int_to_str(int(c)) for c in out["cell"]]
     out["depress_area_m2"] = out["n_pix"] * cell_area
@@ -52,7 +48,7 @@ def depression_cells(depth, labels, code_by_label, transform, crs, res=11):
 def rollup(cells, res):
     """Aggregate a cell table to a coarser H3 resolution.
 
-    Depth and class code take the maximum of the children; area and volume add up.
+    Depth takes the maximum of the children; area and volume add up.
     """
     if len(cells) == 0:
         return cells.copy()
@@ -63,6 +59,4 @@ def rollup(cells, res):
     spec = {"max_depth_m": ("max_depth_m", "max"),
             "depress_area_m2": ("depress_area_m2", "sum"),
             "depress_volume_m3": ("depress_volume_m3", "sum")}
-    if "code" in cells:
-        spec["code"] = ("code", "max")
     return (cells.assign(h3=cells["h3"].map(parent)).groupby("h3", as_index=False).agg(**spec))

@@ -4,24 +4,29 @@
 
 Not yet published. Breaking changes from the earlier prototype are expected while the API settles.
 
+### Direction
+- The library is now a general depression layer on H3 (see [docs/roadmap.md](docs/roadmap.md)).
+  The Austin-only waterlogging classes (`drained`, `unexplained`, `suspect_pit`), their thresholds,
+  the City of Austin asset reader and the 311 comparison were removed: they rested on one city
+  and are not evidence for a global method. The research scripts remain in git history
+  (commit `ca4af00`).
+
 ### Changed
-- Depressions are now 8-connected, matching the fill. Pits touching at a corner are one
-  depression. On the Austin pilot area this merges 75 of 1,700 depressions; max depths are unchanged.
-- Waterlogging is an optional layer (`waterlogging=`), on by default only for DEMs of 2 m or finer.
-  Its columns (`significant`, `suspect_pit`, `cls`) are absent when it is off. Drain and building
-  columns appear only when drains or buildings are supplied.
-- All distances are in metres: `radius` (cells) became `WaterloggingParams.drain_radius_m`.
-- Code moved into `hydro` (core), `h3agg`, `context` (drains, buildings, readers), `waterlogging`,
-  `sources` (USGS, Austin) and `viz`. `analyze` takes keyword arguments after the DEM path.
-- The deepest point of a depression is now the first tied cell in row-major order.
+- Depressions are 8-connected, matching the fill. Pits touching at a corner are one depression.
+  On a 1 m lidar test DEM this merged 75 of 1,700 depressions; max depths were unchanged.
+- All distances are in metres: the old `radius` (cells) became `drain_radius_m`.
+- Code is organised as `hydro` and `h3agg` (core), `context` (drains, buildings, readers),
+  `sources` (USGS 3DEP) and `viz`. `analyze` takes keyword arguments after the DEM path.
+- Drain and building columns appear only when drains or buildings are supplied.
+- The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
 - Tiled runs flag depressions whose water level depends on a tile border (`level_uncertain`).
   Previously a tile could silently split one large depression into several unflagged pieces.
-- `Result.at_resolution`, `rollup`: exact roll-up to coarser H3 resolutions.
-- `Result.to_deck`, `viz.deck.cells_to_geojson`: 3D map and GeoJSON export.
+- `Result.at_resolution` and `rollup`: exact roll-up to coarser H3 resolutions.
+- `Result.to_deck` and `viz.deck.cells_to_geojson`: 3D map and GeoJSON export.
 - Resolution tiers, warnings for DEMs too coarse for the requested analysis, `reproject_to_utm`
-  and `--reproject`, `--waterlogging` / `--no-waterlogging`.
+  and `--reproject`.
 - Tests: fill against an independent method, tiled against whole, vectorized against loop.
 
 ### Fixed

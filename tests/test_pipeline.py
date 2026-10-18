@@ -1,4 +1,3 @@
-import pytest
 import numpy as np
 import rasterio
 from rasterio.transform import from_origin
@@ -15,16 +14,17 @@ def _make_dem(path):
         dst.write(arr, 1)
 
 
-def test_unexplained_then_drained(tmp_path):
+def test_drain_at_the_deepest_part_is_reported(tmp_path):
     p = tmp_path / "dem.tif"
     _make_dem(p)
-    with pytest.warns(UserWarning, match="No drain data"):
-        res = analyze(str(p))
+    res = analyze(str(p))
     assert len(res.depressions) == 1
-    assert res.depressions.iloc[0]["cls"] == "unexplained"
-    res2 = analyze(str(p), drains_xy=np.array([[500027.5, 3349972.5]]))
-    assert res2.depressions.iloc[0]["cls"] == "drained"
-    assert len(res2.cells) >= 1
+    assert "drain_at_core" not in res.depressions   # no drain data given: no claim made
+    inside = analyze(str(p), drains_xy=np.array([[500027.5, 3349972.5]])).depressions.iloc[0]
+    # the reported lowest point of a flat floor is its first cell, here a corner ~10 m away
+    assert bool(inside["drain_at_core"]) and inside["dist_to_drain_m"] < 15
+    outside = analyze(str(p), drains_xy=np.array([[500055.5, 3349972.5]])).depressions.iloc[0]
+    assert not bool(outside["drain_at_core"]) and outside["dist_to_drain_m"] > 20
 
 
 def test_building_overlap(tmp_path):
@@ -36,5 +36,5 @@ def test_building_overlap(tmp_path):
     row = res.depressions.iloc[0]
     assert row["building_overlap"] > 0.99
     assert bool(row["likely_building_artifact"])
-    res2 = analyze(str(p), waterlogging=False)
+    res2 = analyze(str(p))
     assert "building_overlap" not in res2.depressions   # no footprints given: no claim made

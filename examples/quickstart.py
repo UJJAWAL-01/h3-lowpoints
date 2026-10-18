@@ -42,8 +42,7 @@ def main(out_dir=None):
     building = [box(620035, 3349755, 620065, 3349785)]           # footprint over the third pit
     res = analyze(str(dem), res=12, drains_xy=drains, buildings=building)
 
-    print(res.depressions[["max_depth_m", "area_m2", "cls", "building_overlap"]].round(2))
-    print("classes:", res.meta["class_counts"])
+    print(res.depressions[["max_depth_m", "area_m2", "drain_at_core", "building_overlap"]].round(2))
     coarse = res.at_resolution(10)
     print(f"{len(res.cells)} cells at H3 res 12, {len(coarse)} after rolling up to res 10")
     res.save(out)

@@ -20,7 +20,7 @@ def test_cli_with_csv_drains(dem_path, tmp_path):
     csv.write_text("x,y\n500027.5,3349972.5\n")
     out = tmp_path / "out"
     assert main(["analyze", dem_path, "--drains", str(csv), "--out", str(out)]) == 0
-    assert pd.read_csv(out / "depressions.csv").iloc[0]["cls"] == "drained"
+    assert bool(pd.read_csv(out / "depressions.csv").iloc[0]["drain_at_core"])
 
 
 def test_rejects_geographic_crs(tmp_path):

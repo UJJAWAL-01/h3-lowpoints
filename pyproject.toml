@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "h3-lowpoints"
 version = "0.0.1"
-description = "Find closed depressions in elevation models and map them on H3 cells, with an optional waterlogging screen"
+description = "Find closed depressions in elevation models and map them on H3 cells at any resolution"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-keywords = ["h3", "dem", "lidar", "depressions", "hydrology", "flooding", "gis"]
+keywords = ["h3", "dem", "lidar", "depressions", "hydrology", "gis"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",

@@ -1,13 +1,12 @@
 # h3-lowpoints
 
 Find closed depressions ("low points") in an elevation model and map them on [H3](https://h3geo.org)
-cells at any resolution, ready for 3D visualization. An optional add-on screens depressions that
-may be waterlogging zones, to help prioritize drainage review.
+cells at any resolution, ready for 3D visualization.
 
-> **Status: alpha (0.x).** The depression detection is tested against an independent method and
-> across tilings. The waterlogging add-on is a heuristic validated on one city; see
-> [what it does and does not show](docs/waterlogging.md). It is research output, **not a
-> flood-risk map**, and says nothing about any specific property.
+> **Status: alpha (0.x).** The depression detection is checked against an independent method and
+> across tilings. A depression is a feature of the terrain model: this library does not say
+> whether water collects there, and it is **not a flood-risk map**. Where the project is going
+> (global coverage, a susceptibility layer) is in [docs/roadmap.md](docs/roadmap.md).
 
 ## Install
 
@@ -16,7 +15,7 @@ Not on PyPI yet. From a clone:
 ```
 pip install -e .                  # core
 pip install -e ".[viz]"           # + 3D maps (pydeck)
-pip install -e ".[sources]"       # + reading drain / building files, USGS and Austin downloaders
+pip install -e ".[sources]"       # + reading drain / building files and the USGS 3DEP downloader
 ```
 
 ## Quick start
@@ -55,11 +54,11 @@ depression. Details, including how nested basins and raster edges are treated, a
 
 ## Which DEMs it suits
 
-| DEM cell size | Examples | Depression detection | Waterlogging add-on |
-|---|---|---|---|
-| 2 m or finer | USGS 3DEP 1 m, national lidar programs | Full | On by default (the only tier validated) |
-| 2 to 12 m | 3DEP 1/3 arc-second (~10 m) | Large depressions only; a warning is raised | Off by default |
-| coarser | Copernicus GLO-30, FABDEM | Large basins only; vertical error often exceeds `min_depth` | Off by default |
+| DEM cell size | Examples | What it resolves |
+|---|---|---|
+| 2 m or finer | USGS 3DEP 1 m, national lidar programs | Street-scale depressions |
+| 2 to 12 m | 3DEP 1/3 arc-second (~10 m) | Large depressions only; a warning is raised |
+| coarser | Copernicus GLO-30, FABDEM | Large basins only; vertical error often exceeds `min_depth` |
 
 Distances are in metres, so the same settings mean the same thing at any resolution. The library
 warns when the requested H3 resolution is too fine for the DEM (cells with fewer than four
@@ -86,16 +85,17 @@ res = analyze_tiled("big_dem.tif", tile=4096, buffer=256)
 
 A tile sees its border as an outlet, so a lake that really spills beyond the buffer is seen at
 a lower level. Depressions whose water level depends on a tile border get `level_uncertain=True`.
-The flag is a conservative bound ("could differ"), not a measurement: on the Austin pilot area it
+The flag is a conservative bound ("could differ"), not a measurement: on a 1 m lidar test DEM it
 marked most depressions at the default buffer although the result equalled the whole-raster run
 exactly. Raise `buffer` to shrink it; details and numbers are in
-[docs/definition.md](docs/definition.md).
+[docs/definition.md](docs/definition.md). Exact tiling, which needs no buffer, is the next
+planned piece of work.
 
 ## Command line
 
 ```
 h3lowpoints analyze dem.tif --drains drains.csv --buildings buildings.gpkg --out results/
-h3lowpoints analyze dem.tif --res 12 --no-waterlogging --tile 4096
+h3lowpoints analyze dem.tif --res 12 --tile 4096
 h3lowpoints analyze dem_4326.tif --reproject
 ```
 
@@ -105,21 +105,21 @@ Drains: a point file (GeoPackage, GeoJSON, Shapefile) or a CSV with `x,y` (in th
 
 ## Limits
 
-- Depressions are a property of the terrain model. Ponds, quarries and street sags are all
-  depressions; the library does not know which ones hold water or cause problems.
+- Ponds, quarries and street sags are all depressions; the library does not know which ones hold
+  water or cause problems.
 - Lidar artifacts (notably under buildings) produce false depressions; pass `buildings=` to flag them.
-- The waterlogging classes come from one city and one lidar project. Nothing here shows they
-  transfer elsewhere. Read [docs/waterlogging.md](docs/waterlogging.md) before relying on them.
+- Coarse global DEMs show large basins, not street-level ponding.
 - Tiled results can differ from whole-raster results for depressions flagged `level_uncertain`.
 
 ## Project
 
 - [docs/definition.md](docs/definition.md): precisely what is computed
 - [docs/outputs.md](docs/outputs.md): columns and files
-- [docs/waterlogging.md](docs/waterlogging.md): the add-on and its evidence
+- [docs/roadmap.md](docs/roadmap.md): where it is going, and how H3 resolution is handled
 - [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md)
 
 ## Data and licensing
 
-Code is Apache-2.0. USGS 3DEP elevation data is public domain. Check each City of Austin
-dataset's own license before redistributing derived data. Source data is not included here.
+Code is Apache-2.0. No source data is included. Check the license of any elevation, drain or
+building dataset you use before redistributing derived data (USGS 3DEP is public domain;
+Copernicus DEM requires attribution).

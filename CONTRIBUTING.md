@@ -21,19 +21,19 @@ CI runs both on Linux and Windows. The first call compiles the numba fill; later
   simple loop, fill equals the reference method) over single examples. A bug fix needs a test
   that failed before it.
 - **Say what is validated.** The depression core is checked against an independent method.
-  Anything beyond that, such as the waterlogging classes, must state its evidence and its limits
-  in `docs/`.
+  Anything beyond that must state its evidence and its limits in `docs/`. One city is not
+  evidence for a global method.
 - **Parameters in metres**, never cells, so settings mean the same at any resolution.
 - **Keep layers separate.** `hydro/` and `h3agg/` are the general core; `context/` (drains,
-  buildings) and `waterlogging/` are optional; `sources/` holds data downloaders for specific
-  places. `hydro/` and `h3agg/` must not import the others; only `pipeline.py` wires the layers together.
+  buildings) is optional; `sources/` holds data downloaders for specific places. `hydro/` and `h3agg/` must not import the others; only `pipeline.py` wires the layers together.
 - Research scripts and exploratory notebooks do not belong in this repository.
 
 ## Good first contributions
 
 - A `sources/` adapter for another country or city (DEM, drains, buildings).
-- Validation of the waterlogging screen against local flood records, including negative results.
-- Test terrain from places that differ from Austin: karst, glacial potholes, flat coast, steep hills.
+- A `sources/` reader for Copernicus GLO-30 (see the roadmap), or for any other open DEM.
+- Validation of the planned susceptibility index against local flood records, including negative results.
+- Test terrain from varied places: karst, glacial potholes, flat coast, steep hills.
 - Exact tiled filling (Barnes 2016, two passes over a graph of spill levels), so tiled runs
   equal whole-raster runs without a buffer and `level_uncertain` disappears. Compare against
   `analyze` on random terrain, as `tests/test_tiling.py` does.

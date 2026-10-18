@@ -28,11 +28,6 @@ def build_parser():
     a.add_argument("--out", default="h3lowpoints_out", help="output folder (default h3lowpoints_out)")
     a.add_argument("--res", type=int, default=11, help="H3 resolution (default 11)")
     a.add_argument("--min-depth", type=float, default=0.15, help="minimum depression depth in metres")
-    wl = a.add_mutually_exclusive_group()
-    wl.add_argument("--waterlogging", dest="waterlogging", action="store_true", default=None,
-                    help="add waterlogging classes (default: only for DEMs of 2 m or finer)")
-    wl.add_argument("--no-waterlogging", dest="waterlogging", action="store_false",
-                    help="depressions and cells only, no waterlogging classes")
     a.add_argument("--tile", type=int, default=0,
                    help="process in tiles of this many cells (for large DEMs); 0 = whole raster")
     a.add_argument("--buffer", type=int, default=256, help="tile overlap in cells (default 256)")
@@ -61,15 +56,14 @@ def main(argv=None):
 
             result = analyze_tiled(dem, drains_xy=drains, buildings=buildings,
                                    tile=args.tile, buffer=args.buffer, res=args.res,
-                                   min_depth=args.min_depth, waterlogging=args.waterlogging)
+                                   min_depth=args.min_depth)
         else:
             result = analyze(dem, drains_xy=drains, res=args.res, min_depth=args.min_depth,
-                             buildings=buildings, waterlogging=args.waterlogging)
+                             buildings=buildings)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc
 
     out = result.save(args.out)
     print(f"{result.meta['n_depressions']} depressions written to {out}")
-    for name, n in sorted(result.meta.get("class_counts", {}).items()):
-        print(f"  {name}: {n}")
+    print(f"  {result.meta['n_edge']} cut off by the data border")
     return 0

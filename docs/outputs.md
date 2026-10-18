@@ -15,16 +15,15 @@ the same content in memory. Columns appear only when the data behind them was su
 | `level_uncertain` | Tiled runs only: water level depends on a tile border and could differ from a whole-raster run |
 | `dist_to_drain_m`, `drain_at_core` | With `drains_xy`: distance to the nearest drain, and whether a drain lies near the deep core |
 | `building_overlap`, `likely_building_artifact` | With `buildings`: share of the depression under footprints, and whether it is at least 50% |
-| `significant`, `suspect_pit`, `cls` | With waterlogging on: see [waterlogging.md](waterlogging.md) |
 
 ## cells (one row per H3 cell that holds depression pixels)
 
-`h3`, `max_depth_m`, `depress_area_m2`, `depress_volume_m3`, and `code` when waterlogging is on
-(the highest class code among the cell's depressions; the mapping is in `meta["class_codes"]`).
+`h3`, `max_depth_m`, `depress_area_m2`, `depress_volume_m3`. Depth is the maximum over the cell's
+pixels; area and volume are sums, so cells roll up exactly with `Result.at_resolution`.
 
 ## meta.json
 
 Package and H3 versions, the DEM path and CRS, `cell_size_m`, `resolution_tier`, every
-parameter used (including the waterlogging thresholds), counts of drains, buildings and
+parameter used, counts of drains, buildings and
 depressions, and for tiled runs the tile size and buffer. Keep it with the results: it is what
 makes a run reproducible.

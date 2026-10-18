@@ -38,7 +38,7 @@ def _buildings_in(buildings, bounds):
 
 
 def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, tile=4096, buffer=256,
-                  res=11, min_depth=0.15, waterlogging=None, verbose=False):
+                  res=11, min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8, verbose=False):
     """Analyze a large DEM in tiles with overlapping borders and combine the results.
 
     Each depression is kept by the tile whose core contains its lowest point. A tile treats its
@@ -54,8 +54,8 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, tile=4096, buffer
     parts, cell_parts, first_meta = [], [], None
     with rasterio.open(dem_path) as src:
         height, width, crs, nodata = src.height, src.width, src.crs, src.nodata
-        plan = plan_analysis(crs, src.transform, res, min_depth, waterlogging, has_drains)
-        pad = (metres_to_cells(plan[2].drain_radius_m if plan[2] else 5.0, plan[0]) + 1) * plan[0]
+        plan = plan_analysis(crs, src.transform, res, min_depth)
+        pad = (metres_to_cells(drain_radius_m, plan[0]) + 1) * plan[0]
         boxes = list(_tile_boxes(height, width, tile))
         for k, (r0, r1, c0, c1) in enumerate(boxes, 1):
             br0, br1 = max(0, r0 - buffer), min(height, r1 + buffer)
@@ -68,7 +68,8 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, tile=4096, buffer
                 arr, transform, crs, nodata,
                 drains_xy=_drains_in(drains_xy, bounds, pad),
                 buildings=_buildings_in(buildings, bounds),
-                res=res, min_depth=min_depth, waterlogging=waterlogging,
+                res=res, min_depth=min_depth, drain_radius_m=drain_radius_m,
+                drain_core_frac=drain_core_frac,
                 core=(r0 - br0, r1 - br0, c0 - bc0, c1 - bc0),
                 open_sides=(br0 > 0, br1 < height, bc0 > 0, bc1 < width),
                 source=str(dem_path), _plan=plan)
@@ -86,21 +87,16 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, tile=4096, buffer
         deps = pd.concat(parts, ignore_index=True)
         deps["id"] = np.arange(1, len(deps) + 1)
     else:
-        deps = pd.DataFrame(columns=dep_columns(has_drains, buildings is not None, plan[2]))
+        deps = pd.DataFrame(columns=dep_columns(has_drains, buildings is not None))
     if cell_parts:
         stacked = pd.concat(cell_parts, ignore_index=True)
-        spec = {"max_depth_m": ("max_depth_m", "max"),
-                "depress_area_m2": ("depress_area_m2", "sum"),
-                "depress_volume_m3": ("depress_volume_m3", "sum")}
-        if "code" in stacked:
-            spec["code"] = ("code", "max")
-        cells = stacked.groupby("h3", as_index=False).agg(**spec)
+        cells = stacked.groupby("h3", as_index=False).agg(
+            max_depth_m=("max_depth_m", "max"), depress_area_m2=("depress_area_m2", "sum"),
+            depress_volume_m3=("depress_volume_m3", "sum"))
     else:
         cells = pd.DataFrame()
     meta.update({"shape": [height, width], "n_depressions": len(deps),
                  "n_edge": int(deps["edge"].sum()) if len(deps) else 0,
                  "n_level_uncertain": int(deps["level_uncertain"].sum()) if len(deps) else 0,
                  "tiling": {"tile": tile, "buffer": buffer, "n_tiles": len(boxes)}})
-    if "cls" in deps:
-        meta["class_counts"] = deps["cls"].value_counts().to_dict()
     return Result(deps, cells, meta)

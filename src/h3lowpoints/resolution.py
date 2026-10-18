@@ -2,8 +2,7 @@
 
 Closed depressions can be found in any DEM, but what they mean depends on its resolution. A 1 m
 lidar DEM resolves street sags and pits; a 30 m global DEM resolves only large basins and carries
-vertical errors that are often larger than a street-scale depression. The waterlogging add-on was
-validated on 1 m lidar only, so it is on by default only there.
+vertical errors that are often larger than a street-scale depression.
 """
 import math
 import warnings

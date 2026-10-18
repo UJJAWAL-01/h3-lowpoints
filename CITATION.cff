@@ -8,4 +8,4 @@ authors:
 repository-code: "https://github.com/UJJAWAL-01/h3-lowpoints"
 license: Apache-2.0
 version: "0.0.1"
-abstract: "Find closed depressions in elevation models and map them on H3 cells, with an optional waterlogging screen."
+abstract: "Find closed depressions in elevation models and map them on H3 cells at any resolution."

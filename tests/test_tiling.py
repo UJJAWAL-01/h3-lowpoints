@@ -59,8 +59,8 @@ def _keyed(df):
 def test_tiled_equals_whole_when_buffer_covers_the_data(tmp_path, seed):
     p = tmp_path / "dem.tif"
     _random_dem(p, seed)
-    whole = analyze(str(p), waterlogging=False).depressions
-    tiled = analyze_tiled(str(p), tile=100, buffer=400, waterlogging=False).depressions
+    whole = analyze(str(p)).depressions
+    tiled = analyze_tiled(str(p), tile=100, buffer=400).depressions
     # With no artificial cut left, tiling reproduces the whole run exactly.
     assert not whole["level_uncertain"].any() and not tiled["level_uncertain"].any()
     assert whole["edge"].sum() == tiled["edge"].sum()
@@ -77,8 +77,8 @@ def test_narrow_buffer_never_returns_a_wrong_unflagged_depression(tmp_path, seed
     # as settled.
     p = tmp_path / "dem.tif"
     _random_dem(p, seed)
-    whole = _keyed(analyze(str(p), waterlogging=False).depressions)
-    tiled = _keyed(analyze_tiled(str(p), tile=100, buffer=40, waterlogging=False)
+    whole = _keyed(analyze(str(p)).depressions)
+    tiled = _keyed(analyze_tiled(str(p), tile=100, buffer=40)
                    .depressions.query("not edge and not level_uncertain"))
     merged = whole.merge(tiled, on=["lat", "lon"], suffixes=("_w", "_t"))
     assert len(merged) == len(tiled)  # every trusted tiled depression exists in the whole run
@@ -91,6 +91,6 @@ def test_flagging_shrinks_as_buffer_grows(tmp_path):
     # cut, because the data beyond the cut is unknown. More buffer only resolves flags.
     p = tmp_path / "dem.tif"
     _random_dem(p, 0)
-    flagged = [int(analyze_tiled(str(p), tile=100, buffer=b, waterlogging=False)
+    flagged = [int(analyze_tiled(str(p), tile=100, buffer=b)
                    .depressions["level_uncertain"].sum()) for b in (20, 60, 150, 400)]
     assert flagged == sorted(flagged, reverse=True)

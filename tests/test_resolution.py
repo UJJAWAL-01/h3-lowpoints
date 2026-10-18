@@ -3,7 +3,7 @@ import pytest
 import rasterio
 from rasterio.transform import from_origin
 
-from h3lowpoints import WaterloggingParams, analyze
+from h3lowpoints import analyze
 from h3lowpoints.resolution import (check_resolution, metres_to_cells, min_h3_resolution,
                                     resolution_tier)
 
@@ -53,23 +53,12 @@ def test_coarse_dem_warns_about_vertical_error():
         check_resolution(30.0, 8, 0.15)
 
 
-def test_waterlogging_defaults_follow_resolution(tmp_path):
+def test_tier_is_recorded_in_meta(tmp_path):
     fine, coarse = tmp_path / "fine.tif", tmp_path / "coarse.tif"
     _pit_dem(fine, 1.0)
     _pit_dem(coarse, 10.0)
-    a = analyze(str(fine))
-    assert "cls" in a.depressions and a.meta["resolution_tier"] == "fine"
-    b = analyze(str(coarse), res=9, min_depth=1.0)   # medium tier: waterlogging stays off
-    assert "cls" not in b.depressions and b.meta["resolution_tier"] == "medium"
-    assert b.meta["params"]["waterlogging"] is None
-
-
-def test_forcing_waterlogging_on_a_coarse_dem_warns(tmp_path):
-    p = tmp_path / "coarse.tif"
-    _pit_dem(p, 10.0)
-    with pytest.warns(UserWarning, match="only validated"):
-        res = analyze(str(p), res=9, min_depth=1.0, waterlogging=True)
-    assert "cls" in res.depressions
+    assert analyze(str(fine)).meta["resolution_tier"] == "fine"
+    assert analyze(str(coarse), res=9, min_depth=1.0).meta["resolution_tier"] == "medium"
 
 
 @pytest.mark.parametrize("cell", [0.5, 1.0])
@@ -83,6 +72,5 @@ def test_drain_radius_is_in_metres(tmp_path, cell):
     _write(p, arr, cell)
     near = np.array([[500000 + 35 + 4.0, 3350000 - 30]])   # 4 m beyond the pit's east edge
     far = np.array([[500000 + 35 + 8.0, 3350000 - 30]])    # 8 m beyond it
-    wl = WaterloggingParams(drain_radius_m=5.0, core_frac=0.0, sig_area=1.0)
-    assert analyze(str(p), drains_xy=near, waterlogging=wl).depressions["drain_at_core"].all()
-    assert not analyze(str(p), drains_xy=far, waterlogging=wl).depressions["drain_at_core"].any()
+    assert analyze(str(p), drains_xy=near, drain_radius_m=5.0, drain_core_frac=0.0).depressions["drain_at_core"].all()
+    assert not analyze(str(p), drains_xy=far, drain_radius_m=5.0, drain_core_frac=0.0).depressions["drain_at_core"].any()

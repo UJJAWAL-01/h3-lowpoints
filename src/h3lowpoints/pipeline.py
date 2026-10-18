@@ -1,6 +1,5 @@
 import json
-import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
@@ -16,13 +15,11 @@ from .h3agg.aggregate import depression_cells, lonlat, pixel_centers, rollup
 from .hydro.depressions import (depth_and_provisional, label_depressions, lowest_points,
                                 touches_edge)
 from .resolution import cell_size_m, check_resolution, metres_to_cells
-from .waterlogging.classify import CODES, WaterloggingParams, classify
 
 CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint", "edge",
                 "level_uncertain"]
 DRAIN_COLUMNS = ["dist_to_drain_m", "drain_at_core"]
 BUILDING_COLUMNS = ["building_overlap", "likely_building_artifact"]
-WATERLOGGING_COLUMNS = ["significant", "suspect_pit", "cls"]
 
 
 @dataclass
@@ -76,43 +73,31 @@ def _check_crs(crs):
         )
 
 
-def dep_columns(has_drains, has_buildings, wl):
+def dep_columns(has_drains, has_buildings):
     """Columns of the depression table. Optional layers add columns only when they were used."""
     return (CORE_COLUMNS + (DRAIN_COLUMNS if has_drains else [])
-            + (BUILDING_COLUMNS if has_buildings else []) + (WATERLOGGING_COLUMNS if wl else []))
+            + (BUILDING_COLUMNS if has_buildings else []))
 
 
-def plan_analysis(crs, transform, res, min_depth, waterlogging, has_drains):
-    """Validate the request against the DEM and settle what will be computed.
+def plan_analysis(crs, transform, res, min_depth):
+    """Validate the request against the DEM. Returns (cell_size, tier).
 
-    Returns (cell_size, tier, WaterloggingParams or None). Emits warnings for requests the DEM
-    cannot support; callers that analyze many windows call this once and pass the result on.
+    Emits warnings for requests the DEM cannot support; callers that analyze many windows call
+    this once and pass the result on.
     """
     _check_crs(crs)
     size = cell_size_m(transform)
-    tier = check_resolution(size, res, min_depth)
-    if waterlogging is None:
-        waterlogging = tier == "fine"
-    elif waterlogging is not False and tier != "fine":
-        warnings.warn(
-            "The waterlogging classes were only validated on DEMs of 2 m or finer; at "
-            f"{size:g} m treat them as unvalidated.", UserWarning, stacklevel=3)
-    wl = None
-    if waterlogging is not False:
-        wl = waterlogging if isinstance(waterlogging, WaterloggingParams) else WaterloggingParams()
-        if not has_drains:
-            warnings.warn(
-                "No drain data was given, so 'unexplained' only means 'significant depression'; "
-                "it does not mean no drain exists.", UserWarning, stacklevel=3)
-    return size, tier, wl
+    return size, check_resolution(size, res, min_depth)
 
 
 def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings=None, res=11,
-                  min_depth=0.15, waterlogging=None, core=None, open_sides=(False,) * 4,
-                  source="array", _plan=None):
+                  min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8, core=None,
+                  open_sides=(False,) * 4, source="array", _plan=None):
     """Analyze an in-memory DEM.
 
-    waterlogging: None (on only for DEMs of 2 m or finer), True/False, or a WaterloggingParams.
+    drains_xy: optional (n, 2) drain locations in the DEM's CRS. Adds `dist_to_drain_m` and
+        `drain_at_core` (a drain within `drain_radius_m` of the part of the depression deeper
+        than `drain_core_frac` of its maximum).
     core: optional (row0, row1, col0, col1) pixel box; when given only depressions whose lowest
         point lies inside it are returned (this is how tiling avoids double counting).
     open_sides: (top, bottom, left, right) flags for window borders that are cuts through larger
@@ -120,8 +105,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         `level_uncertain` (see docs/definition.md).
     """
     has_drains = drains_xy is not None and len(drains_xy) > 0
-    size, tier, wl = _plan or plan_analysis(crs, transform, res, min_depth, waterlogging,
-                                            has_drains)
+    size, tier = _plan or plan_analysis(crs, transform, res, min_depth)
     invalid = np.isnan(arr)
     if nodata is not None:
         invalid |= arr == nodata
@@ -134,17 +118,16 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         "package_version": _package_version(), "h3_version": h3.__version__, "dem": source,
         "crs": str(crs), "shape": list(arr.shape), "cell_size_m": size,
         "resolution_tier": tier,
-        "params": {"res": res, "min_depth": min_depth,
-                   "waterlogging": asdict(wl) if wl else None},
+        "params": {"res": res, "min_depth": min_depth, "drain_radius_m": drain_radius_m,
+                   "drain_core_frac": drain_core_frac},
         "n_drains": len(drains_xy) if has_drains else 0,
         "n_buildings": None if buildings is None else len(buildings),
-        "class_codes": CODES if wl else None,
     }
-    columns = dep_columns(has_drains, buildings is not None, wl)
+    columns = dep_columns(has_drains, buildings is not None)
     if len(ids) == 0:
-        meta["n_depressions"] = 0
+        meta.update({"n_depressions": 0, "n_edge": 0, "n_level_uncertain": 0})
         return Result(pd.DataFrame(columns=columns), depression_cells(
-            depth, labels, None, transform, crs, res), meta, labels, depth, transform, crs)
+            depth, labels, transform, crs, res), meta, labels, depth, transform, crs)
 
     mx, area, vol = (np.asarray(st[k]) for k in ("max_depth_m", "area_m2", "volume_m3"))
     inside = labels > 0
@@ -160,54 +143,37 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
         "edge": edge, "level_uncertain": limited})
     if has_drains:
-        served = drains_at_core(labels, depth, ids, mx, np.asarray(drains_xy), transform,
-                                wl.core_frac if wl else WaterloggingParams.core_frac,
-                                metres_to_cells(wl.drain_radius_m if wl
-                                                else WaterloggingParams.drain_radius_m, size))
         deps["dist_to_drain_m"] = cKDTree(np.asarray(drains_xy)).query(np.c_[xs, ys])[0]
-        deps["drain_at_core"] = served
-    else:
-        served = np.zeros(len(ids), dtype=bool)
+        deps["drain_at_core"] = drains_at_core(
+            labels, depth, ids, mx, np.asarray(drains_xy), transform, drain_core_frac,
+            metres_to_cells(drain_radius_m, size))
     if buildings is not None:
         deps["building_overlap"] = building_overlap(labels, ids, buildings, transform, arr.shape)
         deps["likely_building_artifact"] = deps["building_overlap"] >= 0.5
-    if wl:
-        cls, significant, pit = classify(mx, area, served, edge, wl)
-        deps["significant"], deps["suspect_pit"], deps["cls"] = significant, pit, cls
 
     keep = np.ones(len(ids), dtype=bool)
     if core is not None:
         r0, r1, c0, c1 = core
         keep = (rows >= r0) & (rows < r1) & (cols >= c0) & (cols < c1)
-    code_by_label = None
-    if wl:
-        code_by_label = np.zeros(int(labels.max()) + 1)
-        code_by_label[ids[keep]] = [CODES[c] for c in cls[keep]]
-    if core is not None:
         owned = np.zeros(int(labels.max()) + 1, dtype=bool)
         owned[ids[keep]] = True
         labels = np.where(owned[labels], labels, 0)
-    cells = depression_cells(depth, labels, code_by_label, transform, crs, res)
+    cells = depression_cells(depth, labels, transform, crs, res)
     deps = deps[keep].reset_index(drop=True)
-    meta["n_depressions"] = len(deps)
-    meta["n_edge"] = int(deps["edge"].sum())
-    meta["n_level_uncertain"] = int(deps["level_uncertain"].sum())
-    if wl:
-        meta["class_counts"] = pd.Series(cls[keep]).value_counts().to_dict()
+    meta.update({"n_depressions": len(deps), "n_edge": int(deps["edge"].sum()),
+                 "n_level_uncertain": int(deps["level_uncertain"].sum())})
     return Result(deps[columns], cells, meta, labels, depth, transform, crs)
 
 
 def analyze(dem_path, *, drains_xy=None, buildings=None, res=11, min_depth=0.15,
-            waterlogging=None):
+            drain_radius_m=5.0, drain_core_frac=0.8):
     """Find closed depressions in a DEM file and describe them on H3 cells.
 
     drains_xy: optional (n, 2) array of drain locations in the DEM's CRS.
     buildings: optional GeoDataFrame (or iterable of shapely polygons) in the DEM's CRS.
-    waterlogging: see `analyze_array`. Thresholds are fixed defaults; changing them is a
-        deliberate analysis choice.
     """
     with rasterio.open(dem_path) as src:
         arr, nodata, transform, crs = src.read(1), src.nodata, src.transform, src.crs
     return analyze_array(arr, transform, crs, nodata, drains_xy=drains_xy, buildings=buildings,
-                         res=res, min_depth=min_depth, waterlogging=waterlogging,
-                         source=str(dem_path))
+                         res=res, min_depth=min_depth, drain_radius_m=drain_radius_m,
+                         drain_core_frac=drain_core_frac, source=str(dem_path))
