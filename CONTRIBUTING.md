@@ -34,7 +34,9 @@ CI runs both on Linux and Windows. The first call compiles the numba fill; later
 - A `sources/` adapter for another country or city (DEM, drains, buildings).
 - Validation of the waterlogging screen against local flood records, including negative results.
 - Test terrain from places that differ from Austin: karst, glacial potholes, flat coast, steep hills.
-- Adaptive tile buffers, so a flagged tile is re-run with more context.
+- Exact tiled filling (Barnes 2016, two passes over a graph of spill levels), so tiled runs
+  equal whole-raster runs without a buffer and `level_uncertain` disappears. Compare against
+  `analyze` on random terrain, as `tests/test_tiling.py` does.
 
 ## Reporting a problem
 

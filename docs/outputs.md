@@ -11,7 +11,8 @@ the same content in memory. Columns appear only when the data behind them was su
 | `max_depth_m` | Deepest point, metres |
 | `area_m2`, `volume_m3` | Area and volume of the filled region |
 | `lat`, `lon`, `h3_lowpoint` | Deepest point and the H3 cell containing it |
-| `edge` | Extent or level not fully known (see [definition.md](definition.md)) |
+| `edge` | Cut off by the data border; size unknown (see [definition.md](definition.md)) |
+| `level_uncertain` | Tiled runs only: water level depends on a tile border and could differ from a whole-raster run |
 | `dist_to_drain_m`, `drain_at_core` | With `drains_xy`: distance to the nearest drain, and whether a drain lies near the deep core |
 | `building_overlap`, `likely_building_artifact` | With `buildings`: share of the depression under footprints, and whether it is at least 50% |
 | `significant`, `suspect_pit`, `cls` | With waterlogging on: see [waterlogging.md](waterlogging.md) |

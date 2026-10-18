@@ -43,9 +43,10 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, tile=4096, buffer
 
     Each depression is kept by the tile whose core contains its lowest point. A tile treats its
     border as an outlet, so a lake that really spills beyond the buffer is seen at a lower level
-    and may be split into pieces. Depressions whose water level depends on such a border are
-    flagged `edge` (count in `meta["n_edge"]`); if many interior depressions are flagged,
-    raise `buffer`.
+    and may be split into pieces. Depressions whose water level depends on such a border get
+    `level_uncertain=True` (count in `meta["n_level_uncertain"]`). The flag is conservative: it
+    marks everything that could change, and much of it is unchanged in practice. Raise `buffer`
+    to shrink it; with a buffer wider than every lake the result equals `analyze`.
     """
     if tile <= 0 or buffer < 0:
         raise ValueError("tile must be positive and buffer must not be negative")
@@ -96,8 +97,9 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, tile=4096, buffer
         cells = stacked.groupby("h3", as_index=False).agg(**spec)
     else:
         cells = pd.DataFrame()
-    n_edge = int(deps["edge"].sum()) if len(deps) else 0
-    meta.update({"shape": [height, width], "n_depressions": len(deps), "n_edge": n_edge,
+    meta.update({"shape": [height, width], "n_depressions": len(deps),
+                 "n_edge": int(deps["edge"].sum()) if len(deps) else 0,
+                 "n_level_uncertain": int(deps["level_uncertain"].sum()) if len(deps) else 0,
                  "tiling": {"tile": tile, "buffer": buffer, "n_tiles": len(boxes)}})
     if "cls" in deps:
         meta["class_counts"] = deps["cls"].value_counts().to_dict()

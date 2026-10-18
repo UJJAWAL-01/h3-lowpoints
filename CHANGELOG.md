@@ -16,8 +16,8 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is now the first tied cell in row-major order.
 
 ### Added
-- Tiled runs flag depressions whose water level depends on a tile border (`edge`). Previously
-  a tile could silently split one large depression into several unflagged pieces.
+- Tiled runs flag depressions whose water level depends on a tile border (`level_uncertain`).
+  Previously a tile could silently split one large depression into several unflagged pieces.
 - `Result.at_resolution`, `rollup`: exact roll-up to coarser H3 resolutions.
 - `Result.to_deck`, `viz.deck.cells_to_geojson`: 3D map and GeoJSON export.
 - Resolution tiers, warnings for DEMs too coarse for the requested analysis, `reproject_to_utm`

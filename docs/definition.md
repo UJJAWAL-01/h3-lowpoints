@@ -32,20 +32,34 @@ Consequences you should know about:
 - **Small noise.** There is no minimum area. A single deep cell counts if it is at least
   `min_depth` deep.
 
-## Edges
+## Edges and tiles
 
-A depression whose extent or water level is not fully known has `edge = True`:
+Two flags describe depressions the data cannot fully describe. They mean different things.
 
-- it lies within one cell of the raster border (the border is an outlet, so the true depression
-  is cut off), or
-- in a tiled run, its water level was set through a path to a tile border that is not a real
-  edge of the data. More data beyond that border could raise the level.
+**`edge`**: the depression lies within one cell of the data border (the raster border, or the
+border of a tile's window). The border is an outlet, so the true depression is cut off there.
+Depressions with `edge = True` are never classed as significant or suspect pits.
 
-Depressions with `edge = True` are never classed as significant or suspect pits. The tile flag is
-**conservative**: it marks every depression that could change, not only those that do. With a
-buffer wider than any lake, a tiled run reproduces the whole-raster run exactly, including which
-depressions are flagged (`tests/test_tiling.py`). A tile that sees a lower lake than the whole
-raster does can split one depression into several; those pieces are always flagged.
+**`level_uncertain`**: only in tiled runs. A tile treats its border as an outlet, so a lake that
+really spills beyond the buffer is seen at a lower level, and one depression can come back as
+several pieces. A depression is flagged when its water level was set through a path to a tile
+border that is not a real edge of the data. This is a *could differ* flag, not a *does differ*
+flag: it marks everything that more data might change, so it is conservative and does not
+suppress any class. Whole-raster runs never set it.
+
+How conservative? On the Austin pilot area (3368 x 3884 cells, tiles of 1500), against a
+whole-raster run:
+
+| buffer | flagged `level_uncertain` | depressions that actually differ | classes that differ |
+|---|---|---|---|
+| 64 | 1238 of 1629 | 2 changed values, 4 extra fragments (all flagged) | 0 |
+| 256 | 1179 of 1625 | 0 | 0 |
+
+So at the default buffer nearly everything is flagged although nothing changed. Treat the flag as
+a bound, and use the buffer to tighten it: with a buffer wider than every lake, a tiled run
+equals `analyze` exactly (`tests/test_tiling.py`), and unflagged depressions are never wrong
+(`test_narrow_buffer_never_returns_a_wrong_unflagged_depression`). An exact tiled algorithm that
+removes the need for a buffer is on the roadmap (see CONTRIBUTING.md).
 
 ## H3 assignment
 

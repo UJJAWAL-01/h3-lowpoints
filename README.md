@@ -84,10 +84,12 @@ from h3lowpoints import analyze_tiled
 res = analyze_tiled("big_dem.tif", tile=4096, buffer=256)
 ```
 
-A tile sees its border as an outlet, so a lake that really spills beyond the buffer is seen at a
-lower level. Depressions whose water level depends on a tile border are flagged `edge`, never
-returned as final. The flag is conservative: it marks everything that *could* change with more
-data. Raise `buffer` to resolve more of them (see `docs/definition.md`).
+A tile sees its border as an outlet, so a lake that really spills beyond the buffer is seen at
+a lower level. Depressions whose water level depends on a tile border get `level_uncertain=True`.
+The flag is a conservative bound ("could differ"), not a measurement: on the Austin pilot area it
+marked most depressions at the default buffer although the result equalled the whole-raster run
+exactly. Raise `buffer` to shrink it; details and numbers are in
+[docs/definition.md](docs/definition.md).
 
 ## Command line
 
@@ -108,7 +110,7 @@ Drains: a point file (GeoPackage, GeoJSON, Shapefile) or a CSV with `x,y` (in th
 - Lidar artifacts (notably under buildings) produce false depressions; pass `buildings=` to flag them.
 - The waterlogging classes come from one city and one lidar project. Nothing here shows they
   transfer elsewhere. Read [docs/waterlogging.md](docs/waterlogging.md) before relying on them.
-- Tiled results can differ from whole-raster results for depressions flagged `edge`.
+- Tiled results can differ from whole-raster results for depressions flagged `level_uncertain`.
 
 ## Project
 

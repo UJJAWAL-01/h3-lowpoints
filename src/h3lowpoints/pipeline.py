@@ -18,7 +18,8 @@ from .hydro.depressions import (depth_and_provisional, label_depressions, lowest
 from .resolution import cell_size_m, check_resolution, metres_to_cells
 from .waterlogging.classify import CODES, WaterloggingParams, classify
 
-CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint", "edge"]
+CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint", "edge",
+                "level_uncertain"]
 DRAIN_COLUMNS = ["dist_to_drain_m", "drain_at_core"]
 BUILDING_COLUMNS = ["building_overlap", "likely_building_artifact"]
 WATERLOGGING_COLUMNS = ["significant", "suspect_pit", "cls"]
@@ -115,8 +116,8 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     core: optional (row0, row1, col0, col1) pixel box; when given only depressions whose lowest
         point lies inside it are returned (this is how tiling avoids double counting).
     open_sides: (top, bottom, left, right) flags for window borders that are cuts through larger
-        data rather than real edges; depressions whose water level depends on them are flagged
-        `edge`.
+        data rather than real edges; depressions whose water level depends on them get
+        `level_uncertain` (see docs/definition.md).
     """
     has_drains = drains_xy is not None and len(drains_xy) > 0
     size, tier, wl = _plan or plan_analysis(crs, transform, res, min_depth, waterlogging,
@@ -149,7 +150,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     inside = labels > 0
     limited = np.bincount(labels[inside], weights=provisional[inside],
                           minlength=int(labels.max()) + 1)[ids] > 0
-    edge = touches_edge(labels, ids) | limited
+    edge = touches_edge(labels, ids)
 
     rows, cols = lowest_points(depth, labels, ids)
     xs, ys = pixel_centers(transform, rows, cols)
@@ -157,7 +158,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     deps = pd.DataFrame({
         "id": ids, "max_depth_m": mx, "area_m2": area, "volume_m3": vol, "lat": lat, "lon": lon,
         "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
-        "edge": edge})
+        "edge": edge, "level_uncertain": limited})
     if has_drains:
         served = drains_at_core(labels, depth, ids, mx, np.asarray(drains_xy), transform,
                                 wl.core_frac if wl else WaterloggingParams.core_frac,
@@ -190,6 +191,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     deps = deps[keep].reset_index(drop=True)
     meta["n_depressions"] = len(deps)
     meta["n_edge"] = int(deps["edge"].sum())
+    meta["n_level_uncertain"] = int(deps["level_uncertain"].sum())
     if wl:
         meta["class_counts"] = pd.Series(cls[keep]).value_counts().to_dict()
     return Result(deps[columns], cells, meta, labels, depth, transform, crs)

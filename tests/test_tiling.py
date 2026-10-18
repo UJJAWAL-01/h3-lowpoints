@@ -61,7 +61,8 @@ def test_tiled_equals_whole_when_buffer_covers_the_data(tmp_path, seed):
     _random_dem(p, seed)
     whole = analyze(str(p), waterlogging=False).depressions
     tiled = analyze_tiled(str(p), tile=100, buffer=400, waterlogging=False).depressions
-    # With no artificial cut left, tiling reproduces the whole run exactly, including `edge`.
+    # With no artificial cut left, tiling reproduces the whole run exactly.
+    assert not whole["level_uncertain"].any() and not tiled["level_uncertain"].any()
     assert whole["edge"].sum() == tiled["edge"].sum()
     a, b = _keyed(whole.query("not edge")), _keyed(tiled.query("not edge"))
     assert len(a) > 5 and len(a) == len(b)
@@ -72,12 +73,13 @@ def test_tiled_equals_whole_when_buffer_covers_the_data(tmp_path, seed):
 @pytest.mark.parametrize("seed", range(4))
 def test_narrow_buffer_never_returns_a_wrong_unflagged_depression(tmp_path, seed):
     # With a narrow buffer a tile can see a lower lake than the whole raster does and split one
-    # depression into several. Those pieces must be flagged `edge`, never presented as final.
+    # depression into several. Those pieces must be flagged `level_uncertain`, never presented
+    # as settled.
     p = tmp_path / "dem.tif"
     _random_dem(p, seed)
     whole = _keyed(analyze(str(p), waterlogging=False).depressions)
     tiled = _keyed(analyze_tiled(str(p), tile=100, buffer=40, waterlogging=False)
-                   .depressions.query("not edge"))
+                   .depressions.query("not edge and not level_uncertain"))
     merged = whole.merge(tiled, on=["lat", "lon"], suffixes=("_w", "_t"))
     assert len(merged) == len(tiled)  # every trusted tiled depression exists in the whole run
     np.testing.assert_allclose(merged["max_depth_m_w"], merged["max_depth_m_t"], atol=1e-6)
@@ -85,10 +87,10 @@ def test_narrow_buffer_never_returns_a_wrong_unflagged_depression(tmp_path, seed
 
 
 def test_flagging_shrinks_as_buffer_grows(tmp_path):
-    # `edge` is conservative: it marks every depression whose level depends on a tile cut, because
-    # the data beyond the cut is unknown. More buffer can only resolve flags, never add them.
+    # `level_uncertain` is conservative: it marks every depression whose level depends on a tile
+    # cut, because the data beyond the cut is unknown. More buffer only resolves flags.
     p = tmp_path / "dem.tif"
     _random_dem(p, 0)
     flagged = [int(analyze_tiled(str(p), tile=100, buffer=b, waterlogging=False)
-                   .depressions["edge"].sum()) for b in (20, 60, 150, 400)]
+                   .depressions["level_uncertain"].sum()) for b in (20, 60, 150, 400)]
     assert flagged == sorted(flagged, reverse=True)
