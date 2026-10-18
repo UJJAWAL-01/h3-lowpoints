@@ -34,6 +34,13 @@ def build_parser():
                    help="process in tiles of this many cells (for DEMs larger than memory); "
                         "0 = whole raster. The result does not depend on the tile size")
 
+    a.add_argument("--map", help="also write an interactive web map to this .html file")
+
+    m = sub.add_parser("map", help="make an interactive web map from a results folder")
+    m.add_argument("results", help="folder written by 'analyze' (depressions.csv, cells.csv, meta.json)")
+    m.add_argument("--out", default="map.html", help="output .html file (default map.html)")
+    m.add_argument("--title", help="title shown on the map")
+
     f = sub.add_parser("fetch-dem", help="download a Copernicus GLO-30 (30 m, global) DEM")
     f.add_argument("--bbox", nargs=4, type=float, required=True,
                    metavar=("WEST", "SOUTH", "EAST", "NORTH"), help="bounding box in degrees")
@@ -78,12 +85,21 @@ def _analyze(args):
     out = result.save(args.out)
     print(f"{result.meta['n_depressions']} depressions written to {out}")
     print(f"  {result.meta['n_edge']} cut off by the data border")
+    if args.map:
+        print(f"map written to {result.to_html(args.map)}")
+    return 0
+
+
+def _map(args):
+    from .viz.webmap import map_from_dir
+
+    print(f"map written to {map_from_dir(args.results, args.out, title=args.title)}")
     return 0
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
-        return {"analyze": _analyze, "fetch-dem": _fetch}[args.command](args)
+        return {"analyze": _analyze, "fetch-dem": _fetch, "map": _map}[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

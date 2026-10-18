@@ -17,3 +17,7 @@ jobs:
       - run: pip install -e ".[sources,viz,dev]"
       - run: ruff check src tests
       - run: pytest
+      - name: The built wheel contains the map page
+        run: |
+          pip wheel . --no-deps -w dist
+          python -c "import glob, zipfile; names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist(); assert any(n.endswith('viz/map_template.html') for n in names), names"

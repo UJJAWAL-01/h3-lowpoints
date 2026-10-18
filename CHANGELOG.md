@@ -31,6 +31,13 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
   pixel areas, and projected DEMs in feet work too. Drain distances are geodesic.
 - **Copernicus GLO-30.** `h3lowpoints fetch-dem` and `sources.copernicus.fetch_dem` read the global
   30 m DEM from AWS open data.
+- **Interactive map.** `Result.to_html`, `h3lowpoints map` and `analyze --map` write one
+  self-contained HTML page: 3D H3 cells over a basemap, every resolution from the analysis one down,
+  several measures, and each depression's lowest point. `examples/gallery.py` builds five real
+  places. A headless-browser test fails on any console error.
+- **Coverage.** Every cell has `coverage` and `covered_area_m2`, the share of the cell the DEM
+  covers, exact against a brute-force oracle and identical between whole and tiled runs
+  (about 2 to 3 s extra on 38.9 Mpx).
 - **Mask.** `analyze(mask=...)` and `analyze_tiled(mask_path=...)` ignore cells such as open water.
 - `Result.at_resolution` and `rollup`: exact roll-up to coarser H3 resolutions.
 - `Result.to_deck` and `viz.deck.cells_to_geojson`: 3D map and GeoJSON export.

@@ -33,17 +33,43 @@ A DEM in latitude and longitude (for example Copernicus GLO-30) is analyzed as i
 are computed exactly on the WGS 84 ellipsoid, so there is no need to resample it to UTM (which
 blurs sharp edges). `h3lowpoints.reproject_to_utm` exists if you want a projected copy anyway.
 
-### See it in 3D and at any H3 resolution
+### See it on a map
+
+```python
+res = analyze("dem.tif", res=10)
+res.to_html("map.html")           # one self-contained interactive page: open it in a browser
+```
+
+```
+h3lowpoints analyze dem.tif --res 10 --map map.html      # the same from the command line
+h3lowpoints map results_folder --out map.html            # from results you saved earlier
+python examples/gallery.py                               # five real places, with an index page
+```
+
+The map draws the H3 cells in 3D over a basemap (light, dark or satellite). You can switch between
+the analysis resolution and every coarser roll-up, choose what colour and height show (deepest
+depth, volume, area, share of the cell that is depressed, or how much of the cell the DEM covers),
+and mark each depression's lowest point. It is one HTML file with the data inside it; it needs an
+internet connection for the basemap and the deck.gl library, and no server or account. Settings
+can go in the link (`map.html#res=6&metric=volume&base=satellite`) so you can share a view.
+
+### Any H3 resolution
 
 ```python
 res = analyze("dem.tif", res=12)  # analyze once at a fine resolution ...
 coarse = res.at_resolution(9)     # ... then roll up: depth = max, area and volume add up
-res.to_deck().to_html("map.html") # extruded hexagons; height and colour follow max depth
 ```
 
-Roll-up is lossless for depth, area and volume, so zooming between resolutions never needs a
-new analysis. `h3lowpoints.viz.deck.cells_to_geojson(cells, "cells.geojson")` writes the cells
-for deck.gl, kepler.gl or QGIS without any extra dependency.
+Roll-up is exact for depth, area and volume, so zooming between resolutions never needs a new
+analysis. `h3lowpoints.viz.deck.cells_to_geojson(cells, "cells.geojson")` writes the cells for
+deck.gl, kepler.gl or QGIS without any extra dependency, and `res.to_deck()` makes a pydeck map
+inside a notebook.
+
+### How much of each cell the DEM covers
+
+Every cell has `coverage` (0 to 1) and `covered_area_m2`. A cell at the edge of the DEM, or beside a
+masked lake, holds depressions from only part of its area, so compare cells by their share of the
+covered area, not by raw totals. `at_resolution` measures coverage afresh at each resolution.
 
 ## Global data
 
@@ -125,7 +151,7 @@ Drains: a point file (GeoPackage, GeoJSON, Shapefile) or a CSV with `x,y` (in th
 
 ## Project
 
-- [docs/definition.md](docs/definition.md): precisely what is computed
+- [docs/definition.md](docs/definition.md): precisely what is computed, including coverage
 - [docs/outputs.md](docs/outputs.md): columns and files
 - [docs/roadmap.md](docs/roadmap.md): where it is going, and how H3 resolution is handled
 - [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md)

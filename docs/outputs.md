@@ -17,8 +17,10 @@ the same content in memory. Columns appear only when the data behind them was su
 
 ## cells (one row per H3 cell that holds depression pixels)
 
-`h3`, `max_depth_m`, `depress_area_m2`, `depress_volume_m3`. Depth is the maximum over the cell's
-pixels; area and volume are sums, so cells roll up exactly with `Result.at_resolution`.
+`h3`, `max_depth_m`, `depress_area_m2`, `depress_volume_m3`, `covered_area_m2`, `coverage`. Depth is
+the maximum over the cell's pixels; area and volume are sums, so cells roll up exactly with
+`Result.at_resolution`. `coverage` (0 to 1) is the share of the cell the DEM covers and
+`covered_area_m2` that share times the cell's exact area (see [definition.md](definition.md)).
 
 ## meta.json
 

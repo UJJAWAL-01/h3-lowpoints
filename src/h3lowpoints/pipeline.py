@@ -10,6 +10,7 @@ import rasterio
 
 from .context.buildings import building_overlap
 from .context.drains import drains_at_core
+from .coverage import Footprint
 from .geometry import cell_size_m, crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import depression_cells, lonlat, pixel_centers, rollup
 from .hydro.depressions import depth_from_array, label_depressions, lowest_points, touches_edge
@@ -35,16 +36,30 @@ class Result:
     depth: np.ndarray = field(repr=False, default=None)
     transform: object = field(repr=False, default=None)
     crs: object = field(repr=False, default=None)
+    footprint: object = field(repr=False, default=None)
 
     def at_resolution(self, res):
-        """Cell table rolled up to a coarser H3 resolution (no re-analysis needed)."""
-        return rollup(self.cells, res)
+        """Cell table at a coarser H3 resolution, rolled up without re-analysis.
+
+        Depth is the maximum of the children, area and volume add up, and the coverage of each
+        coarser cell is measured afresh from the DEM's footprint (it cannot be summed from
+        the cells in the table, which hold only the cells that have depressions).
+        """
+        out = rollup(self.cells, res)
+        return add_coverage(out, self.footprint)
 
     def to_deck(self, value="max_depth_m", **kwargs):
         """3D pydeck map of the cells (needs the `viz` extra). See `viz.deck.cells_deck`."""
         from .viz.deck import cells_deck
 
         return cells_deck(self.cells, value=value, **kwargs)
+
+    def to_html(self, path, **kwargs):
+        """Write an interactive web map of this result. See `viz.webmap.build_map`."""
+        from .viz.webmap import build_map
+
+        return build_map(self.cells, self.depressions, self.meta, path, footprint=self.footprint,
+                         **kwargs)
 
     def save(self, outdir):
         out = Path(outdir)
@@ -53,6 +68,15 @@ class Result:
         self.cells.to_csv(out / "cells.csv", index=False)
         (out / "meta.json").write_text(json.dumps(self.meta, indent=2, default=str))
         return out
+
+
+def add_coverage(cells, footprint):
+    """Add `covered_area_m2` and `coverage` columns to a cell table, if a footprint is known."""
+    if footprint is None or len(cells) == 0:
+        return cells
+    cov = footprint.coverage(cells["h3"])
+    return cells.assign(covered_area_m2=cov["covered_area_m2"].to_numpy(),
+                        coverage=cov["coverage"].to_numpy())
 
 
 def _package_version():
@@ -122,8 +146,9 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     columns = dep_columns(has_drains, buildings is not None)
     if len(ids) == 0:
         meta.update({"n_depressions": 0, "n_edge": 0})
+        footprint = Footprint.from_array(invalid, transform, crs)
         return Result(pd.DataFrame(columns=columns), depression_cells(
-            depth, labels, transform, crs, res), meta, labels, depth, transform, crs)
+            depth, labels, transform, crs, res), meta, labels, depth, transform, crs, footprint)
 
     mx, area, vol = (np.asarray(st[k]) for k in ("max_depth_m", "area_m2", "volume_m3"))
     edge = touches_edge(labels, ids)
@@ -145,9 +170,10 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
             labels, ids, buildings, transform, arr.shape, min_area=0.0 if geographic else 20.0)
         deps["likely_building_artifact"] = deps["building_overlap"] >= 0.5
 
-    cells = depression_cells(depth, labels, transform, crs, res)
+    footprint = Footprint.from_array(invalid, transform, crs)
+    cells = add_coverage(depression_cells(depth, labels, transform, crs, res), footprint)
     meta.update({"n_depressions": len(deps), "n_edge": int(deps["edge"].sum())})
-    return Result(deps[columns], cells, meta, labels, depth, transform, crs)
+    return Result(deps[columns], cells, meta, labels, depth, transform, crs, footprint)
 
 
 def analyze(dem_path, *, drains_xy=None, buildings=None, res=11, min_depth=0.15,

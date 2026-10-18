@@ -19,10 +19,13 @@ Done:
   water, which then act as outlets. Copernicus does not publish a water mask with the AWS tiles,
   so supply one (for example from ESA WorldCover or JRC Global Surface Water).
 
+- **Coverage per cell.** Every H3 cell reports how much of it the DEM covered, so a partly covered
+  cell is never read as "less depressed" than a fully covered one.
+- **An interactive map** (`Result.to_html`, `h3lowpoints map`, `examples/gallery.py`) to see all of
+  this on a basemap at every resolution.
+
 Still to do:
 
-- **Coverage per cell.** Every H3 cell should report how much of it the DEM covered, so a partly
-  covered cell is never read as "less depressed" than a fully covered one.
 - **Continental scale.** Exact tiling holds one graph node per tile-border cell and per outlet
   cell. A continent needs the same method applied to blocks, joined hierarchically.
 - Cost: about 1.7e11 land pixels at 30 m. The speed of one run is measured in the changelog;

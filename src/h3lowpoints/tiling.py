@@ -18,12 +18,13 @@ from scipy.sparse.csgraph import connected_components
 
 from .context.buildings import rasterize_buildings
 from .context.drains import drain_pixels, near_drain_mask
+from .coverage import Footprint, file_opener, mark_invalid_blocks
 from .geometry import crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import CELL_COLUMNS, h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
-from .pipeline import Result, base_meta, dep_columns, plan_analysis
+from .pipeline import Result, add_coverage, base_meta, dep_columns, plan_analysis
 from .resolution import metres_to_cells
 
 _TIE = 1e-9  # depths this close to the maximum count as tied for the lowest point
@@ -162,25 +163,28 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
         try:
             if mask_src is not None and mask_src.shape != src.shape:
                 raise ValueError(f"mask {mask_src.shape} and DEM {src.shape} differ in shape")
-            return _run(src, mask_src, dem_path, height, width, crs, transform, size, tier,
-                        geographic, areas, drains, buildings, tile, res, min_depth,
+            return _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
+                        tier, geographic, areas, drains, buildings, tile, res, min_depth,
                         drain_radius_m, drain_core_frac, verbose)
         finally:
             if mask_src is not None:
                 mask_src.close()
 
 
-def _run(src, mask_src, dem_path, height, width, crs, transform, size, tier, geographic, areas,
-         drains, buildings, tile, res, min_depth, drain_radius_m, drain_core_frac, verbose):
+def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
+         geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
+         drain_core_frac, verbose):
     boxes = list(_tile_boxes(height, width, tile))
     radius = metres_to_cells(drain_radius_m, size)
     drain_rc = drain_pixels(drains, transform, (height, width)) if drains is not None else None
 
     # ---- pass 1: flood every tile from its border and keep only the crossings
     tiles = []
+    blocks = np.zeros((-(-height // 16), -(-width // 16)), dtype=bool)   # blocks holding invalid pixels
     for k, box in enumerate(boxes, 1):
         r0, r1, c0, c1 = box
         work, valid = _read_tile(src, mask_src, box)
+        mark_invalid_blocks(blocks, ~valid, (r0, c0))
         rows, cols, pinned, border = tile_seeds(valid, (r0 == 0, r1 == height, c0 == 0, c1 == width))
         z = work[rows, cols]
         level, root = flood_from_seeds(work, valid, rows, cols, z)
@@ -247,9 +251,11 @@ def _run(src, mask_src, dem_path, height, width, crs, transform, size, tier, geo
     meta["tiling"] = {"tile": tile, "n_tiles": len(boxes), **graph}
     has_buildings = buildings is not None
     columns = dep_columns(drains is not None, has_buildings)
+    footprint = Footprint((height, width), transform, crs, blocks, file_opener(dem_path, mask_path))
     if not records:
         meta.update({"n_depressions": 0, "n_edge": 0})
-        return Result(pd.DataFrame(columns=columns), pd.DataFrame(columns=CELL_COLUMNS), meta)
+        return Result(pd.DataFrame(columns=columns), pd.DataFrame(columns=CELL_COLUMNS), meta,
+                      transform=transform, crs=crs, footprint=footprint)
 
     # ---- join the pieces of each depression and apply min_depth to the whole depression
     recs = pd.concat(records, ignore_index=True)
@@ -300,4 +306,5 @@ def _run(src, mask_src, dem_path, height, width, crs, transform, size, tier, geo
         depress_volume_m3=("depress_volume_m3", "sum")).reset_index()
     cells["h3"] = [h3.int_to_str(int(c)) for c in cells["cell"]]
     meta.update({"n_depressions": len(out), "n_edge": int(out["edge"].sum())})
-    return Result(out[columns], cells[CELL_COLUMNS], meta)
+    return Result(out[columns], add_coverage(cells[CELL_COLUMNS], footprint), meta,
+                  transform=transform, crs=crs, footprint=footprint)

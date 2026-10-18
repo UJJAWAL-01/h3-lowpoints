@@ -95,6 +95,37 @@ Each depression pixel belongs to the H3 cell containing the pixel's centre. A ce
 maximum. Because these are additive, `Result.at_resolution(r)` rolls cells up to any coarser
 resolution exactly. A depression that spans several cells contributes to each of them.
 
+## Coverage
+
+A cell at the edge of the DEM, or next to ignored cells (nodata, or a mask such as open water),
+holds depressions from only part of its area. Each row of the cell table therefore carries
+`coverage` and `covered_area_m2`.
+
+A pixel belongs to the H3 cell that contains its centre, the same rule that assigns depressions to
+cells. The coverage of a cell is the area of its valid pixels divided by the area of all pixel
+positions inside it, counting positions beyond the raster as not covered. `covered_area_m2` is the
+coverage times the cell's exact H3 area, so a cell wholly inside valid data has coverage 1 and the
+full area of the H3 cell.
+
+It is found cheaply: a bitmap with one flag per 16 x 16 block of pixels marks where invalid pixels
+are, so only the cells whose bounding box touches a flagged block or leaves the raster are
+measured, by assigning each pixel position in the box to its H3 cell. That is exact. A cell larger
+than 40,000 pixel positions is measured on a regular sub-lattice anchored to the pixel grid, with a
+coverage error well under 1%, and the result never depends on how the raster was tiled. On 38.9
+million pixels of real terrain the extra time was about 2 to 3 seconds of 28.
+
+`covered_area_m2` and `depress_area_m2` come from different counts (the exact H3 area against a
+sum of whole pixels), so for a cell that is almost entirely depressed their ratio can exceed 1 by a
+fraction of a percent. The map clamps it to 1.
+
+Coverage cannot be summed over the cells of a finer table, because that table lists only the cells
+that have depressions. `Result.at_resolution` therefore measures it afresh for the coarser cells.
+`rollup` on its own, which has no DEM to look at, returns depth, area and volume only.
+Rasters wider than 180 degrees of longitude are not handled across the antimeridian.
+
+GLO-30 holds the sea inside its tiles as valid elevation of 0 m, so sea does not reduce coverage:
+supply a mask if open water should not count.
+
 ## What it cannot tell you
 
 A depression is a feature of the elevation model. It does not know whether water collects there,

@@ -14,6 +14,8 @@ ruff check src tests
 ```
 
 CI runs both on Linux and Windows. The first call compiles the numba fill; later runs use a cache.
+Tests marked `network` read real data and drive a headless browser; run them with
+`H3LP_NETWORK=1 pytest` (they need internet, and Chrome or Edge for the map test).
 
 ## Ground rules
 

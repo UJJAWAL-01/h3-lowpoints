@@ -229,3 +229,9 @@ data/
 
 # but keep the demo maps under docs/
 !docs/**/*.html
+
+# generated maps
+maps/
+
+# the map page is package data and must be committed and shipped
+!src/h3lowpoints/viz/map_template.html
