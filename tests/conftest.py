@@ -14,3 +14,15 @@ def dem_path(tmp_path):
     with rasterio.open(path, "w", **prof) as dst:
         dst.write(arr, 1)
     return str(path)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Tests marked `network` need internet access; run them with H3LP_NETWORK=1."""
+    import os
+
+    if os.environ.get("H3LP_NETWORK") == "1":
+        return
+    skip = pytest.mark.skip(reason="needs internet: set H3LP_NETWORK=1 to run")
+    for item in items:
+        if "network" in item.keywords:
+            item.add_marker(skip)

@@ -19,10 +19,12 @@ def build_parser():
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {_version()}")
     sub = parser.add_subparsers(dest="command", required=True)
+
     a = sub.add_parser("analyze", help="analyze a DEM")
-    a.add_argument("dem", help="GeoTIFF in a projected CRS with metre units")
+    a.add_argument("dem", help="GeoTIFF in a projected CRS or in lon/lat degrees")
     a.add_argument("--reproject", action="store_true",
-                   help="reproject a DEM in geographic coordinates to its UTM zone first")
+                   help="first reproject the DEM to its UTM zone (not needed: lon/lat DEMs are "
+                        "analyzed natively, and resampling blurs sharp edges)")
     a.add_argument("--drains", help="inlet/grate points: GeoPackage, GeoJSON, Shapefile or CSV")
     a.add_argument("--buildings", help="building footprint polygons")
     a.add_argument("--out", default="h3lowpoints_out", help="output folder (default h3lowpoints_out)")
@@ -31,39 +33,57 @@ def build_parser():
     a.add_argument("--tile", type=int, default=0,
                    help="process in tiles of this many cells (for large DEMs); 0 = whole raster")
     a.add_argument("--buffer", type=int, default=256, help="tile overlap in cells (default 256)")
+
+    f = sub.add_parser("fetch-dem", help="download a Copernicus GLO-30 (30 m, global) DEM")
+    f.add_argument("--bbox", nargs=4, type=float, required=True,
+                   metavar=("WEST", "SOUTH", "EAST", "NORTH"), help="bounding box in degrees")
+    f.add_argument("--out", required=True, help="output GeoTIFF")
+    f.add_argument("--source", help="folder with tiles instead of the public AWS bucket")
+    f.add_argument("--max-tiles", type=int, default=16, help="refuse requests above this many 1-degree tiles")
     return parser
 
 
-def main(argv=None):
-    args = build_parser().parse_args(argv)
+def _fetch(args):
+    from .sources.copernicus import fetch_dem
+
+    out = fetch_dem(tuple(args.bbox), args.out, source=args.source, max_tiles=args.max_tiles)
+    with rasterio.open(out) as src:
+        print(f"{src.width} x {src.height} pixels written to {out}")
+    return 0
+
+
+def _analyze(args):
     from .context.readers import read_buildings, read_drains
     from .pipeline import analyze
 
-    try:
-        dem = args.dem
-        if args.reproject:
-            import tempfile
+    dem = args.dem
+    if args.reproject:
+        import tempfile
 
-            from .dem_io import reproject_to_utm
+        from .dem_io import reproject_to_utm
 
-            dem = reproject_to_utm(args.dem, Path(tempfile.mkdtemp()) / "dem_utm.tif")
-        with rasterio.open(dem) as src:
-            crs = src.crs
-        drains = read_drains(args.drains, crs) if args.drains else None
-        buildings = read_buildings(args.buildings, crs) if args.buildings else None
-        if args.tile:
-            from .tiling import analyze_tiled
+        dem = reproject_to_utm(args.dem, Path(tempfile.mkdtemp()) / "dem_utm.tif")
+    with rasterio.open(dem) as src:
+        crs = src.crs
+    drains = read_drains(args.drains, crs) if args.drains else None
+    buildings = read_buildings(args.buildings, crs) if args.buildings else None
+    if args.tile:
+        from .tiling import analyze_tiled
 
-            result = analyze_tiled(dem, drains_xy=drains, buildings=buildings,
-                                   tile=args.tile, buffer=args.buffer, res=args.res,
-                                   min_depth=args.min_depth)
-        else:
-            result = analyze(dem, drains_xy=drains, res=args.res, min_depth=args.min_depth,
-                             buildings=buildings)
-    except (ValueError, OSError, ImportError) as exc:
-        raise SystemExit(f"error: {exc}") from exc
-
+        result = analyze_tiled(dem, drains_xy=drains, buildings=buildings, tile=args.tile,
+                               buffer=args.buffer, res=args.res, min_depth=args.min_depth)
+    else:
+        result = analyze(dem, drains_xy=drains, res=args.res, min_depth=args.min_depth,
+                         buildings=buildings)
     out = result.save(args.out)
     print(f"{result.meta['n_depressions']} depressions written to {out}")
     print(f"  {result.meta['n_edge']} cut off by the data border")
     return 0
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    try:
+        return {"analyze": _analyze, "fetch-dem": _fetch}[args.command](args)
+    except (ValueError, OSError, ImportError) as exc:
+        raise SystemExit(f"error: {exc}") from exc
