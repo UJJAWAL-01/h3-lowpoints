@@ -89,3 +89,24 @@ def depth_from_file(path):
         nodata = src.nodata
         mask = np.isnan(arr) if nodata is None else (arr == nodata)
         return depth_from_array(arr, mask), src.transform, src.crs
+
+
+def lowest_points(depth, labels, ids):
+    """Row and column of each depression's deepest cell.
+
+    Ties go to the first cell in row-major order, so the answer is the same whichever window of
+    a larger raster the depression is analyzed in. scipy's maximum_position makes no such
+    promise, which made tiled runs drop depressions on some platforms.
+    """
+    ids = np.asarray(ids)
+    lut = np.zeros(int(labels.max()) + 1)
+    lut[ids] = ndimage.maximum(depth, labels, ids)
+    flat_labels = labels.ravel()
+    idx = np.flatnonzero(flat_labels)
+    lab = flat_labels[idx]
+    top = depth.ravel()[idx] >= lut[lab] - 1e-9
+    idx, lab = idx[top], lab[top]
+    first_labels, first = np.unique(lab, return_index=True)
+    at = np.searchsorted(first_labels, ids)
+    rows, cols = np.unravel_index(idx[first][at], labels.shape)
+    return rows, cols

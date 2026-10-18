@@ -8,13 +8,12 @@ import numpy as np
 import pandas as pd
 import rasterio
 from pyproj import Transformer
-from scipy import ndimage
 from scipy.spatial import cKDTree
 
 from .buildings import building_overlap
 from .classify import CODES, classify, serving_drains, touches_edge
 from .h3agg.aggregate import depression_cells
-from .hydro.depressions import depth_from_array, label_depressions
+from .hydro.depressions import depth_from_array, label_depressions, lowest_points
 
 DEP_COLS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint",
             "dist_to_drain_m", "drain_at_core", "significant", "suspect_pit", "edge", "cls",
@@ -95,9 +94,7 @@ def analyze_array(arr, transform, crs, nodata=None, drains_xy=None, res=11, min_
     cls, significant, pit = classify(mx, area, served, edge, sig_depth, sig_area,
                                      pit_depth, pit_area)
 
-    pos = ndimage.maximum_position(depth, labels, ids.tolist())
-    rows = np.array([p[0] for p in pos])
-    cols = np.array([p[1] for p in pos])
+    rows, cols = lowest_points(depth, labels, ids)
     xs, ys = rasterio.transform.xy(transform, rows, cols)
     xs, ys = np.asarray(xs), np.asarray(ys)
     lon, lat = Transformer.from_crs(crs, 4326, always_xy=True).transform(xs, ys)
