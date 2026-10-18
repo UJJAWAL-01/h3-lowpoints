@@ -174,10 +174,12 @@ def test_narrower_tiles_towards_the_poles_warn_and_use_the_finest_grid(tmp_path)
 def test_same_resolution_tiles_do_not_warn(tmp_path):
     make_tile(tmp_path, 30, -98, west=-97 - 40 * PX, south=30.0)
     make_tile(tmp_path, 30, -97, west=-97.0, south=30.0)
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
         fetch_dem((-97 - 20 * PX, 30.0, -97 + 20 * PX, 30 + 40 * PX), tmp_path / "o.tif",
                   source=tmp_path)
+    # other libraries may warn about their own internals; only ours matters here
+    assert not [w for w in caught if "longitude resolutions" in str(w.message)]
 
 
 def test_southern_and_western_hemispheres(tmp_path):

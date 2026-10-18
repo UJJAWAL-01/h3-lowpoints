@@ -42,7 +42,7 @@ def brute_coverage(invalid, transform, crs, res, pad=None):
     x, y = transform @ (cc + 0.5, rr + 0.5)
     lon, lat = lonlat(crs, np.asarray(x), np.asarray(y))
     ids = h3_ids(lat.ravel(), lon.ravel(), res).reshape(rr.shape)
-    area = pixel_areas_m2(transform * rasterio.Affine.translation(0, -pad_r), crs, h + 2 * pad_r)[:, None]
+    area = pixel_areas_m2(transform @ rasterio.Affine.translation(0, -pad_r), crs, h + 2 * pad_r)[:, None]
     area = np.broadcast_to(area, rr.shape)
     valid = np.zeros(rr.shape, dtype=bool)
     valid[pad_r:pad_r + h, pad_c:pad_c + w] = ~invalid

@@ -16,12 +16,21 @@ classifiers = [
     "Topic :: Scientific/Engineering :: GIS",
     "Programming Language :: Python :: 3",
 ]
-dependencies = ["numpy", "scipy", "pandas", "rasterio", "pyproj", "h3>=4", "numba", "shapely"]
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "rasterio>=1.3",
+    "affine>=2.4",        # the @ operator on transforms
+    "pyproj",
+    "h3>=4",
+    "numba",
+]
 
 [project.optional-dependencies]
 sources = ["geopandas", "pyogrio", "shapely", "requests"]
 viz = ["pydeck"]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "shapely"]
 
 [project.scripts]
 h3lowpoints = "h3lowpoints.cli:main"
@@ -42,4 +51,10 @@ select = ["E4", "E7", "E9", "F"]
 testpaths = ["tests"]
 markers = ["network: needs internet access (run with H3LP_NETWORK=1)"]
 # Tests use coarse grids on purpose; the ones that check this warning use pytest.warns.
-filterwarnings = ["ignore:The DEM cell size:UserWarning"]
+filterwarnings = [
+    "ignore:The DEM cell size:UserWarning",
+    # our own code must never rely on deprecated behaviour of the libraries it uses
+    "error::DeprecationWarning:h3lowpoints.*",
+    "error::PendingDeprecationWarning:h3lowpoints.*",
+    "error::FutureWarning:h3lowpoints.*",
+]

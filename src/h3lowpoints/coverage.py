@@ -149,7 +149,7 @@ class Footprint:
         return float(member_area[valid].sum() / total) if total > 0 else 1.0
 
     def _row_areas(self, r_start, r_stop):
-        shifted = self.transform * Affine.translation(0, r_start)
+        shifted = self.transform @ Affine.translation(0, r_start)
         return pixel_areas_m2(shifted, self.crs, int(r_stop - r_start))
 
     # -- public -----------------------------------------------------------------------------

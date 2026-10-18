@@ -29,7 +29,7 @@ def h3_ids(lat, lon, res):
                        dtype=np.uint64, count=len(lat))
 
 
-def depression_cells(depth, labels, transform, crs, res=11):
+def depression_cells(depth, labels, transform, crs, res):
     """One row per H3 cell that contains depression pixels.
 
     Each pixel belongs to the cell containing its centre. Area and volume are sums over those
