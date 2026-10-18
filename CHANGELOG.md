@@ -21,6 +21,12 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **Regions of any size and general verification.** `build_3dep_vrt` writes a virtual raster over
+  3DEP tiles (each pixel from its own tile, optional resumable tile cache), and `h3lowpoints build`
+  runs it through the exact tiled analysis. `verify.check_result` / `h3lowpoints verify` test
+  invariants that hold for every correct result, and `spot_check` re-runs random windows of any
+  DEM tiled and whole; `build` runs both and writes `verify.json`. Its first run on real data found
+  coverage values of 1 + 2e-16 from float rounding, now clamped. See docs/verification.md.
 - **US data readers.** `fetch_3dep` (USGS 3DEP bare earth, 30 m and 10 m), `fetch_lidar` (3DEP 1 m;
   newest survey wins, other UTM zones reprojected), `fetch_impervious` (NLCD percent impervious),
   `fetch_worldcover` (global 10 m land cover) and `design_rainfall` (NOAA Atlas 14), with the CLI

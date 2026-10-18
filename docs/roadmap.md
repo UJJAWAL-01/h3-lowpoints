@@ -31,6 +31,9 @@ Still to do:
 - Cost: about 1.7e11 land pixels at 30 m. The speed of one run is measured in the changelog;
   a global figure will be measured, not guessed.
 
+Regions at scale (done): `h3lowpoints build` streams 3DEP tiles through the exact tiled analysis
+and verifies the result (docs/verification.md).
+
 US data (done): USGS 3DEP at 30 m, 10 m and 1 m lidar, NLCD imperviousness, ESA WorldCover and NOAA
 Atlas 14 design rainfall can all be fetched for any box (`h3lowpoints.sources`).
 

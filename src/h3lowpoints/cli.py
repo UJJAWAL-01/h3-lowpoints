@@ -57,6 +57,25 @@ def build_parser():
                     help="worldcover: global 10 m classes (default); nlcd: US 30 m percent impervious")
     lc.add_argument("--year", type=int, default=2021, help="NLCD year (default 2021)")
 
+    b = sub.add_parser("build", help="analyze a US region of any size from USGS 3DEP (streams the tiles)")
+    b.add_argument("--bbox", nargs=4, type=float, required=True,
+                   metavar=("WEST", "SOUTH", "EAST", "NORTH"), help="bounding box in degrees")
+    b.add_argument("--out", required=True, help="output folder")
+    b.add_argument("--from", dest="dataset", default="3dep", choices=["3dep", "3dep10"],
+                   help="3dep: 30 m bare earth (default); 3dep10: 10 m bare earth")
+    b.add_argument("--res", default="auto", help="H3 resolution 0-15, or 'auto' (default)")
+    b.add_argument("--min-depth", type=float, default=0.15, help="minimum depression depth in metres")
+    b.add_argument("--tile", type=int, default=4096, help="tile size in pixels (memory, not result)")
+    b.add_argument("--cache-dir", help="download each 3DEP tile here once instead of streaming it")
+    b.add_argument("--spot-check", type=int, default=0, metavar="N",
+                   help="also re-run N random windows tiled and whole and require identical answers")
+    b.add_argument("--map", help="also write an interactive web map to this .html file")
+
+    v = sub.add_parser("verify", help="check a saved result against invariants that always hold")
+    v.add_argument("results", help="folder written by 'analyze' or 'build'")
+    v.add_argument("--dem", help="also spot-check this DEM: tiled and whole runs on random windows")
+    v.add_argument("--windows", type=int, default=3, help="windows for the spot check (default 3)")
+
     r = sub.add_parser("rainfall", help="design rainfall from NOAA Atlas 14 for a point in the US")
     r.add_argument("lat", type=float)
     r.add_argument("lon", type=float)
@@ -148,6 +167,58 @@ def _analyze(args):
     return 0
 
 
+def _build(args):
+    import json
+    import time
+
+    from .sources.usgs import build_3dep_vrt
+    from .tiling import analyze_tiled
+    from .verify import check_result, spot_check
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    timings = {}
+    start = time.perf_counter()
+    vrt = build_3dep_vrt(tuple(args.bbox), out / "dem.vrt", resolution=30 if args.dataset == "3dep" else 10,
+                         cache_dir=args.cache_dir)
+    timings["tiles"] = time.perf_counter() - start
+    start = time.perf_counter()
+    result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth, verbose=True)
+    timings["analysis"] = time.perf_counter() - start
+    result.meta["build"] = {"dataset": args.dataset, "bbox": list(args.bbox),
+                            "seconds": {k: round(v, 1) for k, v in timings.items()}}
+    result.save(out)
+    problems = check_result(result)
+    if args.spot_check:
+        problems += spot_check(str(vrt), windows=args.spot_check, res=result.res, min_depth=args.min_depth)
+    (out / "verify.json").write_text(json.dumps({"problems": problems}, indent=2))
+    print(f"{result.meta['n_depressions']:,} depressions on H3 resolution {result.res} written to {out} "
+          f"({timings['tiles']:.0f} s for tiles, {timings['analysis']:.0f} s for the analysis)")
+    print("verification: " + ("all invariants hold" if not problems else f"{len(problems)} problem(s), see verify.json"))
+    if args.map:
+        print(f"map written to {result.to_html(args.map)}")
+    return 0 if not problems else 1
+
+
+def _verify(args):
+    from .verify import check_saved, spot_check
+
+    problems = check_saved(args.results)
+    if args.dem:
+        import json
+
+        meta = json.loads((Path(args.results) / "meta.json").read_text())
+        problems += spot_check(args.dem, windows=args.windows, res=meta["params"]["res"],
+                               min_depth=meta["params"]["min_depth"])
+    if problems:
+        print(f"{len(problems)} problem(s):")
+        for p in problems:
+            print("  - " + p)
+        return 1
+    print("all invariants hold" + (f"; tiled and whole agree on {args.windows} random windows" if args.dem else ""))
+    return 0
+
+
 def _map(args):
     from .viz.webmap import map_from_dir
 
@@ -159,7 +230,8 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         commands = {"analyze": _analyze, "fetch-dem": _fetch, "map": _map,
-                    "fetch-landcover": _landcover, "rainfall": _rainfall}
+                    "fetch-landcover": _landcover, "rainfall": _rainfall, "build": _build,
+                    "verify": _verify}
         return commands[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

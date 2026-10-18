@@ -111,6 +111,14 @@ h3lowpoints rainfall 30.27 -97.74                                               
 | ESA WorldCover, 10 m | the world | land-cover classes (`fetch-landcover --from worldcover`) |
 | NOAA Atlas 14 rainfall | the US except Washington and Oregon | depth by storm duration and return period |
 
+For a whole state or region, `build` streams the 3DEP tiles through the exact tiled analysis,
+then verifies the result:
+
+```
+h3lowpoints build --bbox -98 30 -96 32 --out region/ --min-depth 0.5 --cache-dir tiles/ --spot-check 3
+h3lowpoints verify region/                       # re-check any saved result at any time
+```
+
 On 1 m lidar, `analyze` works at H3 resolution 14, and each depression's lowest point is given to
 the metre (`h3_lowpoint_15`). These inputs (land cover and rainfall) feed the planned
 waterlogging-susceptibility layer (see [docs/roadmap.md](docs/roadmap.md)).
@@ -185,6 +193,7 @@ Drains: a point file (GeoPackage, GeoJSON, Shapefile) or a CSV with `x,y` (in th
 
 - [docs/definition.md](docs/definition.md): precisely what is computed, including coverage
 - [docs/outputs.md](docs/outputs.md): columns and files
+- [docs/verification.md](docs/verification.md): how any result is checked, with no reference answer
 - [docs/roadmap.md](docs/roadmap.md): where it is going, and how H3 resolution is handled
 - [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md)
 

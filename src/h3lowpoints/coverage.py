@@ -146,7 +146,8 @@ class Footprint:
         areas = self._row_areas(rows.min(), rows.max() + 1)[rr - rows.min()]
         member_area = np.where(member.reshape(rr.shape), areas, 0.0)
         total = member_area.sum()
-        return float(member_area[valid].sum() / total) if total > 0 else 1.0
+        # two sums of the same numbers in a different order can exceed 1 by a rounding error
+        return min(1.0, float(member_area[valid].sum() / total)) if total > 0 else 1.0
 
     def _row_areas(self, r_start, r_stop):
         shifted = self.transform @ Affine.translation(0, r_start)
@@ -175,9 +176,11 @@ def file_opener(dem_path, mask_path=None):
     import rasterio
     from rasterio.windows import Window
 
+    from .sources._common import gdal_env
+
     @contextlib.contextmanager
     def opener():
-        with rasterio.open(dem_path) as src, \
+        with gdal_env(), rasterio.open(dem_path) as src, \
                 (rasterio.open(mask_path) if mask_path else contextlib.nullcontext()) as mask:
             def read(r0, r1, c0, c1):
                 window = Window(c0, r0, c1 - c0, r1 - r0)

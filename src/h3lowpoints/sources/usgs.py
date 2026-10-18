@@ -18,7 +18,10 @@ depression is a feature of the ground, not of a roof or a canopy.
 import json
 import math
 import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 import numpy as np
 import rasterio
@@ -26,8 +29,8 @@ from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 
-from ._common import (bbox_area_km2, check_bbox, degree_tiles, gdal_env, mosaic, read_text,
-                      remote, snap_outwards, url_exists, write_raster)
+from ._common import (USER_AGENT, bbox_area_km2, check_bbox, degree_tiles, gdal_env, mosaic,
+                      read_text, remote, snap_outwards, url_exists, write_raster)
 
 STAGED = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation"
 PRODUCTS = {30: ("1", 1 / 3600), 10: ("13", 1 / 10800)}      # resolution: (product code, pixel)
@@ -112,6 +115,84 @@ def _own_cell_mosaic(found, bounds, pixel):
         rows, cols = min(block.shape[0], height - row0), min(block.shape[1], width - col0)
         out[row0:row0 + rows, col0:col0 + cols] = block[:rows, :cols]
     return out, rasterio.transform.from_origin(west, north, pixel, pixel), crs
+
+
+def _download(url, cache_dir):
+    """Local copy of `url` in `cache_dir` (downloaded once, resumable), or None if it does not exist."""
+    target = Path(cache_dir) / url.rsplit("/", 1)[-1]
+    if target.exists() and target.stat().st_size > 0:
+        return str(target)
+    if not url_exists(url):
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(target.suffix + ".part")
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as fh:
+        while chunk := response.read(1 << 20):
+            fh.write(chunk)
+    partial.replace(target)                 # only a complete file gets the real name
+    return str(target)
+
+
+def build_3dep_vrt(bbox, path, *, resolution=30, source=None, cache_dir=None, workers=8):
+    """Write a virtual raster (GDAL VRT) of 3DEP over `bbox`, for regions too big to mosaic in memory.
+
+    The VRT is a small text file that points at the tiles; `analyze_tiled` reads it piece by
+    piece. Like `fetch_3dep`, every pixel comes from the tile whose own 1-degree cell holds it.
+    source: a folder of tiles instead of the public bucket.
+    cache_dir: download each tile there once (resumable) instead of streaming it over HTTP,
+        which pays off because a tiled analysis reads the data twice.
+    Returns the path. Tiles that do not exist (open sea, outside the US) are left as nodata.
+    """
+    if resolution not in PRODUCTS:
+        raise ValueError(f"resolution must be 30 or 10 (metres), got {resolution!r}")
+    bbox = check_bbox(bbox)
+    _, pixel = PRODUCTS[resolution]
+    west, south, east, north = snap_outwards(bbox, pixel)
+    width, height = round((east - west) / pixel), round((north - south) / pixel)
+
+    def probe(tile):
+        lat, lon = tile
+        if source is not None:
+            loc = _locate(lat, lon, resolution, source)
+        elif cache_dir is not None:
+            loc = _download(tile_url(lat, lon, resolution), cache_dir)
+        else:
+            loc = _locate(lat, lon, resolution, None)
+        if loc is None:
+            return None
+        with rasterio.open(loc) as src:
+            return tile, loc, src.transform, src.crs, src.nodata
+
+    with gdal_env(), ThreadPoolExecutor(max_workers=workers) as pool:
+        found = [info for info in pool.map(probe, degree_tiles(bbox)) if info]
+    if not found:
+        raise ValueError("No 3DEP tiles cover this box (outside the US, or open sea)")
+    sources = []
+    for (lat, lon), loc, tr, _, nodata in found:
+        cw, cs = max(west, lon), max(south, lat)
+        ce, cn = min(east, lon + 1), min(north, lat + 1)
+        if ce <= cw or cn <= cs:
+            continue
+        w, h = round((ce - cw) / pixel), round((cn - cs) / pixel)
+        sx, sy = round((cw - tr.c) / tr.a), round((tr.f - cn) / -tr.e)
+        dx, dy = round((cw - west) / pixel), round((north - cn) / pixel)
+        sources.append(
+            f'    <ComplexSource><SourceFilename relativeToVRT="0">{escape(loc)}</SourceFilename>'
+            f'<SourceBand>1</SourceBand><SrcRect xOff="{sx}" yOff="{sy}" xSize="{w}" ySize="{h}"/>'
+            f'<DstRect xOff="{dx}" yOff="{dy}" xSize="{w}" ySize="{h}"/>'
+            f'<NODATA>{nodata if nodata is not None else NODATA}</NODATA></ComplexSource>')
+    crs = found[0][3]
+    text = (f'<VRTDataset rasterXSize="{width}" rasterYSize="{height}">\n'
+            f'  <SRS dataAxisToSRSAxisMapping="2,1">{escape(crs.to_wkt())}</SRS>\n'
+            f'  <GeoTransform>{west!r}, {pixel!r}, 0, {north!r}, 0, {-pixel!r}</GeoTransform>\n'
+            f'  <VRTRasterBand dataType="Float32" band="1">\n'
+            f'    <NoDataValue>{NODATA}</NoDataValue>\n' + "\n".join(sources) +
+            '\n  </VRTRasterBand>\n</VRTDataset>\n')
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    return out
 
 
 # ------------------------------------------------------------------ 1 m lidar

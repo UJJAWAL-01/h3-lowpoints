@@ -26,6 +26,7 @@ from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve
                           tile_seeds)
 from .pipeline import CELL_TABLE, Result, base_meta, dep_columns, finish_cells, plan_analysis
 from .resolution import FINEST_H3
+from .sources._common import gdal_env
 from .resolution import metres_to_cells
 
 _TIE = 1e-9  # depths this close to the maximum count as tied for the lowest point
@@ -155,7 +156,7 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
         raise ValueError("tile must be positive")
     has_drains = drains_xy is not None and len(drains_xy) > 0
     drains = np.asarray(drains_xy, dtype="float64").reshape(-1, 2) if has_drains else None
-    with rasterio.open(dem_path) as src:
+    with gdal_env(), rasterio.open(dem_path) as src:
         height, width, crs, transform = src.height, src.width, src.crs, src.transform
         requested = res
         size, tier, res = plan_analysis(crs, transform, height, res, min_depth)
