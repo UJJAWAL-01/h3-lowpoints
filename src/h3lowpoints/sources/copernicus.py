@@ -18,16 +18,16 @@ the EGM2008 geoid. Things worth knowing before you trust a result:
 Data licence: free to use with the attribution given by the Copernicus programme (see
 https://spacedata.copernicus.eu/collections/copernicus-digital-elevation-model).
 """
-import math
 import urllib.request
 import warnings
 from functools import lru_cache
 from pathlib import Path
 
-import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 from rasterio.merge import merge
+
+from ._common import check_bbox, degree_tiles, gdal_env, snap_outwards, write_raster
 
 BASE_URL = "https://copernicus-dem-30m.s3.amazonaws.com"
 NODATA = -32768.0
@@ -47,14 +47,7 @@ def tile_url(lat, lon, base=BASE_URL):
 
 def tiles_for_bbox(west, south, east, north):
     """South-west corners (lat, lon) of every 1 degree tile that a bounding box touches."""
-    if not (west < east and south < north):
-        raise ValueError("bbox must be (west, south, east, north) with west < east and south < north;"
-                         " a box crossing the antimeridian must be split in two")
-    if west < -180 or east > 180 or south < -90 or north > 90:
-        raise ValueError("bbox is outside the valid range (lon -180..180, lat -90..90)")
-    lon0, lon1 = math.floor(west), math.ceil(east) - 1
-    lat0, lat1 = math.floor(south), math.ceil(north) - 1
-    return [(lat, lon) for lat in range(lat0, lat1 + 1) for lon in range(lon0, lon1 + 1)]
+    return degree_tiles((west, south, east, north))
 
 
 @lru_cache(maxsize=1)
@@ -93,14 +86,8 @@ def fetch_dem(bbox, out_path, *, source=None, max_tiles=16):
         raise ValueError("No GLO-30 tiles cover this box (open ocean?). "
                          f"{len(tiles)} tile(s) checked")
 
-    west, south, east, north = bbox
-    # Snap outwards to the 1/3600 degree pixel grid; the small tolerance stops float noise in a box
-    # that already lies on the grid from adding a spurious extra pixel.
-    eps = 1e-6
-    snapped = (math.floor(west / _PIXEL + eps) * _PIXEL, math.floor(south / _PIXEL + eps) * _PIXEL,
-               math.ceil(east / _PIXEL - eps) * _PIXEL, math.ceil(north / _PIXEL - eps) * _PIXEL)
-    with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY="3",
-                      GDAL_HTTP_RETRY_DELAY="1", CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif"):
+    snapped = snap_outwards(check_bbox(bbox), _PIXEL)
+    with gdal_env():
         datasets = [rasterio.open(loc) for _, loc in present]
         try:
             xres = sorted({round(d.res[0], 9) for d in datasets})
@@ -115,11 +102,4 @@ def fetch_dem(bbox, out_path, *, source=None, max_tiles=16):
         finally:
             for d in datasets:
                 d.close()
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(
-            out_path, "w", driver="GTiff", height=mosaic.shape[1], width=mosaic.shape[2], count=1,
-            dtype="float32", crs="EPSG:4326", transform=transform, nodata=NODATA,
-            compress="deflate", predictor=3, tiled=True, blockxsize=256, blockysize=256) as dst:
-        dst.write(mosaic[0].astype(np.float32), 1)
-    return out_path
+    return write_raster(out_path, mosaic[0], transform, "EPSG:4326", NODATA, "float32")

@@ -31,6 +31,9 @@ Still to do:
 - Cost: about 1.7e11 land pixels at 30 m. The speed of one run is measured in the changelog;
   a global figure will be measured, not guessed.
 
+US data (done): USGS 3DEP at 30 m, 10 m and 1 m lidar, NLCD imperviousness, ESA WorldCover and NOAA
+Atlas 14 design rainfall can all be fetched for any box (`h3lowpoints.sources`).
+
 Honest limit: GLO-30 is a surface model with vertical error of a few metres. It resolves large
 basins, not street-level ponding. Street-scale depressions need lidar-derived DEMs, which exist
 openly only for some countries.

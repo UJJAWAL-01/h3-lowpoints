@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-sources = ["geopandas", "pyogrio", "shapely", "requests"]
+sources = ["geopandas", "pyogrio", "shapely"]   # reading drain and building files
 viz = ["pydeck"]
 dev = ["pytest", "ruff", "shapely"]
 

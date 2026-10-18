@@ -21,6 +21,15 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **US data readers.** `fetch_3dep` (USGS 3DEP bare earth, 30 m and 10 m), `fetch_lidar` (3DEP 1 m;
+  newest survey wins, other UTM zones reprojected), `fetch_impervious` (NLCD percent impervious),
+  `fetch_worldcover` (global 10 m land cover) and `design_rainfall` (NOAA Atlas 14), with the CLI
+  commands `fetch-dem --from ...`, `fetch-landcover` and `rainfall`. They read only the parts of
+  cloud-optimised files a box needs and use only the standard library and rasterio; the old
+  untested `sources/dem.py` and the `requests` dependency are gone.
+  Found while testing on real data: neighbouring 3DEP tiles' 6-pixel overlaps differ by
+  centimetres, so each pixel is now taken from the tile whose own cell holds it; and NLCD tags 0%
+  impervious as "no data", which would have erased every park and field.
 - **Finest resolution by default.** `res="auto"` (now the default, also `--res auto`) picks the finest
   H3 resolution the DEM supports (14 for 1 m lidar, 10 for 30 m). Every depression carries
   `h3_lowpoint_15`, its deepest point as a resolution-15 cell. Cells gain `n_lowpoints` and

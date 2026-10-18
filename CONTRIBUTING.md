@@ -34,7 +34,9 @@ Tests marked `network` read real data and drive a headless browser; run them wit
 
 - A `sources/` adapter for another country or city (DEM, drains, buildings).
 - A `sources/` reader for another open DEM (national lidar programs, FABDEM, NASADEM), or a
-  water-mask source to pair with it.
+  water-mask source to pair with it. Follow `sources/usgs.py`: read only the windows a box needs,
+  treat only HTTP 404 as "missing" (`_common.url_exists`), and test against fake tiles that copy the
+  real layout, plus a `network` test against the real service.
 - Validation of the planned susceptibility index against local flood records, including negative results.
 - Test terrain from varied places: karst, glacial potholes, flat coast, steep hills.
 - Coverage per H3 cell (share of the cell the DEM covers), and a hierarchical version of the

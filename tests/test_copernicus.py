@@ -235,7 +235,8 @@ def test_cli_fetch_then_analyze(tmp_path, capsys):
     dem = tmp_path / "dem.tif"
     assert main(["fetch-dem", "--bbox", "-97.99", "30.0", str(-97.99 + 200 * PX), str(30 + 200 * PX),
                  "--out", str(dem), "--source", str(tmp_path)]) == 0
-    assert "pixels written" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert "200 x 200 pixels" in printed and "degrees each" in printed and "written to" in printed
     out = tmp_path / "res"
     assert main(["analyze", str(dem), "--res", "9", "--min-depth", "1", "--out", str(out)]) == 0
     assert (out / "depressions.csv").exists()

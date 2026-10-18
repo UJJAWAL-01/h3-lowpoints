@@ -1,0 +1,117 @@
+"""Shared parts of the data readers: boxes, tiles, existence checks, mosaics and output files.
+
+The readers use only the standard library and rasterio, so a plain install can fetch data.
+"""
+import contextlib
+import math
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import numpy as np
+import rasterio
+from rasterio.enums import Resampling
+from rasterio.merge import merge
+
+USER_AGENT = "h3-lowpoints (https://github.com/UJJAWAL-01/h3-lowpoints)"
+
+
+def check_bbox(bbox):
+    """(west, south, east, north) as floats, or ValueError with a plain explanation."""
+    try:
+        west, south, east, north = (float(v) for v in bbox)
+    except (TypeError, ValueError):
+        raise ValueError("bbox must be four numbers: (west, south, east, north) in degrees") from None
+    if not (west < east and south < north):
+        raise ValueError("bbox must be (west, south, east, north) with west < east and south < north;"
+                         " a box crossing the antimeridian must be split in two")
+    if west < -180 or east > 180 or south < -90 or north > 90:
+        raise ValueError("bbox is outside the valid range (lon -180..180, lat -90..90)")
+    return west, south, east, north
+
+
+def degree_tiles(bbox, size=1):
+    """South-west corners (lat, lon) of every `size`-degree tile a box touches, on a grid of `size`."""
+    west, south, east, north = check_bbox(bbox)
+    lon0 = math.floor(west / size) * size
+    lat0 = math.floor(south / size) * size
+    lon1 = math.ceil(east / size) * size - size
+    lat1 = math.ceil(north / size) * size - size
+    return [(lat, lon) for lat in range(int(lat0), int(lat1) + 1, size)
+            for lon in range(int(lon0), int(lon1) + 1, size)]
+
+
+def bbox_area_km2(bbox):
+    """Approximate area of a lon/lat box in square kilometres."""
+    west, south, east, north = check_bbox(bbox)
+    mid = math.radians((south + north) / 2)
+    return (east - west) * 111.32 * math.cos(mid) * (north - south) * 110.57
+
+
+def url_exists(url, timeout=30):
+    """True if the server has the file, False if it answers 404. Any other failure raises.
+
+    Only a 404 means "no such tile" (for example open ocean). A network error, a timeout or any
+    other status is raised, so a broken connection is never mistaken for missing data.
+    """
+    request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout):
+            return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False
+        raise OSError(f"{url} answered HTTP {exc.code}") from exc
+
+
+def read_text(url, timeout=60):
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def read_bytes(url, timeout=120):
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
+def remote(url):
+    """A rasterio path that reads a remote file by ranges (only the parts needed)."""
+    return url if not url.startswith(("http://", "https://")) else "/vsicurl/" + url
+
+
+@contextlib.contextmanager
+def gdal_env():
+    with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY="3",
+                      GDAL_HTTP_RETRY_DELAY="1", CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
+                      GDAL_HTTP_USERAGENT=USER_AGENT):
+        yield
+
+
+def snap_outwards(bbox, pixel):
+    """Grow a box to whole pixels of a grid anchored at 0 (tolerant of float noise)."""
+    west, south, east, north = bbox
+    eps = 1e-6
+    return (math.floor(west / pixel + eps) * pixel, math.floor(south / pixel + eps) * pixel,
+            math.ceil(east / pixel - eps) * pixel, math.ceil(north / pixel - eps) * pixel)
+
+
+def mosaic(datasets, bounds, res, nodata, dtype, resampling=Resampling.nearest):
+    """Merge open datasets over `bounds`; earlier datasets win where they overlap."""
+    array, transform = merge(datasets, bounds=bounds, res=res, nodata=nodata, dtype=dtype,
+                             resampling=resampling, method="first")
+    return array[0], transform
+
+
+def write_raster(path, array, transform, crs, nodata, dtype):
+    """A tiled, compressed single-band GeoTIFF; creates the folder."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    floats = np.dtype(dtype).kind == "f"
+    with rasterio.open(out, "w", driver="GTiff", height=array.shape[0], width=array.shape[1],
+                       count=1, dtype=dtype, crs=crs, transform=transform, nodata=nodata,
+                       compress="deflate", predictor=3 if floats else 2, tiled=True,
+                       blockxsize=256, blockysize=256) as dst:
+        dst.write(array.astype(dtype), 1)
+    return out

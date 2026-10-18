@@ -42,21 +42,78 @@ def build_parser():
     m.add_argument("--out", default="map.html", help="output .html file (default map.html)")
     m.add_argument("--title", help="title shown on the map")
 
-    f = sub.add_parser("fetch-dem", help="download a Copernicus GLO-30 (30 m, global) DEM")
-    f.add_argument("--bbox", nargs=4, type=float, required=True,
-                   metavar=("WEST", "SOUTH", "EAST", "NORTH"), help="bounding box in degrees")
-    f.add_argument("--out", required=True, help="output GeoTIFF")
-    f.add_argument("--source", help="folder with tiles instead of the public AWS bucket")
-    f.add_argument("--max-tiles", type=int, default=16, help="refuse requests above this many 1-degree tiles")
+    f = sub.add_parser("fetch-dem", help="download a DEM for a box: global 30 m, or US 30 m, 10 m or 1 m")
+    _bbox_out(f)
+    f.add_argument("--from", dest="dataset", default="copernicus",
+                   choices=["copernicus", "3dep", "3dep10", "lidar"],
+                   help="copernicus: global 30 m surface model (default); 3dep: US 30 m bare earth; "
+                        "3dep10: US 10 m bare earth; lidar: US 1 m lidar")
+    f.add_argument("--source", help="folder with tiles instead of the public bucket (not for lidar)")
+    f.add_argument("--max-tiles", type=int, default=16, help="refuse boxes touching more 1-degree tiles")
+
+    lc = sub.add_parser("fetch-landcover", help="download land cover for a box")
+    _bbox_out(lc)
+    lc.add_argument("--from", dest="dataset", default="worldcover", choices=["worldcover", "nlcd"],
+                    help="worldcover: global 10 m classes (default); nlcd: US 30 m percent impervious")
+    lc.add_argument("--year", type=int, default=2021, help="NLCD year (default 2021)")
+
+    r = sub.add_parser("rainfall", help="design rainfall from NOAA Atlas 14 for a point in the US")
+    r.add_argument("lat", type=float)
+    r.add_argument("lon", type=float)
+    r.add_argument("--duration", help="one duration, for example 60-min or 24-hr")
+    r.add_argument("--years", type=int, help="one return period in years, for example 10 or 100")
     return parser
 
 
-def _fetch(args):
-    from .sources.copernicus import fetch_dem
+def _bbox_out(parser):
+    parser.add_argument("--bbox", nargs=4, type=float, required=True,
+                        metavar=("WEST", "SOUTH", "EAST", "NORTH"), help="bounding box in degrees")
+    parser.add_argument("--out", required=True, help="output GeoTIFF")
 
-    out = fetch_dem(tuple(args.bbox), args.out, source=args.source, max_tiles=args.max_tiles)
+
+def _fetch(args):
+    bbox = tuple(args.bbox)
+    if args.dataset == "copernicus":
+        from .sources.copernicus import fetch_dem
+
+        out = fetch_dem(bbox, args.out, source=args.source, max_tiles=args.max_tiles)
+    elif args.dataset in ("3dep", "3dep10"):
+        from .sources.usgs import fetch_3dep
+
+        out = fetch_3dep(bbox, args.out, resolution=30 if args.dataset == "3dep" else 10,
+                         source=args.source, max_tiles=args.max_tiles)
+    else:
+        from .sources.usgs import fetch_lidar
+
+        out = fetch_lidar(bbox, args.out)
+    with rasterio.open(out) as src:
+        unit = "degrees" if src.crs.is_geographic else (src.crs.linear_units or "map units")
+        print(f"{src.width} x {src.height} pixels ({src.res[0]:.6g} {unit} each) written to {out}")
+    return 0
+
+
+def _landcover(args):
+    from .sources import landcover
+
+    bbox = tuple(args.bbox)
+    out = (landcover.fetch_worldcover(bbox, args.out) if args.dataset == "worldcover"
+           else landcover.fetch_impervious(bbox, args.out, year=args.year))
     with rasterio.open(out) as src:
         print(f"{src.width} x {src.height} pixels written to {out}")
+    return 0
+
+
+def _rainfall(args):
+    from .sources.rainfall import design_rainfall, rainfall_depth
+
+    table = design_rainfall(args.lat, args.lon)
+    if args.duration or args.years:
+        depth = rainfall_depth(args.lat, args.lon, args.duration or "60-min", args.years or 10,
+                               table=table)
+        print(f"{depth:g} mm")
+    else:
+        print("NOAA Atlas 14 depths in mm (rows: duration, columns: return period in years)")
+        print(table.to_string())
     return 0
 
 
@@ -101,6 +158,8 @@ def _map(args):
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
-        return {"analyze": _analyze, "fetch-dem": _fetch, "map": _map}[args.command](args)
+        commands = {"analyze": _analyze, "fetch-dem": _fetch, "map": _map,
+                    "fetch-landcover": _landcover, "rainfall": _rainfall}
+        return commands[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

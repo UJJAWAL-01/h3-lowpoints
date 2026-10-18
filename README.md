@@ -15,7 +15,7 @@ Not on PyPI yet. From a clone:
 ```
 pip install -e .                  # core
 pip install -e ".[viz]"           # + 3D maps (pydeck)
-pip install -e ".[sources]"       # + reading drain / building files and the USGS 3DEP downloader
+pip install -e ".[sources]"       # + reading drain and building files (GeoPackage, Shapefile, ...)
 ```
 
 ## Quick start
@@ -89,6 +89,31 @@ h3lowpoints analyze austin.tif --res 9 --min-depth 1
 It is a surface model with a vertical error of a few metres: it shows large basins, such as the
 below-sea-level polders around Rotterdam, not street-level ponding. Use a lidar DEM for that.
 More in `h3lowpoints.sources.copernicus`.
+
+### US data
+
+The United States publishes better data for free, and the library reads it directly. Only the
+parts of the remote files inside your box are downloaded.
+
+```
+h3lowpoints fetch-dem --from lidar  --bbox -97.756 30.262 -97.743 30.273 --out downtown.tif   # 1 m lidar
+h3lowpoints fetch-dem --from 3dep   --bbox -97.9 30.1 -97.6 30.4 --out austin30.tif          # 30 m bare earth
+h3lowpoints fetch-dem --from 3dep10 --bbox -97.9 30.1 -97.6 30.4 --out austin10.tif          # 10 m bare earth
+h3lowpoints fetch-landcover --from nlcd --bbox -97.9 30.1 -97.6 30.4 --out imperv.tif        # % impervious
+h3lowpoints rainfall 30.27 -97.74                                                            # design storms
+```
+
+| Data | Coverage | Notes |
+|---|---|---|
+| USGS 3DEP 1 m lidar | most of the US | newest survey wins where surveys overlap; city-sized boxes |
+| USGS 3DEP 30 m and 10 m | all of the US | bare earth: buildings and trees removed, unlike GLO-30 |
+| NLCD impervious, 30 m | the lower 48 states | percent of each pixel that is paved or built |
+| ESA WorldCover, 10 m | the world | land-cover classes (`fetch-landcover --from worldcover`) |
+| NOAA Atlas 14 rainfall | the US except Washington and Oregon | depth by storm duration and return period |
+
+On 1 m lidar, `analyze` works at H3 resolution 14, and each depression's lowest point is given to
+the metre (`h3_lowpoint_15`). These inputs (land cover and rainfall) feed the planned
+waterlogging-susceptibility layer (see [docs/roadmap.md](docs/roadmap.md)).
 
 ## What counts as a depression
 
