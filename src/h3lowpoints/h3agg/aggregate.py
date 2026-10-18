@@ -4,6 +4,9 @@ import pandas as pd
 from h3.api import numpy_int
 from pyproj import Transformer
 
+from ..geometry import pixel_areas_m2
+from ..hydro.depressions import pixel_weights
+
 CELL_COLUMNS = ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3"]
 
 
@@ -14,6 +17,9 @@ def pixel_centers(transform, rows, cols):
 
 
 def lonlat(crs, x, y):
+    """Longitude and latitude of map coordinates (a no-op for WGS 84)."""
+    if crs.to_epsg() == 4326:
+        return np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64")
     return Transformer.from_crs(crs, 4326, always_xy=True).transform(x, y)
 
 
@@ -35,13 +41,12 @@ def depression_cells(depth, labels, transform, crs, res=11):
     if len(rr) == 0:
         return pd.DataFrame(columns=columns)
     lon, lat = lonlat(crs, *pixel_centers(transform, rr, cc))
-    df = pd.DataFrame({"cell": h3_ids(lat, lon, res), "depth": depth[rr, cc]})
-    out = df.groupby("cell").agg(max_depth_m=("depth", "max"), n_pix=("depth", "size"),
-                                 depth_sum=("depth", "sum")).reset_index()
-    cell_area = abs(transform.a * transform.e)
+    area = pixel_weights(pixel_areas_m2(transform, crs, depth.shape[0]), rr)
+    d = depth[rr, cc]
+    df = pd.DataFrame({"cell": h3_ids(lat, lon, res), "depth": d, "area": area, "volume": d * area})
+    out = df.groupby("cell").agg(max_depth_m=("depth", "max"), depress_area_m2=("area", "sum"),
+                                 depress_volume_m3=("volume", "sum")).reset_index()
     out["h3"] = [numpy_int.int_to_str(int(c)) for c in out["cell"]]
-    out["depress_area_m2"] = out["n_pix"] * cell_area
-    out["depress_volume_m3"] = out["depth_sum"] * cell_area
     return out[columns]
 
 

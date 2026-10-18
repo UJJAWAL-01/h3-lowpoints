@@ -54,8 +54,10 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, tile=4096, buffer
     parts, cell_parts, first_meta = [], [], None
     with rasterio.open(dem_path) as src:
         height, width, crs, nodata = src.height, src.width, src.crs, src.nodata
-        plan = plan_analysis(crs, src.transform, res, min_depth)
-        pad = (metres_to_cells(drain_radius_m, plan[0]) + 1) * plan[0]
+        plan = plan_analysis(crs, src.transform, height, res, min_depth)
+        # drain search margin in CRS units: radius in cells plus one, times the pixel size
+        pad = (metres_to_cells(drain_radius_m, plan[0]) + 1) * max(abs(src.transform.a),
+                                                                    abs(src.transform.e))
         boxes = list(_tile_boxes(height, width, tile))
         for k, (r0, r1, c0, c1) in enumerate(boxes, 1):
             br0, br1 = max(0, r0 - buffer), min(height, r1 + buffer)

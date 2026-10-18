@@ -40,3 +40,6 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["network: needs internet access (run with H3LP_NETWORK=1)"]
+# Tests use coarse grids on purpose; the ones that check this warning use pytest.warns.
+filterwarnings = ["ignore:The DEM cell size:UserWarning"]

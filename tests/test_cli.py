@@ -23,10 +23,10 @@ def test_cli_with_csv_drains(dem_path, tmp_path):
     assert bool(pd.read_csv(out / "depressions.csv").iloc[0]["drain_at_core"])
 
 
-def test_rejects_geographic_crs(tmp_path):
-    p = tmp_path / "geo.tif"
+def test_rejects_a_dem_without_a_crs(tmp_path):
+    p = tmp_path / "nocrs.tif"
     prof = {"driver": "GTiff", "height": 10, "width": 10, "count": 1, "dtype": "float32",
-            "crs": "EPSG:4326", "transform": from_origin(-97.0, 30.0, 0.0001, 0.0001), "nodata": -9999.0}
+            "transform": from_origin(-97.0, 30.0, 0.0001, 0.0001), "nodata": -9999.0}
     with rasterio.open(p, "w", **prof) as dst:
         dst.write(np.zeros((10, 10), dtype="float32"), 1)
     with pytest.raises(SystemExit):

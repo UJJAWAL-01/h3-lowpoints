@@ -7,14 +7,14 @@ import h3
 import numpy as np
 import pandas as pd
 import rasterio
-from scipy.spatial import cKDTree
 
 from .context.buildings import building_overlap
 from .context.drains import drains_at_core
+from .geometry import cell_size_m, crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import depression_cells, lonlat, pixel_centers, rollup
 from .hydro.depressions import (depth_and_provisional, label_depressions, lowest_points,
                                 touches_edge)
-from .resolution import cell_size_m, check_resolution, metres_to_cells
+from .resolution import check_resolution, metres_to_cells
 
 CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint", "edge",
                 "level_uncertain"]
@@ -64,29 +64,20 @@ def _package_version():
         return "unknown"
 
 
-def _check_crs(crs):
-    units = (crs.linear_units or "").lower() if crs is not None and crs.is_projected else ""
-    if units not in ("metre", "meter"):
-        raise ValueError(
-            f"The DEM needs a projected CRS in metres (for example a UTM zone), got {crs}. "
-            "Reproject it first with h3lowpoints.reproject_to_utm or gdalwarp -t_srs EPSG:xxxxx."
-        )
-
-
 def dep_columns(has_drains, has_buildings):
     """Columns of the depression table. Optional layers add columns only when they were used."""
     return (CORE_COLUMNS + (DRAIN_COLUMNS if has_drains else [])
             + (BUILDING_COLUMNS if has_buildings else []))
 
 
-def plan_analysis(crs, transform, res, min_depth):
-    """Validate the request against the DEM. Returns (cell_size, tier).
+def plan_analysis(crs, transform, height, res, min_depth):
+    """Validate the request against the DEM. Returns (cell_size_m, tier).
 
-    Emits warnings for requests the DEM cannot support; callers that analyze many windows call
-    this once and pass the result on.
+    Raises ValueError for a CRS or grid the analysis cannot use, and emits warnings for requests
+    the DEM cannot support. Callers that analyze many windows call this once for the whole DEM
+    and pass the result on.
     """
-    _check_crs(crs)
-    size = cell_size_m(transform)
+    size = cell_size_m(pixel_areas_m2(transform, crs, height))
     return size, check_resolution(size, res, min_depth)
 
 
@@ -105,18 +96,19 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         `level_uncertain` (see docs/definition.md).
     """
     has_drains = drains_xy is not None and len(drains_xy) > 0
-    size, tier = _plan or plan_analysis(crs, transform, res, min_depth)
+    size, tier = _plan or plan_analysis(crs, transform, arr.shape[0], res, min_depth)
+    geographic, _ = crs_info(crs)
+    row_areas = pixel_areas_m2(transform, crs, arr.shape[0])
     invalid = np.isnan(arr)
     if nodata is not None:
         invalid |= arr == nodata
-    cell_area = abs(transform.a * transform.e)
 
     depth, provisional = depth_and_provisional(arr, invalid, open_sides=open_sides)
-    labels, st = label_depressions(depth, cell_area, min_depth)
+    labels, st = label_depressions(depth, row_areas, min_depth)
     ids = np.asarray(st["id"]).astype(int)
     meta = {
         "package_version": _package_version(), "h3_version": h3.__version__, "dem": source,
-        "crs": str(crs), "shape": list(arr.shape), "cell_size_m": size,
+        "crs": str(crs), "shape": list(arr.shape), "cell_size_m": size, "geographic": geographic,
         "resolution_tier": tier,
         "params": {"res": res, "min_depth": min_depth, "drain_radius_m": drain_radius_m,
                    "drain_core_frac": drain_core_frac},
@@ -143,12 +135,13 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
         "edge": edge, "level_uncertain": limited})
     if has_drains:
-        deps["dist_to_drain_m"] = cKDTree(np.asarray(drains_xy)).query(np.c_[xs, ys])[0]
+        deps["dist_to_drain_m"] = nearest_distance_m(drains_xy, np.c_[xs, ys], crs)
         deps["drain_at_core"] = drains_at_core(
             labels, depth, ids, mx, np.asarray(drains_xy), transform, drain_core_frac,
             metres_to_cells(drain_radius_m, size))
     if buildings is not None:
-        deps["building_overlap"] = building_overlap(labels, ids, buildings, transform, arr.shape)
+        deps["building_overlap"] = building_overlap(
+            labels, ids, buildings, transform, arr.shape, min_area=0.0 if geographic else 20.0)
         deps["likely_building_artifact"] = deps["building_overlap"] >= 0.5
 
     keep = np.ones(len(ids), dtype=bool)

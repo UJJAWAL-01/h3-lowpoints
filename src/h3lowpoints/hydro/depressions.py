@@ -94,28 +94,34 @@ EIGHT = np.ones((3, 3), dtype=int)
 def label_depressions(depth, cell_area, min_depth=0.15):
     """Label 8-connected regions of positive depth and keep those at least `min_depth` deep.
 
-    Returns (labels, stats). Label values are not renumbered after filtering, so `stats["id"]`
-    lists the surviving label values.
+    `cell_area` is the ground area of one pixel in square metres: a number, or an array with one
+    value per row (pixels of geographic grids shrink towards the poles). Returns (labels, stats).
+    Label values are not renumbered after filtering, so `stats["id"]` lists the surviving labels.
     """
     labels, n = ndimage.label(depth > 0, structure=EIGHT)
     if n == 0:
         return labels, {"id": [], "max_depth_m": [], "area_m2": [], "volume_m3": []}
     # Summaries run over the labelled pixels only: scipy's labelled reductions sort every pixel
     # of the raster, which dominates the run time on large DEMs.
-    inside = labels > 0
-    lab, d = labels[inside], depth[inside]
+    rows, cols = np.nonzero(labels)
+    lab, d = labels[rows, cols], depth[rows, cols]
+    area = pixel_weights(cell_area, rows)
     idx = np.arange(1, n + 1)
     max_d = np.asarray(ndimage.maximum(d, lab, idx))
     keep = idx[max_d >= min_depth]
     out = np.where(np.isin(labels, keep), labels, 0)
-    counts = np.bincount(lab, minlength=n + 1)
-    sums = np.bincount(lab, weights=d, minlength=n + 1)
     return out, {
         "id": keep,
         "max_depth_m": max_d[keep - 1],
-        "area_m2": counts[keep] * cell_area,
-        "volume_m3": sums[keep] * cell_area,
+        "area_m2": np.bincount(lab, weights=area, minlength=n + 1)[keep],
+        "volume_m3": np.bincount(lab, weights=d * area, minlength=n + 1)[keep],
     }
+
+
+def pixel_weights(cell_area, rows):
+    """Ground area of each pixel given its row, for a scalar or per-row `cell_area`."""
+    a = np.asarray(cell_area, dtype="float64")
+    return np.full(len(rows), float(a)) if a.ndim == 0 else a[rows]
 
 
 def depth_from_file(path):

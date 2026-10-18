@@ -63,12 +63,17 @@ def test_reproject_geographic_dem_to_utm(tmp_path):
             "nodata": -9999.0}
     with rasterio.open(src, "w", **prof) as dst:
         dst.write(arr, 1)
-    with pytest.raises(ValueError, match="projected CRS"):
-        analyze(str(src))
+    geographic = analyze(str(src)).depressions       # analyzed in degrees, no resampling
     out = reproject_to_utm(src, tmp_path / "utm.tif")
     with rasterio.open(out) as r:
         assert r.crs.to_epsg() == 32614   # UTM zone 14N
-    assert len(analyze(str(out)).depressions) == 1
+    projected = analyze(str(out)).depressions
+    assert len(geographic) == len(projected) == 1
+    # Native: 15 x 15 pixels, each 1e-5 degrees wide (about 1.07 m2 at this latitude).
+    assert geographic["area_m2"].iloc[0] == pytest.approx(225 * 1.066, rel=0.02)
+    # Resampling blurs the pit's sharp rim into extra shallow pixels, so the projected copy is
+    # only roughly comparable. That blur is why geographic DEMs are analyzed natively.
+    assert geographic["area_m2"].iloc[0] == pytest.approx(projected["area_m2"].iloc[0], rel=0.25)
 
 
 def test_quickstart_example_runs(tmp_path):

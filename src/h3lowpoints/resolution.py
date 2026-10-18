@@ -14,11 +14,6 @@ MEDIUM_MAX_M = 12.0    # up to this: neighbourhood-scale basins only
 MIN_PIXELS_PER_H3_CELL = 4  # fewer DEM pixels than this per H3 cell makes cell statistics noise
 
 
-def cell_size_m(transform):
-    """Pixel size in map units (metres for a projected metric CRS); geometric mean of x and y."""
-    return float(math.sqrt(abs(transform.a * transform.e)))
-
-
 def resolution_tier(size_m):
     """'fine', 'medium' or 'coarse' for a DEM cell size in metres."""
     if size_m <= FINE_MAX_M:

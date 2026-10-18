@@ -7,7 +7,8 @@ def building_overlap(labels, ids, buildings, transform, shape, min_area=20.0):
     """Fraction of each depression's area that lies under building footprints.
 
     `buildings` is a GeoDataFrame (or an iterable of shapely geometries) in the DEM's CRS.
-    Footprints smaller than `min_area` (map units squared) are ignored.
+    Footprints smaller than `min_area` (map units squared) are ignored; use 0 for geographic
+    coordinates, where map units are degrees.
     """
     geoms = getattr(buildings, "geometry", buildings)
     shapes = [(g, 1) for g in geoms if g is not None and not g.is_empty and g.area >= min_area]
