@@ -217,13 +217,13 @@ def test_geographic_tiled_equals_whole(tmp_path):
     p = tmp_path / "g.tif"
     _write(p, arr, "EPSG:4326", from_origin(-97.8, 60.0, 1 / 1800, 1 / 3600))
     whole = analyze(str(p), res=9).depressions
-    tiled = analyze_tiled(str(p), tile=100, buffer=400, res=9).depressions
+    tiled = analyze_tiled(str(p), tile=100, res=9).depressions
     key = ["lat", "lon"]
     a = whole.round({"lat": 7, "lon": 7}).sort_values(key).reset_index(drop=True)
     b = tiled.round({"lat": 7, "lon": 7}).sort_values(key).reset_index(drop=True)
     assert len(a) > 5 and len(a) == len(b)
     for col in ("max_depth_m", "area_m2", "volume_m3"):
-        np.testing.assert_allclose(a[col], b[col], rtol=1e-7)
+        np.testing.assert_allclose(a[col], b[col], rtol=1e-9)
 
 
 def test_cells_conserve_area_and_volume_on_a_geographic_grid():

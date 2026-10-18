@@ -286,3 +286,20 @@ def test_live_dutch_polders_are_depressions_below_sea_level(tmp_path):
     inside = res.labels == int(big["id"])
     assert a[inside].min() < -3                                   # well below sea level
     assert (a + res.depth)[inside].max() == pytest.approx(0.0, abs=0.5)   # spills at sea level
+
+
+@pytest.mark.network
+@pytest.mark.parametrize("name, bbox, tile", [
+    ("norway_fjords", (6.0, 60.0, 7.2, 61.0), 400),            # sea and fjords: lots of nodata edges
+    ("alps", (10.3, 46.3, 10.9, 46.8), 300),                   # steep mountains
+    ("death_valley", (-117.2, 35.9, -116.7, 36.4), 250),       # closed desert basin
+])
+def test_live_tiled_equals_whole_on_real_terrain(tmp_path, name, bbox, tile):
+    from test_tiling import assert_equivalent
+
+    from h3lowpoints import analyze_tiled
+
+    path = fetch_dem(bbox, tmp_path / f"{name}.tif")
+    whole = analyze(str(path), res=8, min_depth=1.0)
+    assert len(whole.depressions) > 100                         # the comparison is not trivial
+    assert_equivalent(whole, analyze_tiled(str(path), tile=tile, res=8, min_depth=1.0))

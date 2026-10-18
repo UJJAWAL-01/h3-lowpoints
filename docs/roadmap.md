@@ -6,17 +6,27 @@ inputs. Nothing below is released yet; each phase is finished and tested before 
 
 ## Phase 1: the depression layer, globally
 
-- **A global DEM source.** Copernicus GLO-30 (30 m, open data, no login), with its water-body mask
-  treated as nodata so lakes and sea are not mistaken for depressions. The US 3DEP 1 m reader stays
-  as the high-resolution tier, and any national lidar DEM works through `analyze`.
-- **Native geographic coordinates.** Global DEMs are in latitude and longitude. Pixel areas
-  should be computed per latitude so they need no resampling to UTM.
-- **Exact tiled filling** (Barnes 2016, two passes over a graph of spill levels), so 1-degree tiles
-  join correctly without a buffer and `level_uncertain` disappears.
-- **Coverage per cell.** Every H3 cell reports how much of it the DEM covered, so a partly
+Done:
+
+- **A global DEM source.** `h3lowpoints fetch-dem` reads Copernicus GLO-30 (30 m, open data, no
+  login) from AWS. The US 3DEP 1 m reader stays as the high-resolution tier, and any national
+  lidar DEM works through `analyze`.
+- **Native geographic coordinates.** Latitude/longitude DEMs are analyzed as they are, with exact
+  WGS 84 pixel areas per row; no resampling to UTM.
+- **Exact tiled filling** (Barnes 2016): `analyze_tiled` equals `analyze` whatever the tile size,
+  so a DEM larger than memory gives the same answer.
+- **A mask.** `analyze(mask=...)` and `analyze_tiled(mask_path=...)` ignore cells such as open
+  water, which then act as outlets. Copernicus does not publish a water mask with the AWS tiles,
+  so supply one (for example from ESA WorldCover or JRC Global Surface Water).
+
+Still to do:
+
+- **Coverage per cell.** Every H3 cell should report how much of it the DEM covered, so a partly
   covered cell is never read as "less depressed" than a fully covered one.
-- Cost: about 1.7e11 land pixels. At roughly 1.5 million pixels per second per core that is on the
-  order of one to two CPU-days; it will be measured before it is promised.
+- **Continental scale.** Exact tiling holds one graph node per tile-border cell and per outlet
+  cell. A continent needs the same method applied to blocks, joined hierarchically.
+- Cost: about 1.7e11 land pixels at 30 m. The speed of one run is measured in the changelog;
+  a global figure will be measured, not guessed.
 
 Honest limit: GLO-30 is a surface model with vertical error of a few metres. It resolves large
 basins, not street-level ponding. Street-scale depressions need lidar-derived DEMs, which exist

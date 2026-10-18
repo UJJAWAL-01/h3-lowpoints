@@ -21,18 +21,30 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
-- Tiled runs flag depressions whose water level depends on a tile border (`level_uncertain`).
-  Previously a tile could silently split one large depression into several unflagged pieces.
+- **Exact tiled analysis.** `analyze_tiled` now equals `analyze` for any tile size (Barnes 2016: two
+  passes joined by a graph over the tile-border cells), including depressions that span many
+  tiles. The earlier buffer-based version could silently split one large depression into several
+  pieces; the `buffer` option and the `level_uncertain` flag are gone because they are no longer
+  needed. Measured on 38.9 Mpx of real Copernicus terrain: identical results, 30 s against 28 s,
+  0.3 GB against 1.4 GB of memory. Checked on the Dutch coast, Death Valley, the Alps and Norway.
+- **Geographic coordinates.** DEMs in latitude/longitude are analyzed natively with exact WGS 84
+  pixel areas, and projected DEMs in feet work too. Drain distances are geodesic.
+- **Copernicus GLO-30.** `h3lowpoints fetch-dem` and `sources.copernicus.fetch_dem` read the global
+  30 m DEM from AWS open data.
+- **Mask.** `analyze(mask=...)` and `analyze_tiled(mask_path=...)` ignore cells such as open water.
 - `Result.at_resolution` and `rollup`: exact roll-up to coarser H3 resolutions.
 - `Result.to_deck` and `viz.deck.cells_to_geojson`: 3D map and GeoJSON export.
 - Resolution tiers, warnings for DEMs too coarse for the requested analysis, `reproject_to_utm`
   and `--reproject`.
-- Tests: fill against an independent method, tiled against whole, vectorized against loop.
+- Tests: fill against an independent method, tiled against whole (with mutation checks),
+  geographic areas against an independent ellipsoid implementation, vectorized against loop.
 
 ### Fixed
 - Tiled runs could drop depressions with a flat floor, because the tie-break for the deepest
   cell depended on the window.
 - The `edge` flag did not fire for depressions cut off by the raster border.
+- Reprojecting a DEM to UTM blurred sharp depression rims and inflated areas; geographic DEMs
+  are now analyzed without resampling.
 
 ### Performance
 - Region summaries run over depression pixels only (about 25% faster on a 13-megapixel DEM);

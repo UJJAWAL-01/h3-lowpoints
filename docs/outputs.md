@@ -7,12 +7,11 @@ the same content in memory. Columns appear only when the data behind them was su
 
 | Column | Meaning |
 |---|---|
-| `id` | Label of the depression within this run |
+| `id` | Label of the depression: the raster label for `analyze`, 1 to n in scan order for `analyze_tiled` |
 | `max_depth_m` | Deepest point, metres |
 | `area_m2`, `volume_m3` | Area and volume of the filled region |
 | `lat`, `lon`, `h3_lowpoint` | Deepest point and the H3 cell containing it |
-| `edge` | Cut off by the data border; size unknown (see [definition.md](definition.md)) |
-| `level_uncertain` | Tiled runs only: water level depends on a tile border and could differ from a whole-raster run |
+| `edge` | Within one cell of the raster border; size unknown (see [definition.md](definition.md)) |
 | `dist_to_drain_m`, `drain_at_core` | With `drains_xy`: distance to the nearest drain, and whether a drain lies near the deep core |
 | `building_overlap`, `likely_building_artifact` | With `buildings`: share of the depression under footprints, and whether it is at least 50% |
 
@@ -25,5 +24,5 @@ pixels; area and volume are sums, so cells roll up exactly with `Result.at_resol
 
 Package and H3 versions, the DEM path and CRS, `cell_size_m`, `resolution_tier`, every
 parameter used, counts of drains, buildings and
-depressions, and for tiled runs the tile size and buffer. Keep it with the results: it is what
+depressions, and for tiled runs the tile size and the size of the border graph. Keep it with the results: it is what
 makes a run reproducible.

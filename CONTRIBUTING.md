@@ -31,12 +31,12 @@ CI runs both on Linux and Windows. The first call compiles the numba fill; later
 ## Good first contributions
 
 - A `sources/` adapter for another country or city (DEM, drains, buildings).
-- A `sources/` reader for Copernicus GLO-30 (see the roadmap), or for any other open DEM.
+- A `sources/` reader for another open DEM (national lidar programs, FABDEM, NASADEM), or a
+  water-mask source to pair with it.
 - Validation of the planned susceptibility index against local flood records, including negative results.
 - Test terrain from varied places: karst, glacial potholes, flat coast, steep hills.
-- Exact tiled filling (Barnes 2016, two passes over a graph of spill levels), so tiled runs
-  equal whole-raster runs without a buffer and `level_uncertain` disappears. Compare against
-  `analyze` on random terrain, as `tests/test_tiling.py` does.
+- Coverage per H3 cell (share of the cell the DEM covers), and a hierarchical version of the
+  exact tiling for continental rasters. Compare against `analyze`, as `tests/test_tiling.py` does.
 
 ## Reporting a problem
 

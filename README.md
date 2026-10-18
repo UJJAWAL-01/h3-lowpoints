@@ -29,8 +29,9 @@ res.cells.head()                  # one row per H3 cell
 res.save("outputs/my_area")       # depressions.csv, cells.csv, meta.json
 ```
 
-A DEM in geographic coordinates (for example Copernicus GLO-30) needs reprojecting first:
-`h3lowpoints.reproject_to_utm("dem_4326.tif", "dem_utm.tif")`.
+A DEM in latitude and longitude (for example Copernicus GLO-30) is analyzed as it is: pixel areas
+are computed exactly on the WGS 84 ellipsoid, so there is no need to resample it to UTM (which
+blurs sharp edges). `h3lowpoints.reproject_to_utm` exists if you want a projected copy anyway.
 
 ### See it in 3D and at any H3 resolution
 
@@ -43,6 +44,18 @@ res.to_deck().to_html("map.html") # extruded hexagons; height and colour follow 
 Roll-up is lossless for depth, area and volume, so zooming between resolutions never needs a
 new analysis. `h3lowpoints.viz.deck.cells_to_geojson(cells, "cells.geojson")` writes the cells
 for deck.gl, kepler.gl or QGIS without any extra dependency.
+
+## Global data
+
+```
+h3lowpoints fetch-dem --bbox -97.9 30.1 -97.6 30.4 --out austin.tif   # Copernicus GLO-30, 30 m
+h3lowpoints analyze austin.tif --res 9 --min-depth 1
+```
+
+`fetch-dem` reads the public Copernicus GLO-30 elevation data from AWS open data (no account).
+It is a surface model with a vertical error of a few metres: it shows large basins, such as the
+below-sea-level polders around Rotterdam, not street-level ponding. Use a lidar DEM for that.
+More in `h3lowpoints.sources.copernicus`.
 
 ## What counts as a depression
 
@@ -80,16 +93,14 @@ supply the data.
 ```python
 from h3lowpoints import analyze_tiled
 
-res = analyze_tiled("big_dem.tif", tile=4096, buffer=256)
+res = analyze_tiled("big_dem.tif", tile=4096)
 ```
 
-A tile sees its border as an outlet, so a lake that really spills beyond the buffer is seen at
-a lower level. Depressions whose water level depends on a tile border get `level_uncertain=True`.
-The flag is a conservative bound ("could differ"), not a measurement: on a 1 m lidar test DEM it
-marked most depressions at the default buffer although the result equalled the whole-raster run
-exactly. Raise `buffer` to shrink it; details and numbers are in
-[docs/definition.md](docs/definition.md). Exact tiling, which needs no buffer, is the next
-planned piece of work.
+The result is exactly what `analyze` would give, whatever the tile size: the tiles only decide
+how much memory you need. Water that crosses a tile border, and depressions that span several
+tiles, are handled exactly rather than approximately. On 39 million pixels of real terrain,
+1024-cell tiles took 30 s against 28 s for the whole raster and needed about a fifth of the memory
+(0.3 GB against 1.4 GB). How it works and how it is tested: [docs/definition.md](docs/definition.md).
 
 ## Command line
 
@@ -109,7 +120,8 @@ Drains: a point file (GeoPackage, GeoJSON, Shapefile) or a CSV with `x,y` (in th
   water or cause problems.
 - Lidar artifacts (notably under buildings) produce false depressions; pass `buildings=` to flag them.
 - Coarse global DEMs show large basins, not street-level ponding.
-- Tiled results can differ from whole-raster results for depressions flagged `level_uncertain`.
+- A depression is not a flood. Much of the Netherlands lies below sea level behind dikes and is
+  pumped dry: the library finds those polders as large depressions.
 
 ## Project
 

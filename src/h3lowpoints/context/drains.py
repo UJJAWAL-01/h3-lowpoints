@@ -26,3 +26,20 @@ def drains_at_core(labels, depth, ids, max_depth, drains_xy, transform, core_fra
     mask[rows, cols] = True
     near = ndimage.maximum_filter(mask, size=2 * radius_cells + 1, mode="constant")
     return np.isin(ids, np.unique(core[near & (core > 0)]))
+
+
+def near_drain_mask(rows, cols, shape, origin, radius_cells):
+    """Pixels of a window within `radius_cells` (square neighbourhood) of any drain.
+
+    `rows`, `cols` are drain pixels in the coordinates of the whole raster, `shape` is the
+    window's size and `origin` its (row, col) offset. Drains outside the window count when they
+    are within reach of it.
+    """
+    r0, c0 = origin
+    h, w = shape
+    mask = np.zeros((h + 2 * radius_cells, w + 2 * radius_cells), dtype=bool)
+    rr, cc = rows - r0 + radius_cells, cols - c0 + radius_cells
+    inside = (rr >= 0) & (cc >= 0) & (rr < mask.shape[0]) & (cc < mask.shape[1])
+    mask[rr[inside], cc[inside]] = True
+    near = ndimage.maximum_filter(mask, size=2 * radius_cells + 1, mode="constant")
+    return near[radius_cells:radius_cells + h, radius_cells:radius_cells + w]

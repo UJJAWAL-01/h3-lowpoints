@@ -32,34 +32,61 @@ Consequences you should know about:
 - **Small noise.** There is no minimum area. A single deep cell counts if it is at least
   `min_depth` deep.
 
-## Edges and tiles
+## Edges
 
-Two flags describe depressions the data cannot fully describe. They mean different things.
+A depression has `edge = True` when it lies within one cell of the raster border. The border is
+an outlet, so the true depression may extend beyond the data and its area and volume are lower
+bounds. Cells next to nodata are outlets too, but a depression touching nodata is not flagged:
+water really can leave there.
 
-**`edge`**: the depression lies within one cell of the data border (the raster border, or the
-border of a tile's window). The border is an outlet, so the true depression is cut off there.
-Treat their area and volume as lower bounds.
+## Tiles
 
-**`level_uncertain`**: only in tiled runs. A tile treats its border as an outlet, so a lake that
-really spills beyond the buffer is seen at a lower level, and one depression can come back as
-several pieces. A depression is flagged when its water level was set through a path to a tile
-border that is not a real edge of the data. This is a *could differ* flag, not a *does differ*
-flag: it marks everything that more data might change, so it is conservative. Whole-raster
-runs never set it.
+`analyze_tiled` gives the result of `analyze`, whatever the tile size. The tile size trades
+memory for speed and never changes a depth, an area or a flag. It does this exactly, not
+approximately, in two passes (Barnes, Callaghan and Wheeler 2016):
 
-How conservative? On a 1 m lidar test DEM (3368 x 3884 cells, tiles of 1500), against a
-whole-raster run:
+1. **Pass 1.** Each tile is flooded from its border cells (and from its real outlets), each at
+   its own elevation. Every cell learns which seed it was reached from, its *root*. Wherever two
+   neighbouring cells have different roots, the larger of their levels is the lowest level at
+   which water can cross between those two roots; only the lowest crossing per pair is kept.
+2. **Between passes.** Border cells of neighbouring tiles that touch (diagonals included) are
+   joined by single steps, and a minimax shortest path from the real outlets gives every border
+   cell its exact final level.
+3. **Pass 2.** Each tile is flooded again, now starting its border cells at those exact levels.
+   Depressions are labelled inside the tile, and pieces that meet across a tile border are
+   joined, so a depression crossing many tiles is still one depression with one lowest point.
 
-| buffer | flagged `level_uncertain` | depressions that actually differ |
+Why the crossings suffice: take the best path between two border cells inside a tile, and let
+M be its highest elevation. Every cell on it joined its root at a level no higher than M, so the
+sequence of roots along the path is a chain of crossings each no higher than M. Conversely any
+chain of crossings corresponds to a real path no higher than its largest crossing. So the
+bottleneck between roots equals the bottleneck between the border cells they came from.
+
+What this costs, measured on 38.9 million pixels of real Copernicus terrain around Austin
+(166,882 depressions, 8 cores idle, results identical in every case):
+
+| mode | time | extra memory at peak |
 |---|---|---|
-| 64 | 1238 of 1629 | 2 changed values, 4 extra fragments (all flagged) |
-| 256 | 1179 of 1625 | 0 |
+| `analyze` | 28 to 30 s | 1.4 to 1.5 GB |
+| `analyze_tiled`, 2048-cell tiles | 34 s | 0.50 GB |
+| `analyze_tiled`, 1024-cell tiles | 30 s | 0.31 GB |
+| `analyze_tiled`, 512-cell tiles | 29 s | 0.43 GB |
 
-So at the default buffer nearly everything is flagged although nothing changed. Treat the flag as
-a bound, and use the buffer to tighten it: with a buffer wider than every lake, a tiled run
-equals `analyze` exactly (`tests/test_tiling.py`), and unflagged depressions are never wrong
-(`test_narrow_buffer_never_returns_a_wrong_unflagged_depression`). An exact tiled algorithm that
-removes the need for a buffer is on the roadmap (see [roadmap.md](roadmap.md)).
+Each tile is read and flooded twice, yet the tiled run costs only a few percent more time here,
+because its working arrays are smaller and fit the cache better. Memory is one tile plus the
+graph, which has a node for every tile-border cell and every outlet cell (a coastline counts), a
+few tens of bytes each; very small tiles make that graph the larger part, as the 512-cell row
+shows. `Result.labels` and `Result.depth` are not returned, and `id` numbers the depressions 1 to
+n in raster-scan order instead of carrying raster label values.
+
+`tests/test_tiling.py` compares both modes depression by depression and cell by cell on random
+terrain, terraces full of ties, integer DEMs, a serpentine corridor that routes water through
+every tile, a lake with a distant sill, nodata and NaN on and across tile borders, drains,
+buildings, masks, geographic and feet-based grids, tiles of 1 cell, and 60 random configurations.
+Six deliberate breakages of the algorithm (dropping seam steps, ignoring diagonals, keeping the
+highest crossing, and so on) are each caught by that suite. The network-marked tests repeat the
+comparison on real terrain: the Austin block above, and also the Dutch coast, Death Valley, the
+Alps and Norway's fjords, all identical.
 
 ## H3 assignment
 

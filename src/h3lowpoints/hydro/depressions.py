@@ -7,23 +7,18 @@ from scipy import ndimage
 
 
 @njit(cache=True)
-def fill_depressions(dem, valid, drains, open_sides):
-    """Priority-flood fill. Returns the filled surface and a per-cell `provisional` flag.
+def fill_depressions(dem, valid, drains):
+    """Priority-flood fill: raise every cell to the lowest level water could stand at.
 
-    The raster border, cells next to invalid cells, and `drains` are outlets. `open_sides` marks
-    which of the four borders (top, bottom, left, right) are artificial window cuts rather than
-    real edges of the data. A cell is provisional when its water level was set by a path to an
-    artificial cut: with more data beyond the cut the level could be higher. At equal height a
-    real outlet wins over an artificial cut (the heap orders ties by the provisional flag), so only
-    genuinely ambiguous cells are marked.
+    The raster border, cells next to invalid cells, and `drains` are outlets. Water spreads to
+    all eight neighbours.
     """
     h, w = dem.shape
     filled = dem.copy()
     closed = np.zeros((h, w), np.uint8)
-    provisional = np.zeros((h, w), np.uint8)
     dr = np.array([-1, -1, -1, 0, 0, 1, 1, 1])
     dc = np.array([-1, 0, 1, -1, 1, -1, 0, 1])
-    heap = [(-1e30, 0, -1)]  # dummy entry so numba can infer the list type
+    heap = [(-1e30, -1)]  # dummy entry so numba can infer the list type
 
     for r in range(h):
         for c in range(w):
@@ -41,13 +36,10 @@ def fill_depressions(dem, valid, drains, open_sides):
                         seed = True
             if seed:
                 closed[r, c] = 1
-                if ((r == 0 and open_sides[0]) or (r == h - 1 and open_sides[1])
-                        or (c == 0 and open_sides[2]) or (c == w - 1 and open_sides[3])):
-                    provisional[r, c] = 1
-                heapq.heappush(heap, (dem[r, c], np.int64(provisional[r, c]), r * w + c))
+                heapq.heappush(heap, (dem[r, c], r * w + c))
 
     while len(heap) > 0:
-        z, _, idx = heapq.heappop(heap)
+        z, idx = heapq.heappop(heap)
         if idx < 0:
             continue
         r = idx // w
@@ -60,30 +52,23 @@ def fill_depressions(dem, valid, drains, open_sides):
             if closed[rr, cc] == 1:
                 continue
             closed[rr, cc] = 1
-            provisional[rr, cc] = provisional[r, c]
             zz = dem[rr, cc]
             if zz < z:
                 zz = z
             filled[rr, cc] = zz
-            heapq.heappush(heap, (zz, np.int64(provisional[rr, cc]), rr * w + cc))
-    return filled, provisional
-
-
-def depth_and_provisional(arr, nodata_mask=None, drains=None, open_sides=(False,) * 4):
-    """Depression depth raster plus a bool raster of cells whose depth is only a lower bound."""
-    arr = arr.astype(np.float64)
-    invalid = np.isnan(arr) if nodata_mask is None else (nodata_mask | np.isnan(arr))
-    work = np.where(invalid, 0.0, arr)
-    d = np.zeros(arr.shape, dtype=np.bool_) if drains is None else drains.astype(np.bool_)
-    filled, provisional = fill_depressions(work, ~invalid, d, np.asarray(open_sides, dtype=np.bool_))
-    depth = filled - work
-    depth[invalid] = 0.0
-    return depth, provisional.astype(bool)
+            heapq.heappush(heap, (zz, rr * w + cc))
+    return filled
 
 
 def depth_from_array(arr, nodata_mask=None, drains=None):
     """Depression depth raster. `drains` is an optional bool raster of cells that drain away."""
-    return depth_and_provisional(arr, nodata_mask, drains)[0]
+    arr = arr.astype(np.float64)
+    invalid = np.isnan(arr) if nodata_mask is None else (nodata_mask | np.isnan(arr))
+    work = np.where(invalid, 0.0, arr)
+    d = np.zeros(arr.shape, dtype=np.bool_) if drains is None else drains.astype(np.bool_)
+    depth = fill_depressions(work, ~invalid, d) - work
+    depth[invalid] = 0.0
+    return depth
 
 
 # The fill spreads through all 8 neighbours, so a depression is an 8-connected region of
