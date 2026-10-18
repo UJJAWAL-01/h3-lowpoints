@@ -40,7 +40,7 @@ def test_geojson_export(dem_path, tmp_path):
     ring = f["geometry"]["coordinates"][0]
     assert f["geometry"]["type"] == "Polygon" and ring[0] == ring[-1]
     assert set(f["properties"]) == {"max_depth_m", "depress_area_m2", "depress_volume_m3",
-                                     "covered_area_m2", "coverage"}
+                                     "n_lowpoints", "covered_area_m2", "coverage", "depressed_share"}
     assert json.loads((tmp_path / "cells.geojson").read_text())["type"] == "FeatureCollection"
 
 

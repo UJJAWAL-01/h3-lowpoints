@@ -21,6 +21,11 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **Finest resolution by default.** `res="auto"` (now the default, also `--res auto`) picks the finest
+  H3 resolution the DEM supports (14 for 1 m lidar, 10 for 30 m). Every depression carries
+  `h3_lowpoint_15`, its deepest point as a resolution-15 cell. Cells gain `n_lowpoints` and
+  `depressed_share`; `resolution_guide(dem)` explains each resolution for a DEM; the map opens
+  resolutions 0 to 3 on the share and can colour cells by the number of depressions.
 - **Exact tiled analysis.** `analyze_tiled` now equals `analyze` for any tile size (Barnes 2016: two
   passes joined by a graph over the tile-border cells), including depressions that span many
   tiles. The earlier buffer-based version could silently split one large depression into several

@@ -57,10 +57,11 @@ def _levels(cells, res, max_cells, n_levels, footprint):
 
 
 def _level_json(r, table):
-    columns = ["h", "depth", "area", "volume"]
+    columns = ["h", "depth", "area", "volume", "count"]
+    count = table["n_lowpoints"] if "n_lowpoints" in table else pd.Series(0, index=table.index)
     rows = np.column_stack([
         table["max_depth_m"].round(3), table["depress_area_m2"].round(1),
-        table["depress_volume_m3"].round(1)]).tolist()
+        table["depress_volume_m3"].round(1), count]).tolist()
     ids = table["h3"].tolist()
     if "covered_area_m2" in table:
         columns += ["covered", "covered_frac"]

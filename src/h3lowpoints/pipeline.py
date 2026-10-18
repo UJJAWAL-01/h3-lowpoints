@@ -14,9 +14,12 @@ from .coverage import Footprint
 from .geometry import cell_size_m, crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import depression_cells, lonlat, pixel_centers, rollup
 from .hydro.depressions import depth_from_array, label_depressions, lowest_points, touches_edge
-from .resolution import check_resolution, metres_to_cells
+from .resolution import FINEST_H3, check_resolution, guide_for_cell_size, metres_to_cells, resolve_resolution
 
-CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint", "edge"]
+CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint",
+                "h3_lowpoint_15", "edge"]
+CELL_TABLE = ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3", "n_lowpoints",
+              "covered_area_m2", "coverage", "depressed_share"]
 DRAIN_COLUMNS = ["dist_to_drain_m", "drain_at_core"]
 BUILDING_COLUMNS = ["building_overlap", "likely_building_artifact"]
 
@@ -48,6 +51,11 @@ class Result:
         out = rollup(self.cells, res)
         return add_coverage(out, self.footprint)
 
+    @property
+    def res(self):
+        """The H3 resolution of the cell table (resolved, when "auto" was asked for)."""
+        return self.meta["params"]["res"]
+
     def to_deck(self, value="max_depth_m", **kwargs):
         """3D pydeck map of the cells (needs the `viz` extra). See `viz.deck.cells_deck`."""
         from .viz.deck import cells_deck
@@ -71,12 +79,40 @@ class Result:
 
 
 def add_coverage(cells, footprint):
-    """Add `covered_area_m2` and `coverage` columns to a cell table, if a footprint is known."""
+    """Add `covered_area_m2`, `coverage` and `depressed_share` to a cell table, if a footprint is known.
+
+    `depressed_share` is the depressed area over the covered area, capped at 1 (the two come from
+    different counts, see docs/definition.md).
+    """
     if footprint is None or len(cells) == 0:
         return cells
     cov = footprint.coverage(cells["h3"])
-    return cells.assign(covered_area_m2=cov["covered_area_m2"].to_numpy(),
-                        coverage=cov["coverage"].to_numpy())
+    covered = cov["covered_area_m2"].to_numpy()
+    share = np.minimum(1.0, cells["depress_area_m2"].to_numpy() / np.where(covered > 0, covered, np.nan))
+    return cells.assign(covered_area_m2=covered, coverage=cov["coverage"].to_numpy(),
+                        depressed_share=share)
+
+
+def finish_cells(cells, lowpoints, footprint):
+    """The cell table in its final form: lowest-point counts, coverage, fixed column order.
+
+    `lowpoints` are the `h3_lowpoint` ids of the depressions (at the table's resolution).
+    """
+    counts = pd.Series(lowpoints).value_counts()
+    cells = cells.assign(n_lowpoints=cells["h3"].map(counts).fillna(0).astype("int64"))
+    cells = add_coverage(cells, footprint)
+    if len(cells) == 0:
+        return pd.DataFrame({c: pd.Series(dtype="float64" if c != "h3" else "object")
+                             for c in CELL_TABLE})
+    return cells[CELL_TABLE].reset_index(drop=True)
+
+
+def resolution_guide(dem_path):
+    """Which H3 resolutions a DEM file supports: the finest, the summary-only ones, and per level
+    the cell area and how many DEM pixels each cell holds. See `resolution.guide_for_cell_size`."""
+    with rasterio.open(dem_path) as src:
+        size = cell_size_m(pixel_areas_m2(src.transform, src.crs, src.height))
+    return guide_for_cell_size(size)
 
 
 def _package_version():
@@ -93,20 +129,23 @@ def dep_columns(has_drains, has_buildings):
 
 
 def plan_analysis(crs, transform, height, res, min_depth):
-    """Validate the request against the DEM. Returns (cell_size_m, tier).
+    """Validate the request against the DEM. Returns (cell_size_m, tier, res).
 
-    Raises ValueError for a CRS or grid the analysis cannot use, and emits warnings for requests
+    `res` may be "auto", which becomes the finest H3 resolution the DEM supports. Raises
+    ValueError for a CRS, grid or resolution the analysis cannot use, and warns about requests
     the DEM cannot support. Callers that analyze many windows call this once for the whole DEM
     and pass the result on.
     """
     size = cell_size_m(pixel_areas_m2(transform, crs, height))
-    return size, check_resolution(size, res, min_depth)
+    res = resolve_resolution(res, size)
+    return size, check_resolution(size, res, min_depth), res
 
 
 def base_meta(source, crs, shape, size, tier, geographic, res, min_depth, drain_radius_m,
-              drain_core_frac, drains_xy, buildings):
+              drain_core_frac, drains_xy, buildings, res_requested=None):
     """The run description stored in `Result.meta`, shared by whole-raster and tiled runs."""
     return {
+        "res_requested": res if res_requested is None else res_requested,
         "package_version": _package_version(), "h3_version": h3.__version__, "dem": source,
         "crs": str(crs), "shape": list(shape), "cell_size_m": size, "geographic": geographic,
         "resolution_tier": tier,
@@ -117,7 +156,7 @@ def base_meta(source, crs, shape, size, tier, geographic, res, min_depth, drain_
     }
 
 
-def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings=None, res=11,
+def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings=None, res="auto",
                   min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8, mask=None,
                   source="array", _plan=None):
     """Analyze an in-memory DEM.
@@ -127,9 +166,11 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         than `drain_core_frac` of its maximum).
     mask: optional boolean array, True where the DEM should be ignored (for example open water).
         Masked cells are treated like nodata: water can leave the DEM through them.
+    res: H3 resolution of the cell table, or "auto" (the default) for the finest the DEM supports.
     """
     has_drains = drains_xy is not None and len(drains_xy) > 0
-    size, tier = _plan or plan_analysis(crs, transform, arr.shape[0], res, min_depth)
+    requested = res
+    size, tier, res = _plan or plan_analysis(crs, transform, arr.shape[0], res, min_depth)
     geographic, _ = crs_info(crs)
     row_areas = pixel_areas_m2(transform, crs, arr.shape[0])
     invalid = np.isnan(arr)
@@ -142,13 +183,15 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     labels, st = label_depressions(depth, row_areas, min_depth)
     ids = np.asarray(st["id"]).astype(int)
     meta = base_meta(source, crs, arr.shape, size, tier, geographic, res, min_depth,
-                     drain_radius_m, drain_core_frac, drains_xy if has_drains else None, buildings)
+                     drain_radius_m, drain_core_frac, drains_xy if has_drains else None, buildings,
+                     res_requested=requested)
     columns = dep_columns(has_drains, buildings is not None)
     if len(ids) == 0:
         meta.update({"n_depressions": 0, "n_edge": 0})
         footprint = Footprint.from_array(invalid, transform, crs)
-        return Result(pd.DataFrame(columns=columns), depression_cells(
-            depth, labels, transform, crs, res), meta, labels, depth, transform, crs, footprint)
+        cells = finish_cells(depression_cells(depth, labels, transform, crs, res), [], footprint)
+        return Result(pd.DataFrame(columns=columns), cells, meta, labels, depth, transform, crs,
+                      footprint)
 
     mx, area, vol = (np.asarray(st[k]) for k in ("max_depth_m", "area_m2", "volume_m3"))
     edge = touches_edge(labels, ids)
@@ -159,6 +202,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     deps = pd.DataFrame({
         "id": ids, "max_depth_m": mx, "area_m2": area, "volume_m3": vol, "lat": lat, "lon": lon,
         "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
+        "h3_lowpoint_15": [h3.latlng_to_cell(la, lo, FINEST_H3) for la, lo in zip(lat, lon)],
         "edge": edge})
     if has_drains:
         deps["dist_to_drain_m"] = nearest_distance_m(drains_xy, np.c_[xs, ys], crs)
@@ -171,18 +215,20 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         deps["likely_building_artifact"] = deps["building_overlap"] >= 0.5
 
     footprint = Footprint.from_array(invalid, transform, crs)
-    cells = add_coverage(depression_cells(depth, labels, transform, crs, res), footprint)
+    cells = finish_cells(depression_cells(depth, labels, transform, crs, res), deps["h3_lowpoint"],
+                         footprint)
     meta.update({"n_depressions": len(deps), "n_edge": int(deps["edge"].sum())})
     return Result(deps[columns], cells, meta, labels, depth, transform, crs, footprint)
 
 
-def analyze(dem_path, *, drains_xy=None, buildings=None, res=11, min_depth=0.15,
+def analyze(dem_path, *, drains_xy=None, buildings=None, res="auto", min_depth=0.15,
             drain_radius_m=5.0, drain_core_frac=0.8, mask=None):
     """Find closed depressions in a DEM file and describe them on H3 cells.
 
     drains_xy: optional (n, 2) array of drain locations in the DEM's CRS.
     buildings: optional GeoDataFrame (or iterable of shapely polygons) in the DEM's CRS.
     mask: optional boolean array (same shape as the DEM), True where the DEM is to be ignored.
+    res: H3 resolution of the cell table, or "auto" (the default) for the finest the DEM supports.
     """
     with rasterio.open(dem_path) as src:
         arr, nodata, transform, crs = src.read(1), src.nodata, src.transform, src.crs

@@ -28,7 +28,8 @@ def build_parser():
     a.add_argument("--drains", help="inlet/grate points: GeoPackage, GeoJSON, Shapefile or CSV")
     a.add_argument("--buildings", help="building footprint polygons")
     a.add_argument("--out", default="h3lowpoints_out", help="output folder (default h3lowpoints_out)")
-    a.add_argument("--res", type=int, default=11, help="H3 resolution (default 11)")
+    a.add_argument("--res", default="auto",
+                   help="H3 resolution 0-15, or 'auto' (default) for the finest the DEM supports")
     a.add_argument("--min-depth", type=float, default=0.15, help="minimum depression depth in metres")
     a.add_argument("--tile", type=int, default=0,
                    help="process in tiles of this many cells (for DEMs larger than memory); "
@@ -83,7 +84,7 @@ def _analyze(args):
         result = analyze(dem, drains_xy=drains, res=args.res, min_depth=args.min_depth,
                          buildings=buildings)
     out = result.save(args.out)
-    print(f"{result.meta['n_depressions']} depressions written to {out}")
+    print(f"{result.meta['n_depressions']} depressions on H3 resolution {result.res} written to {out}")
     print(f"  {result.meta['n_edge']} cut off by the data border")
     if args.map:
         print(f"map written to {result.to_html(args.map)}")

@@ -126,6 +126,8 @@ const METRICS = {
               note: "Total volume of all depressions in the cell, log scale." },
   area:     { label: "Area depressed (m²)", col: "area", scale: "log", unit: " m²", dec: 0,
               note: "Total area of depressions in the cell, log scale." },
+  count:    { label: "Depressions in cell", col: "count", scale: "linear", unit: "", dec: 0,
+              note: "Number of depressions whose lowest point lies in the cell. At the finest resolutions most cells hold 0 or 1; coarser ones show where they cluster." },
   share:    { label: "Share of cell depressed", col: "share", scale: "linear", unit: "", dec: 3, pct: true,
               note: "Depressed area as a share of the part of the cell the DEM covers." },
   coverage: { label: "Share of cell covered by the DEM", col: "coverage", scale: "linear", unit: "", dec: 2, pct: true,
@@ -253,6 +255,7 @@ function tooltip(info) {
   } else {
     const o = info.object;
     html = `<b>H3 cell ${o.h}</b>deepest ${fmt(o.depth, 2)} m<br>${fmt(o.area)} m² &middot; ${fmt(o.volume)} m³` +
+           (o.count ? `<br>${fmt(o.count)} lowest point${o.count === 1 ? "" : "s"} here` : "") +
            (o.share !== undefined ? `<br>${(100 * o.share).toFixed(1)}% of covered area` : "") +
            (o.coverage !== undefined && o.coverage < 0.995 ? `<br>DEM covers ${(100 * o.coverage).toFixed(0)}% of this cell` : "");
   }
@@ -273,7 +276,11 @@ function init() {
 }
 D.levels.forEach((L, i) => { const o = document.createElement("option"); o.value = i;
   o.textContent = `Resolution ${L.res} – ${fmt(L.rows.length)} cells` + (i === 0 ? " (analysis)" : ""); $("res").appendChild(o); });
-$("res").onchange = (e) => { state.level = +e.target.value; setMetrics(); refresh(); };
+$("res").onchange = (e) => {
+  state.level = +e.target.value;
+  // a cell of 12,000 km2 or more can honestly report a share, not a single deepest point
+  if (D.levels[state.level].res <= 3 && state.metric === "depth") state.metric = "share";
+  setMetrics(); refresh(); };
 function setMetrics() {
   loadLevel();
   const sel = $("metric"); sel.innerHTML = "";

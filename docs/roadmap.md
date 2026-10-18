@@ -35,7 +35,7 @@ Honest limit: GLO-30 is a surface model with vertical error of a few metres. It 
 basins, not street-level ponding. Street-scale depressions need lidar-derived DEMs, which exist
 openly only for some countries.
 
-## Phase 2: H3 resolution policy
+## Phase 2: H3 resolution policy (in place: `res="auto"`, `h3_lowpoint_15`, summaries at res 0 to 3)
 
 H3 cell area: res 0 is 4.36 million km², res 3 is 12,393 km², res 5 is 253 km², res 7 is
 5.2 km², res 9 is 0.105 km², res 11 is 0.0021 km².

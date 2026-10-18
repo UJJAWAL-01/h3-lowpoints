@@ -53,7 +53,7 @@ def depression_cells(depth, labels, transform, crs, res=11):
 def rollup(cells, res):
     """Aggregate a cell table to a coarser H3 resolution.
 
-    Depth takes the maximum of the children; area and volume add up.
+    Depth takes the maximum of the children; area, volume and lowest-point counts add up.
     """
     if len(cells) == 0:
         return cells.copy()
@@ -64,4 +64,6 @@ def rollup(cells, res):
     spec = {"max_depth_m": ("max_depth_m", "max"),
             "depress_area_m2": ("depress_area_m2", "sum"),
             "depress_volume_m3": ("depress_volume_m3", "sum")}
+    if "n_lowpoints" in cells:
+        spec["n_lowpoints"] = ("n_lowpoints", "sum")
     return (cells.assign(h3=cells["h3"].map(parent)).groupby("h3", as_index=False).agg(**spec))

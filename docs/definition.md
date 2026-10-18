@@ -95,6 +95,23 @@ Each depression pixel belongs to the H3 cell containing the pixel's centre. A ce
 maximum. Because these are additive, `Result.at_resolution(r)` rolls cells up to any coarser
 resolution exactly. A depression that spans several cells contributes to each of them.
 
+## Resolution
+
+`res="auto"` (the default) chooses the finest H3 resolution whose cells hold at least four DEM
+pixels: 14 for 1 m lidar, 13 for 2 m, 11 for 10 m, 10 for 30 m. A finer resolution can be asked
+for, with a warning, but its cells would hold less than the DEM measured.
+
+Whatever the table's resolution, every depression also carries `h3_lowpoint_15`, the
+resolution-15 cell of its deepest pixel's centre. Its location is only as precise as the DEM's
+pixel: on a 30 m DEM it marks a 1 m cell inside a 30 m pixel. H3 cells do not nest exactly, so the
+parent of `h3_lowpoint_15` at the table's resolution can occasionally differ from `h3_lowpoint` near a
+cell edge; `h3_lowpoint` is the one that matches the cell table.
+
+Resolutions 0 to 3 (cells of 12,000 km² and more) hold thousands of unrelated features. Read them
+as summaries: `depressed_share` and `n_lowpoints`, not one deepest depth. The map opens those
+levels on the share. `resolution_guide(dem)` lists, for a DEM, each resolution's cell area, pixels
+per cell and recommended use.
+
 ## Coverage
 
 A cell at the edge of the DEM, or next to ignored cells (nodata, or a mask such as open water),

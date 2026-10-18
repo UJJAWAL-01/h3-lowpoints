@@ -24,7 +24,8 @@ from .h3agg.aggregate import CELL_COLUMNS, h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
-from .pipeline import Result, add_coverage, base_meta, dep_columns, plan_analysis
+from .pipeline import CELL_TABLE, Result, base_meta, dep_columns, finish_cells, plan_analysis
+from .resolution import FINEST_H3
 from .resolution import metres_to_cells
 
 _TIE = 1e-9  # depths this close to the maximum count as tied for the lowest point
@@ -141,7 +142,7 @@ def _tile_records(depth, box, width, areas, bmask, near, min_depth):
 
 
 def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, tile=4096,
-                  res=11, min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8,
+                  res="auto", min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8,
                   verbose=False):
     """Analyze a large DEM in tiles. The result equals `analyze` on the same DEM.
 
@@ -156,7 +157,8 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
     drains = np.asarray(drains_xy, dtype="float64").reshape(-1, 2) if has_drains else None
     with rasterio.open(dem_path) as src:
         height, width, crs, transform = src.height, src.width, src.crs, src.transform
-        size, tier = plan_analysis(crs, transform, height, res, min_depth)
+        requested = res
+        size, tier, res = plan_analysis(crs, transform, height, res, min_depth)
         geographic, _ = crs_info(crs)
         areas = pixel_areas_m2(transform, crs, height)
         mask_src = rasterio.open(mask_path) if mask_path else None
@@ -165,7 +167,7 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
                 raise ValueError(f"mask {mask_src.shape} and DEM {src.shape} differ in shape")
             return _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
                         tier, geographic, areas, drains, buildings, tile, res, min_depth,
-                        drain_radius_m, drain_core_frac, verbose)
+                        drain_radius_m, drain_core_frac, verbose, requested)
         finally:
             if mask_src is not None:
                 mask_src.close()
@@ -173,7 +175,7 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
 
 def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
          geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
-         drain_core_frac, verbose):
+         drain_core_frac, verbose, requested):
     boxes = list(_tile_boxes(height, width, tile))
     radius = metres_to_cells(drain_radius_m, size)
     drain_rc = drain_pixels(drains, transform, (height, width)) if drains is not None else None
@@ -247,14 +249,14 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
             print(f"pass 2, tile {k}/{len(boxes)}: {len(agg)} pieces", flush=True)
 
     meta = base_meta(str(dem_path), crs, (height, width), size, tier, geographic, res, min_depth,
-                     drain_radius_m, drain_core_frac, drains, buildings)
+                     drain_radius_m, drain_core_frac, drains, buildings, res_requested=requested)
     meta["tiling"] = {"tile": tile, "n_tiles": len(boxes), **graph}
     has_buildings = buildings is not None
     columns = dep_columns(drains is not None, has_buildings)
     footprint = Footprint((height, width), transform, crs, blocks, file_opener(dem_path, mask_path))
     if not records:
         meta.update({"n_depressions": 0, "n_edge": 0})
-        return Result(pd.DataFrame(columns=columns), pd.DataFrame(columns=CELL_COLUMNS), meta,
+        return Result(pd.DataFrame(columns=columns), pd.DataFrame(columns=CELL_TABLE), meta,
                       transform=transform, crs=crs, footprint=footprint)
 
     # ---- join the pieces of each depression and apply min_depth to the whole depression
@@ -290,6 +292,7 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         "area_m2": dep["area"].to_numpy(), "volume_m3": dep["volume"].to_numpy(),
         "lat": lat, "lon": lon,
         "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
+        "h3_lowpoint_15": [h3.latlng_to_cell(la, lo, FINEST_H3) for la, lo in zip(lat, lon)],
         "edge": ((dep["rmin"] <= 1) | (dep["cmin"] <= 1) | (dep["rmax"] + 1 >= height - 1)
                  | (dep["cmax"] + 1 >= width - 1)).to_numpy()})
     if drains is not None:
@@ -306,5 +309,5 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         depress_volume_m3=("depress_volume_m3", "sum")).reset_index()
     cells["h3"] = [h3.int_to_str(int(c)) for c in cells["cell"]]
     meta.update({"n_depressions": len(out), "n_edge": int(out["edge"].sum())})
-    return Result(out[columns], add_coverage(cells[CELL_COLUMNS], footprint), meta,
-                  transform=transform, crs=crs, footprint=footprint)
+    return Result(out[columns], finish_cells(cells[CELL_COLUMNS], out["h3_lowpoint"], footprint),
+                  meta, transform=transform, crs=crs, footprint=footprint)

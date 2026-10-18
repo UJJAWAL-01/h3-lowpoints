@@ -319,8 +319,8 @@ def test_buildings_and_drains_together_with_nothing_to_find(tmp_path):
     whole = check(p, [8], res=10, buildings=[box(500005, 3349990, 500015, 3349980)],
                   drains_xy=np.array([[500010.0, 3349985.0]]))
     assert list(whole.depressions.columns) == [
-        "id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint", "edge",
-        "dist_to_drain_m", "drain_at_core", "building_overlap", "likely_building_artifact"]
+        "id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint", "h3_lowpoint_15",
+        "edge", "dist_to_drain_m", "drain_at_core", "building_overlap", "likely_building_artifact"]
     assert list(analyze_tiled(p, tile=8, buildings=[box(1, 1, 2, 2)],
                               drains_xy=np.array([[1.0, 1.0]])).depressions.columns) == \
         list(whole.depressions.columns)

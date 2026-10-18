@@ -53,15 +53,22 @@ and mark each depression's lowest point. It is one HTML file with the data insid
 internet connection for the basemap and the deck.gl library, and no server or account. Settings
 can go in the link (`map.html#res=6&metric=volume&base=satellite`) so you can share a view.
 
-### Any H3 resolution
+### Any H3 resolution, down to the finest the data supports
 
 ```python
-res = analyze("dem.tif", res=12)  # analyze once at a fine resolution ...
-coarse = res.at_resolution(9)     # ... then roll up: depth = max, area and volume add up
+res = analyze("dem.tif")          # res="auto": the finest H3 resolution the DEM supports
+res.res                           # 14 for 1 m lidar, 10 for 30 m data
+res.depressions["h3_lowpoint_15"] # every lowest point also as a resolution-15 cell, the finest H3 has
+coarse = res.at_resolution(9)     # roll up: depth = max; area, volume and counts add up
+h3lowpoints.resolution_guide("dem.tif")   # what each resolution means for this DEM
 ```
 
-Roll-up is exact for depth, area and volume, so zooming between resolutions never needs a new
-analysis. `h3lowpoints.viz.deck.cells_to_geojson(cells, "cells.geojson")` writes the cells for
+The finest useful resolution is set by the DEM, not by H3: a cell needs at least four DEM pixels
+for its numbers to mean anything (`res="auto"` picks that). Finer still, each depression's exact
+lowest point is given as a resolution-15 cell, about 1 m across. Roll-up is exact for depth, area,
+volume and counts, so zooming between resolutions never needs a new analysis. Resolutions 0 to 3
+(cells of 12,000 km² and more) are for summaries: the share of the land that is depressed and how
+many depressions there are, not single deepest points. `h3lowpoints.viz.deck.cells_to_geojson(cells, "cells.geojson")` writes the cells for
 deck.gl, kepler.gl or QGIS without any extra dependency, and `res.to_deck()` makes a pydeck map
 inside a notebook.
 
