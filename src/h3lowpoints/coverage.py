@@ -31,6 +31,7 @@ from .h3agg.aggregate import h3_ids, lonlat
 
 BLOCK = 16
 SAMPLE_LIMIT = 40_000   # pixel positions measured per partial cell before sampling kicks in
+CHUNK = 100_000         # cells handled at a time, so memory stays flat for any number of cells
 
 
 def _block_shape(shape):
@@ -117,11 +118,27 @@ class Footprint:
         return best
 
     def _could_be_partial(self, box):
-        r0, r1, c0, c1 = box
+        return bool(self._partial_mask(np.asarray([box]))[0])
+
+    def _partial_mask(self, boxes):
+        """For each box: does it leave the raster, or touch a block holding an invalid pixel?
+
+        A summed-area table over the block bitmap answers each box with four lookups.
+        """
+        if getattr(self, "_prefix", None) is None:
+            prefix = np.zeros((self.blocks.shape[0] + 1, self.blocks.shape[1] + 1), dtype=np.int64)
+            prefix[1:, 1:] = self.blocks.cumsum(axis=0).cumsum(axis=1)
+            self._prefix = prefix
         h, w = self.shape
-        if r0 < 0 or c0 < 0 or r1 > h or c1 > w:
-            return True
-        return bool(self.blocks[r0 // BLOCK:(r1 - 1) // BLOCK + 1, c0 // BLOCK:(c1 - 1) // BLOCK + 1].any())
+        r0, r1, c0, c1 = (boxes[:, i] for i in range(4))
+        outside = (r0 < 0) | (c0 < 0) | (r1 > h) | (c1 > w)
+        br0 = np.clip(r0, 0, h - 1) // BLOCK
+        br1 = (np.clip(r1, 1, h) - 1) // BLOCK + 1
+        bc0 = np.clip(c0, 0, w - 1) // BLOCK
+        bc1 = (np.clip(c1, 1, w) - 1) // BLOCK + 1
+        p = self._prefix
+        invalid_blocks = p[br1, bc1] - p[br0, bc1] - p[br1, bc0] + p[br0, bc0]
+        return outside | (invalid_blocks > 0)
 
     def _exact(self, cell, box, read, res):
         """Coverage of one cell by assigning the pixel positions in its box to H3 cells."""
@@ -154,20 +171,27 @@ class Footprint:
         return pixel_areas_m2(shifted, self.crs, int(r_stop - r_start))
 
     # -- public -----------------------------------------------------------------------------
-    def coverage(self, cells):
-        """DataFrame with `coverage` and `covered_area_m2` for H3 cells (a Series or list of ids)."""
+    def coverage(self, cells, chunk=CHUNK):
+        """DataFrame with `coverage` and `covered_area_m2` for H3 cells (a Series or list of ids).
+
+        Cells are handled `chunk` at a time, so memory does not grow with the number of cells.
+        """
         cells = list(cells)
-        if not cells:
+        n = len(cells)
+        if not n:
             return pd.DataFrame({"coverage": [], "covered_area_m2": []})
         res = h3.get_resolution(cells[0])
-        boxes = self._boxes(cells)
-        coverage = np.ones(len(cells))
-        todo = [i for i, box in enumerate(boxes) if self._could_be_partial(box)]
-        if todo:
-            with self._opener() as read:
-                for i in todo:
-                    coverage[i] = self._exact(cells[i], boxes[i], read, res)
-        nominal = np.array([h3.cell_area(c, unit="m^2") for c in cells])
+        coverage, nominal = np.ones(n), np.empty(n)
+        with contextlib.ExitStack() as stack:
+            read = None
+            for start in range(0, n, chunk):
+                part = cells[start:start + chunk]
+                boxes = self._boxes(part)
+                for i in np.nonzero(self._partial_mask(boxes))[0]:
+                    if read is None:              # open the DEM only if some cell needs it
+                        read = stack.enter_context(self._opener())
+                    coverage[start + i] = self._exact(part[i], boxes[i], read, res)
+                nominal[start:start + len(part)] = [h3.cell_area(c, unit="m^2") for c in part]
         return pd.DataFrame({"coverage": coverage, "covered_area_m2": coverage * nominal})
 
 

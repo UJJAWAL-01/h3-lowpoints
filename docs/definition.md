@@ -79,6 +79,15 @@ few tens of bytes each; very small tiles make that graph the larger part, as the
 shows. `Result.labels` and `Result.depth` are not returned, and `id` numbers the depressions 1 to
 n in raster-scan order instead of carrying raster label values.
 
+For large regions the output itself becomes the larger part. Each tile's pixels are summed per
+depression piece and H3 cell as soon as the tile is done, the tile's own data is released, and
+the final tables are built with sorted arrays; coverage is measured a fixed number of cells at a
+time, and GDAL's read cache is capped at 256 MB (its default is 5% of the machine's memory, while
+each window is read only once). On the USGS 3DEP 30 m box around Texas (1.82 billion pixels,
+120 tiles of 4096, res 10, 1.75 million depressions, 7.9 million cells) the extra memory at peak
+fell from 11.0 GB to 3.6 GB with identical output, in 24 minutes on a laptop. The result tables
+take about 1.3 GB of that; the rest is assembly that lasts a few seconds.
+
 `tests/test_tiling.py` compares both modes depression by depression and cell by cell on random
 terrain, terraces full of ties, integer DEMs, a serpentine corridor that routes water through
 every tile, a lake with a distant sill, nodata and NaN on and across tile borders, drains,

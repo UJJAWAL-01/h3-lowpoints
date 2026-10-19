@@ -81,11 +81,16 @@ def remote(url):
     return url if not url.startswith(("http://", "https://")) else "/vsicurl/" + url
 
 
+# GDAL's block cache defaults to 5% of the machine's memory (over 1 GB on many laptops). The
+# readers and the tiled analysis read each window once, so a small cache costs nothing.
+GDAL_CACHE_MB = 256
+
+
 @contextlib.contextmanager
 def gdal_env():
     with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY="3",
                       GDAL_HTTP_RETRY_DELAY="1", CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
-                      GDAL_HTTP_USERAGENT=USER_AGENT):
+                      GDAL_HTTP_USERAGENT=USER_AGENT, GDAL_CACHEMAX=GDAL_CACHE_MB):
         yield
 
 

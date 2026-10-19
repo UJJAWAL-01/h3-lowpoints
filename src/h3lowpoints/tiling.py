@@ -20,7 +20,7 @@ from .context.buildings import rasterize_buildings
 from .context.drains import drain_pixels, near_drain_mask
 from .coverage import Footprint, file_opener, mark_invalid_blocks
 from .geometry import crs_info, nearest_distance_m, pixel_areas_m2
-from .h3agg.aggregate import CELL_COLUMNS, h3_ids, lonlat, pixel_centers
+from .h3agg.aggregate import h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
@@ -63,6 +63,46 @@ def _read_tile(src, mask_src, box):
     if mask_src is not None:
         invalid |= mask_src.read(1, window=window).astype(bool)
     return np.where(invalid, 0.0, arr.astype(np.float64)), ~invalid
+
+
+def _runs(*keys):
+    """Start index of each run of equal keys (the arrays must already be sorted by them)."""
+    change = np.zeros(len(keys[0]), dtype=bool)
+    change[0] = True
+    for k in keys:
+        change[1:] |= k[1:] != k[:-1]
+    return np.flatnonzero(change)
+
+
+def _cell_summary(rec, cell, depth, area, volume):
+    """Deepest depth and summed area and volume per (piece, H3 cell), as plain arrays."""
+    order = np.lexsort((cell, rec))
+    rec, cell = rec[order], cell[order]
+    start = _runs(rec, cell)
+    return (rec[start], cell[start], np.maximum.reduceat(depth[order], start),
+            np.add.reduceat(area[order], start), np.add.reduceat(volume[order], start))
+
+
+def _final_cells(parts, comp, kept):
+    """The cell table: pieces of depressions that were kept, aggregated per H3 cell."""
+    rec = np.concatenate([p[0] for p in parts])
+    keep = kept[comp[rec]]
+    del rec
+    cell = np.concatenate([p[1] for p in parts])[keep]
+    depth = np.concatenate([p[2] for p in parts])[keep]
+    area = np.concatenate([p[3] for p in parts])[keep]
+    volume = np.concatenate([p[4] for p in parts])[keep]
+    if len(cell) == 0:                         # every depression was below min_depth
+        return pd.DataFrame({"h3": pd.Series(dtype="object"), "max_depth_m": [], "depress_area_m2": [],
+                             "depress_volume_m3": []})
+    order = np.argsort(cell, kind="stable")
+    cell = cell[order]
+    start = _runs(cell)
+    return pd.DataFrame({
+        "h3": [h3.int_to_str(int(c)) for c in cell[start]],
+        "max_depth_m": np.maximum.reduceat(depth[order], start),
+        "depress_area_m2": np.add.reduceat(area[order], start),
+        "depress_volume_m3": np.add.reduceat(volume[order], start)})
 
 
 def _solve_borders(tiles, width, height):
@@ -209,7 +249,9 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
     # ---- pass 2: flood each tile from the exact border levels, then summarise its depressions
     records, rings, cell_parts = [], [], []
     n_rec = 0
-    for k, (box, t, lv) in enumerate(zip(boxes, tiles, levels), 1):
+    for k, box in enumerate(boxes, 1):
+        t, lv = tiles[k - 1], levels[k - 1]
+        tiles[k - 1] = levels[k - 1] = None          # release this tile's pass-1 data once used
         if len(t["z"]) == 0:        # nothing valid in this tile
             continue
         r0, r1, c0, c1 = box
@@ -240,10 +282,10 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         # pixels of kept pieces, as H3 cells
         lon, lat = lonlat(crs, *pixel_centers(transform, pixels["r"].to_numpy(),
                                               pixels["c"].to_numpy()))
-        pixels = pixels.assign(cell=h3_ids(lat, lon, res), rec=lab2rec[pixels["lab"].to_numpy()])
-        cell_parts.append(pixels.groupby(["rec", "cell"]).agg(
-            max_depth_m=("d", "max"), depress_area_m2=("a", "sum"),
-            depress_volume_m3=("v", "sum")).reset_index())
+        cell_parts.append(_cell_summary(
+            lab2rec[pixels["lab"].to_numpy()], h3_ids(lat, lon, res), pixels["d"].to_numpy(),
+            pixels["a"].to_numpy(), pixels["v"].to_numpy()))
+        del pixels
         records.append(agg)
         n_rec += len(agg)
         if verbose:
@@ -303,12 +345,10 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         out["building_overlap"] = (dep["bsum"] / dep["npx"]).to_numpy()
         out["likely_building_artifact"] = out["building_overlap"] >= 0.5
 
-    cells = pd.concat(cell_parts, ignore_index=True)
-    cells = cells[cells["rec"].map(recs["comp"]).isin(dep.index)]
-    cells = cells.groupby("cell").agg(
-        max_depth_m=("max_depth_m", "max"), depress_area_m2=("depress_area_m2", "sum"),
-        depress_volume_m3=("depress_volume_m3", "sum")).reset_index()
-    cells["h3"] = [h3.int_to_str(int(c)) for c in cells["cell"]]
+    kept = np.zeros(int(comp.max()) + 1, dtype=bool)
+    kept[dep.index.to_numpy()] = True
+    cells = _final_cells(cell_parts, comp, kept)
+    del cell_parts, records, recs
     meta.update({"n_depressions": len(out), "n_edge": int(out["edge"].sum())})
-    return Result(out[columns], finish_cells(cells[CELL_COLUMNS], out["h3_lowpoint"], footprint),
+    return Result(out[columns], finish_cells(cells, out["h3_lowpoint"], footprint),
                   meta, transform=transform, crs=crs, footprint=footprint)

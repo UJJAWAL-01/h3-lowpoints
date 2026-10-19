@@ -264,3 +264,57 @@ def test_analyze_array_exposes_the_footprint():
     arr[:, 50:] = np.nan
     res = analyze_array(arr, from_origin(500000, 3350000, 1, 1), UTM, res=12, min_depth=0.5)
     assert res.footprint.shape == (60, 60) and res.footprint.blocks.any()
+
+
+# ------------------------------------------------------------------ the fast paths
+# The summed-area table and chunking keep memory flat for millions of cells; they must not change
+# a single answer.
+
+def _direct_partial(fp, box):
+    r0, r1, c0, c1 = (int(v) for v in box)
+    h, w = fp.shape
+    if r0 < 0 or c0 < 0 or r1 > h or c1 > w:
+        return True
+    return bool(fp.blocks[r0 // BLOCK:(r1 - 1) // BLOCK + 1, c0 // BLOCK:(c1 - 1) // BLOCK + 1].any())
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_partial_mask_matches_a_direct_scan(seed):
+    rng = np.random.default_rng(seed)
+    shape = (int(rng.integers(20, 200)), int(rng.integers(20, 200)))
+    invalid = rng.random(shape) < 0.002
+    fp = Footprint.from_array(invalid, from_origin(500000, 3350000, 1, 1), UTM)
+    r0 = rng.integers(-10, shape[0], 2000)
+    c0 = rng.integers(-10, shape[1], 2000)
+    boxes = np.column_stack([r0, r0 + rng.integers(1, 60, 2000), c0, c0 + rng.integers(1, 60, 2000)])
+    got = fp._partial_mask(boxes)
+    want = [_direct_partial(fp, b) for b in boxes]
+    np.testing.assert_array_equal(got, want)
+    assert got.any() and not got.all()
+
+
+@pytest.mark.parametrize("chunk", [1, 7, 50])
+def test_chunked_coverage_equals_one_pass(chunk):
+    invalid = blobs((150, 170), 6, 3)
+    tr = from_origin(500000, 3350000, 1, 1)
+    cells = sorted(brute_coverage(invalid, tr, UTM, 12))
+    fp = Footprint.from_array(invalid, tr, UTM)
+    whole = fp.coverage(cells, chunk=len(cells))
+    parts = fp.coverage(cells, chunk=chunk)
+    assert (whole["coverage"] < 1).any()
+    np.testing.assert_array_equal(whole.to_numpy(), parts.to_numpy())
+
+
+def test_the_dem_is_not_opened_when_no_cell_is_partial():
+    opened = []
+    invalid = np.zeros((300, 300), dtype=bool)
+    tr = from_origin(500000, 3350000, 1, 1)
+    fp = Footprint.from_array(invalid, tr, UTM)
+    real = fp._opener
+    fp._opener = lambda: (opened.append(1), real())[1]
+    def cell_at(x, y):
+        lon, lat = lonlat(UTM, np.array([x]), np.array([y]))
+        return h3.latlng_to_cell(float(lat[0]), float(lon[0]), 12)
+    assert fp.coverage([cell_at(500150.0, 3349850.0)])["coverage"].iloc[0] == 1.0 and not opened
+    fp.coverage([cell_at(500000.5, 3349999.5)])               # a corner cell leaves the raster
+    assert opened

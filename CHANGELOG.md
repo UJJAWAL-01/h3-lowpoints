@@ -21,6 +21,10 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **A third of the memory for large regions.** `analyze_tiled` releases each tile once it is
+  summarised and assembles the cell table with sorted arrays instead of pandas groupby; coverage
+  is measured in chunks with a summed-area table; GDAL's read cache is capped at 256 MB. The 3DEP
+  Texas box (1.82 Gpx) now peaks at 3.6 GB extra instead of 11.0 GB, with identical output.
 - **Regions of any size and general verification.** `build_3dep_vrt` writes a virtual raster over
   3DEP tiles (each pixel from its own tile, optional resumable tile cache), and `h3lowpoints build`
   runs it through the exact tiled analysis. `verify.check_result` / `h3lowpoints verify` test

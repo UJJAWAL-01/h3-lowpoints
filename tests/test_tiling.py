@@ -3,6 +3,7 @@
 The whole-raster analysis is the oracle. Every test builds a DEM, runs both, and compares every
 depression and every H3 cell.
 """
+import h3
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,8 +13,10 @@ from scipy import ndimage
 from shapely.geometry import box
 
 from h3lowpoints import analyze, analyze_tiled
+from h3lowpoints import tiling as T
 from h3lowpoints.cli import main
 from h3lowpoints.hydro.depressions import fill_depressions
+from h3lowpoints.sources._common import GDAL_CACHE_MB
 from h3lowpoints.hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges,
                                      solve_levels, tile_seeds)
 
@@ -607,3 +610,72 @@ def test_a_checkerboard_drains_through_its_diagonals(tmp_path):
     p = write_dem(tmp_path / "d.tif", 10.0 + ((x + y) % 2) * 1.0)
     # low cells touch diagonally, so with 8-neighbour flow they all reach the border: no depressions
     assert len(check(p, [1, 7, 40], res=10, min_depth=0.5).depressions) == 0
+
+
+# ------------------------------------------------------------------ the array aggregation helpers
+# The tiled run sums cells with sorted plain arrays instead of pandas groupby, to keep memory down.
+# pandas groupby (what it used before) is the oracle.
+
+def _random_parts(seed, n_parts=4, n=500):
+    rng = np.random.default_rng(seed)
+    parts, frames = [], []
+    for _ in range(n_parts):
+        rec = rng.integers(0, 40, n)
+        cell = rng.integers(0, 25, n).astype(np.uint64) + np.uint64(0x8a2a1072b59ffff)
+        d, a, v = rng.random(n), rng.random(n) * 5, rng.random(n) * 3
+        parts.append(T._cell_summary(rec, cell, d, a, v))
+        frames.append(pd.DataFrame({"rec": rec, "cell": cell, "d": d, "a": a, "v": v}))
+    return parts, pd.concat(frames, ignore_index=True)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_cell_summary_matches_a_groupby(seed):
+    rng = np.random.default_rng(seed)
+    n = int(rng.integers(1, 300))
+    rec, cell = rng.integers(0, 6, n), rng.integers(0, 6, n).astype(np.uint64)
+    d, a, v = rng.random(n), rng.random(n), rng.random(n)
+    got = pd.DataFrame(dict(zip(["rec", "cell", "d", "a", "v"], T._cell_summary(rec, cell, d, a, v))))
+    want = (pd.DataFrame({"rec": rec, "cell": cell, "d": d, "a": a, "v": v})
+            .groupby(["rec", "cell"]).agg(d=("d", "max"), a=("a", "sum"), v=("v", "sum")).reset_index())
+    pd.testing.assert_frame_equal(got, want, check_dtype=False, rtol=1e-12)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_final_cells_matches_a_groupby(seed):
+    parts, raw = _random_parts(seed)
+    rng = np.random.default_rng(seed + 100)
+    comp = rng.integers(0, 12, 40)              # pieces joined into 12 depressions
+    kept = rng.random(12) < 0.6
+    got = T._final_cells(parts, comp, kept)
+    raw = raw[kept[comp[raw["rec"].to_numpy()]]]
+    want = raw.groupby("cell").agg(max_depth_m=("d", "max"), depress_area_m2=("a", "sum"),
+                                   depress_volume_m3=("v", "sum")).reset_index()
+    want.insert(0, "h3", [h3.int_to_str(int(c)) for c in want.pop("cell")])
+    pd.testing.assert_frame_equal(got, want, check_dtype=False, rtol=1e-12)
+
+
+def test_final_cells_when_nothing_is_kept():
+    parts, _ = _random_parts(0)
+    got = T._final_cells(parts, np.zeros(40, dtype=np.int64), np.zeros(1, dtype=bool))
+    assert len(got) == 0
+    assert list(got.columns) == ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3"]
+
+
+def test_runs_marks_every_change_of_any_key():
+    a, b = np.array([0, 0, 0, 1, 1, 2]), np.array([5, 5, 6, 6, 6, 6])
+    np.testing.assert_array_equal(T._runs(a), [0, 3, 5])
+    np.testing.assert_array_equal(T._runs(a, b), [0, 2, 3, 5])
+
+
+def test_tiled_reads_with_a_capped_gdal_cache(tmp_path, monkeypatch):
+    seen = []
+    real = T._read_tile
+
+    def spy(*a, **k):
+        seen.append(rasterio.env.getenv().get("GDAL_CACHEMAX"))
+        return real(*a, **k)
+    monkeypatch.setattr(T, "_read_tile", spy)
+    rng = np.random.default_rng(3)
+    p = write_dem(tmp_path / "d.tif", ndimage.gaussian_filter(rng.random((60, 70)) * 30, 2))
+    analyze_tiled(p, tile=25, res=12)
+    assert seen and set(seen) == {GDAL_CACHE_MB}
