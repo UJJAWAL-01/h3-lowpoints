@@ -13,7 +13,8 @@ listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 | [`fetch-landcover`](#fetch-landcover) | Download land cover for a box. |
 | [`rainfall`](#rainfall) | Design rainfall for a point in the US. |
 
-**Exit codes.** 0 on success. 1 when `verify` or `build` found problems. Any input error
+**Exit codes.** 0 on success. 1 when `verify` or `build` found problems. 3 when `build` stopped at
+its `--hours` limit (run it again to continue). Any input error
 (a bad box, a missing file, a CRS that cannot be used, a missing optional package) prints
 `error: <explanation>` and exits with code 1. `h3lowpoints --version` prints the version.
 
@@ -74,11 +75,14 @@ writes the tables as they are produced, then verifies the result. See
 | `--tile N` | `4096` | Tile size in pixels (memory and speed, never the result). |
 | `--format csv\|parquet` | `csv` | Table format. Parquet is recommended for large regions. |
 | `--cache-dir DIR` | | Download each 3DEP tile here once (about 40 MB per 1° tile at 30 m) instead of reading it over the internet twice. Faster (about 1.65× in a measured test) but needs disk for every tile; without it nothing is stored. An interrupted run keeps the tiles already downloaded. See [Large regions](large-regions.md#streaming-or-caching-the-tiles). |
+| `--hours H` | | Stop after about H hours, at the end of a tile, and exit with code 3. Every tile is saved as it finishes, so running the same command again continues where it stopped. Use it to split a long run into parts; see [Large regions](large-regions.md#running-in-parts). |
 | `--spot-check N` | `0` | Also cut N random windows and require the whole and tiled analyses to agree exactly. |
 | `--map FILE.html` | | Also write the interactive map (for small regions; a state has millions of cells). |
 
 The run prints one line per tile per pass, then a summary and the verification outcome. Exit
-code 1 means the verification found a problem (listed in `verify.json`).
+code 1 means the verification found a problem (listed in `verify.json`). Every tile is saved as
+it finishes: if the run is interrupted (a crash, a shutdown, a lost connection, Ctrl+C), the same
+command continues where it stopped, redoing at most the tile that was in progress.
 
 ```
 h3lowpoints build --bbox -98 30 -96 32 --out central_texas --min-depth 0.5 \

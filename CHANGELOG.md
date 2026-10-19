@@ -21,6 +21,12 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **Long runs in parts, safe against interruption.** A run written to disk saves every tile's
+  result as soon as it is computed (`out_dir/_work`), so after a crash, shutdown or lost
+  connection the same call continues where it stopped, redoing at most one tile, with exactly the
+  result of an uninterrupted run. `hours=` / `build --hours H` stop cleanly after H hours (exit
+  code 3) to split a run into parts. A folder refuses to continue with other settings. Remote reads
+  retry ten times with growing delays (at least 17 minutes of lost connection).
 - **Results written to disk as they are produced, in CSV or Parquet.** `analyze_tiled(out_dir=...)`
   keeps its per-cell sums in partition files on disk (one per coarse H3 parent) and writes the
   depression and cell tables piece by piece, so the size of the output no longer limits the size

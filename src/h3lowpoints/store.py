@@ -12,6 +12,7 @@ guesses types turns ids such as `8e4516503458447` (resolution 14) into the numbe
 either in memory or in files on disk.
 """
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -206,7 +207,8 @@ class CellParts:
         self._memory = {}
         self.n_records = 0
         if self.dir is not None:
-            self.dir.mkdir(parents=True, exist_ok=True)
+            shutil.rmtree(self.dir, ignore_errors=True)   # leftovers of an interrupted run would count twice
+            self.dir.mkdir(parents=True)
 
     def add(self, rec, cell, depth, area, volume):
         if len(rec) == 0:
@@ -241,3 +243,60 @@ class CellParts:
         self._memory.clear()
         if self.dir is not None and self.dir.exists():
             shutil.rmtree(self.dir, ignore_errors=True)
+
+
+class Checkpoints:
+    """Per-tile results of a tiled run saved on disk, so an interrupted run continues where it stopped.
+
+    Each result is one .npz file of named arrays, written under a temporary name and renamed when
+    complete, so a crash never leaves a half-written file under a real name. `manifest.json`
+    records the run's settings; reopening the folder with different settings is refused, so pieces
+    of two different runs can never be mixed.
+    """
+
+    def __init__(self, folder, settings):
+        self.dir = Path(folder)
+        settings = json.loads(json.dumps(settings))          # the form it takes once saved
+        manifest = self.dir / "manifest.json"
+        if manifest.exists():
+            saved = json.loads(manifest.read_text())
+            if saved != settings:
+                changed = sorted(k for k in set(saved) | set(settings) if saved.get(k) != settings.get(k))
+                raise ValueError(
+                    f"{self.dir} holds a run started with different settings ({', '.join(changed)}). "
+                    "Use the original settings to continue it, or delete that folder to start again.")
+        else:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            tmp = self.dir / "manifest.json.tmp"
+            tmp.write_text(json.dumps(settings, indent=2))
+            os.replace(tmp, manifest)
+
+    def _path(self, stage, k):
+        return self.dir / f"{stage}_{k:06d}.npz"
+
+    def has(self, stage, k):
+        return self._path(stage, k).exists()
+
+    def count(self, stage):
+        return sum(1 for _ in self.dir.glob(f"{stage}_*.npz"))
+
+    def save(self, stage, k, arrays):
+        tmp = self.dir / f"tmp_{stage}_{k:06d}.npz"
+        np.savez(tmp, **arrays)
+        os.replace(tmp, self._path(stage, k))
+
+    def load(self, stage, k, keys=None):
+        with np.load(self._path(stage, k), allow_pickle=False) as f:
+            return {n: f[n] for n in (f.files if keys is None else keys)}
+
+    def save_json(self, name, data):
+        tmp = self.dir / f"{name}.json.tmp"
+        tmp.write_text(json.dumps(data))
+        os.replace(tmp, self.dir / f"{name}.json")
+
+    def load_json(self, name):
+        path = self.dir / f"{name}.json"
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def remove(self):
+        shutil.rmtree(self.dir, ignore_errors=True)

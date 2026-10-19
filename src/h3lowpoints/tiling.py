@@ -9,6 +9,7 @@ does not limit the size of the region either. The result equals `analyze` on the
 last digit of every depth and to rounding in area and volume sums; `tests/test_tiling.py` checks
 that on random terrain, nodata, flats, mazes and geographic grids.
 """
+import time
 from pathlib import Path
 
 import h3
@@ -22,7 +23,7 @@ from scipy.sparse.csgraph import connected_components
 
 from .context.buildings import rasterize_buildings
 from .context.drains import drain_pixels, near_drain_mask
-from .coverage import Footprint, file_opener, mark_invalid_blocks
+from .coverage import Footprint, file_opener, invalid_block_flags
 from .geometry import crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
@@ -32,7 +33,8 @@ from .pipeline import (CELL_TABLE, Result, add_coverage, base_meta, dep_columns,
                        empty_depressions, plan_analysis)
 from .resolution import FINEST_H3, metres_to_cells
 from .sources._common import gdal_env
-from .store import CHUNK_ROWS, CellParts, TableWriter, check_format, remove_other_formats, write_meta
+from .store import (CHUNK_ROWS, CellParts, Checkpoints, TableWriter, check_format, remove_other_formats,
+                    write_meta)
 
 _TIE = 1e-9  # depths this close to the maximum count as tied for the lowest point
 
@@ -202,7 +204,7 @@ def _tile_records(depth, box, width, areas, bmask, near, min_depth):
 
 def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, tile=4096,
                   res="auto", min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8,
-                  verbose=False, out_dir=None, format="csv"):
+                  verbose=False, out_dir=None, format="csv", hours=None):
     """Analyze a large DEM in tiles. The result equals `analyze` on the same DEM.
 
     tile: tile edge in cells. It only trades memory for speed; it never changes the result.
@@ -211,6 +213,11 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
         instead of holding the tables in memory. The returned `Result` then has
         `depressions = cells = None` and `path = out_dir`; `Result.load()` reads them back.
     format: "csv" (default) or "parquet" (needs the `parquet` extra), used with `out_dir`.
+        With `out_dir`, every tile's result is also saved as it is computed (in `out_dir/_work`),
+        so a run that is interrupted continues where it stopped when called again with the same
+        arguments; the checkpoints are removed once the tables are written.
+    hours: with `out_dir`, stop after about this many hours, at the end of a tile, raising
+        `Paused`; calling again with the same arguments continues. Splits a long run into parts.
     Other arguments are as in `analyze`. `Result.labels` and `Result.depth` are not returned,
     and `id` numbers the depressions 1..n in raster-scan order of their first cell.
     """
@@ -218,6 +225,8 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
         raise ValueError("tile must be positive")
     if out_dir is not None:
         check_format(format)
+    if hours is not None and (out_dir is None or not hours > 0):
+        raise ValueError("hours needs out_dir (the checkpoints live there) and must be positive")
     has_drains = drains_xy is not None and len(drains_xy) > 0
     drains = np.asarray(drains_xy, dtype="float64").reshape(-1, 2) if has_drains else None
     with gdal_env(), rasterio.open(dem_path) as src:
@@ -232,103 +241,59 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
                 raise ValueError(f"mask {mask_src.shape} and DEM {src.shape} differ in shape")
             return _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
                         tier, geographic, areas, drains, buildings, tile, res, min_depth,
-                        drain_radius_m, drain_core_frac, verbose, requested, out_dir, format)
+                        drain_radius_m, drain_core_frac, verbose, requested, out_dir, format, hours)
         finally:
             if mask_src is not None:
                 mask_src.close()
 
 
+class Paused(Exception):
+    """A run written to disk stopped at its time limit (`hours`); run it again to continue.
+
+    `done` and `total` count tile steps: every tile is processed twice, once per pass.
+    """
+
+    def __init__(self, message, done, total):
+        super().__init__(message)
+        self.done, self.total = done, total
+
+
+def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radius_m,
+              drain_core_frac, drains, buildings, mask_path):
+    """What a resumed run must share with the run it continues."""
+    import hashlib
+
+    from .pipeline import _package_version
+
+    return {
+        "dem": str(dem_path), "shape": list(shape), "transform": list(transform)[:6],
+        "crs": crs.to_wkt(), "tile": tile, "res": res, "min_depth": min_depth,
+        "drain_radius_m": drain_radius_m, "drain_core_frac": drain_core_frac,
+        "drains": None if drains is None else hashlib.sha256(drains.tobytes()).hexdigest(),
+        "buildings": None if buildings is None else len(buildings),
+        "mask": None if mask_path is None else str(mask_path),
+        "package_version": _package_version()}
+
+
 def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
          geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
-         drain_core_frac, verbose, requested, out_dir, fmt):
+         drain_core_frac, verbose, requested, out_dir, fmt, hours):
+    work = None
     if out_dir is not None:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
-    parts = CellParts(res, None if out_dir is None else out_dir / "_spill")
-    try:
-        return _run_tiles(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
-                          tier, geographic, areas, drains, buildings, tile, res, min_depth,
-                          drain_radius_m, drain_core_frac, verbose, requested, out_dir, fmt, parts)
-    finally:
-        parts.close()
-
-
-def _run_tiles(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
-               geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
-               drain_core_frac, verbose, requested, out_dir, fmt, parts):
+        work = Checkpoints(out_dir / "_work", _settings(
+            dem_path, (height, width), transform, crs, tile, res, min_depth, drain_radius_m,
+            drain_core_frac, drains, buildings, mask_path))
+    ctx = {"src": src, "mask_src": mask_src, "height": height, "width": width, "crs": crs,
+           "transform": transform, "areas": areas, "buildings": buildings, "geographic": geographic,
+           "res": res, "min_depth": min_depth, "radius": metres_to_cells(drain_radius_m, size),
+           "drain_rc": drain_pixels(drains, transform, (height, width)) if drains is not None else None,
+           "deadline": None if hours is None else time.monotonic() + hours * 3600,
+           "verbose": verbose}
     boxes = list(_tile_boxes(height, width, tile))
-    radius = metres_to_cells(drain_radius_m, size)
-    drain_rc = drain_pixels(drains, transform, (height, width)) if drains is not None else None
-
-    # ---- pass 1: flood every tile from its border and keep only the crossings
-    tiles = []
     blocks = np.zeros((-(-height // 16), -(-width // 16)), dtype=bool)   # blocks holding invalid pixels
-    for k, box in enumerate(boxes, 1):
-        r0, r1, c0, c1 = box
-        work, valid = _read_tile(src, mask_src, box)
-        mark_invalid_blocks(blocks, ~valid, (r0, c0))
-        rows, cols, pinned, border = tile_seeds(valid, (r0 == 0, r1 == height, c0 == 0, c1 == width))
-        z = work[rows, cols]
-        level, root = flood_from_seeds(work, valid, rows, cols, z)
-        ea, eb, ew = region_edges(level, root)
-        edge_mask = np.zeros(valid.shape, dtype=bool)
-        edge_mask[0, :] = edge_mask[-1, :] = edge_mask[:, 0] = edge_mask[:, -1] = True
-        bad_r, bad_c = np.nonzero(edge_mask & ~valid)
-        tiles.append({
-            "rows": rows, "cols": cols, "z": z, "pinned": pinned, "border": border,
-            "keys": (rows + r0).astype(np.int64) * width + (cols + c0),
-            "ea": ea, "eb": eb, "ew": ew,
-            "invalid_border_keys": (bad_r + r0).astype(np.int64) * width + (bad_c + c0)})
-        if verbose:
-            print(f"pass 1, tile {k}/{len(boxes)}: {len(z)} seeds, {len(ea)} crossings", flush=True)
-
-    # ---- the exact level of every border cell
-    levels, graph = _solve_borders(tiles, width, height)
-
-    # ---- pass 2: flood each tile from the exact border levels, then summarise its depressions
-    records, rings = [], []
-    n_rec = 0
-    for k, box in enumerate(boxes, 1):
-        t, lv = tiles[k - 1], levels[k - 1]
-        tiles[k - 1] = levels[k - 1] = None          # release this tile's pass-1 data once used
-        if len(t["z"]) == 0:        # nothing valid in this tile
-            continue
-        r0, r1, c0, c1 = box
-        h, w = r1 - r0, c1 - c0
-        work, valid = _read_tile(src, mask_src, box)
-        filled, _ = flood_from_seeds(work, valid, t["rows"], t["cols"], lv)
-        depth = np.where(valid, filled - work, 0.0)
-        window_transform = src.window_transform(Window(c0, r0, w, h))
-        bmask = None
-        if buildings is not None:
-            bmask = rasterize_buildings(
-                _buildings_in(buildings, _bounds(window_transform, (h, w))), window_transform,
-                (h, w), min_area=0.0 if geographic else 20.0)
-        near = (near_drain_mask(drain_rc[0], drain_rc[1], (h, w), (r0, c0), radius)
-                if drain_rc is not None else None)
-        out = _tile_records(depth, box, width, areas[r0:r1], bmask, near, min_depth)
-        if out is None:
-            continue
-        agg, pixels, labels = out
-        agg = agg.assign(rec=np.arange(n_rec, n_rec + len(agg)))
-        lab2rec = np.full(int(labels.max()) + 1, -1, dtype=np.int64)
-        lab2rec[agg["lab"].to_numpy()] = agg["rec"].to_numpy()
-        # border pixels, to join pieces of one depression across tile borders
-        ring = np.zeros((h, w), dtype=bool)
-        ring[0, :] = ring[-1, :] = ring[:, 0] = ring[:, -1] = True
-        pr, pc = np.nonzero(ring & (labels > 0))
-        rings.append(((pr + r0).astype(np.int64) * width + (pc + c0), lab2rec[labels[pr, pc]]))
-        # pixels of kept pieces, as H3 cells
-        lon, lat = lonlat(crs, *pixel_centers(transform, pixels["r"].to_numpy(),
-                                              pixels["c"].to_numpy()))
-        parts.add(*_cell_summary(
-            lab2rec[pixels["lab"].to_numpy()], h3_ids(lat, lon, res), pixels["d"].to_numpy(),
-            pixels["a"].to_numpy(), pixels["v"].to_numpy()))
-        del pixels
-        records.append(agg)
-        n_rec += len(agg)
-        if verbose:
-            print(f"pass 2, tile {k}/{len(boxes)}: {len(agg)} pieces", flush=True)
+    pieces, graph = _two_passes(boxes, blocks, ctx, work)
 
     meta = base_meta(str(dem_path), crs, (height, width), size, tier, geographic, res, min_depth,
                      drain_radius_m, drain_core_frac, drains, buildings, res_requested=requested)
@@ -336,24 +301,194 @@ def _run_tiles(src, mask_src, dem_path, mask_path, height, width, crs, transform
     has_buildings = buildings is not None
     columns = dep_columns(drains is not None, has_buildings)
     footprint = Footprint((height, width), transform, crs, blocks, file_opener(dem_path, mask_path))
-    if not records:
-        out, lowpoints = None, np.zeros(0, dtype=np.uint64)
-        comp, kept = np.zeros(0, dtype=np.int64), np.zeros(0, dtype=bool)
-    else:
-        out, lowpoints, comp, kept = _join_pieces(records, rings, width, height, transform, crs,
-                                                  res, min_depth, drains, has_buildings,
-                                                  drain_core_frac)
+    parts = CellParts(res, None if out_dir is None else out_dir / "_spill")
+    try:
+        records, rings = [], []
+        for piece in pieces:                     # tile by tile, in order: identical ids every time
+            _add_piece(piece, records, rings, parts)
+        if not records:
+            out, lowpoints = None, np.zeros(0, dtype=np.uint64)
+            comp, kept = np.zeros(0, dtype=np.int64), np.zeros(0, dtype=bool)
+        else:
+            out, lowpoints, comp, kept = _join_pieces(records, rings, width, height, transform, crs,
+                                                      res, min_depth, drains, has_buildings,
+                                                      drain_core_frac)
         del records, rings
-    meta.update({"n_depressions": 0 if out is None else len(out),
-                 "n_edge": 0 if out is None else int(out["edge"].sum())})
-    cells = _cell_chunks(parts, comp, kept, lowpoints, footprint)
-    if out_dir is not None:
-        return _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs,
-                      footprint)
-    deps = empty_depressions(columns) if out is None else _with_ids(out, lowpoints)[columns]
-    chunks = list(cells)
-    table = pd.concat(chunks, ignore_index=True) if chunks else empty_cells()
-    return Result(deps, table, meta, transform=transform, crs=crs, footprint=footprint)
+        meta.update({"n_depressions": 0 if out is None else len(out),
+                     "n_edge": 0 if out is None else int(out["edge"].sum())})
+        cells = _cell_chunks(parts, comp, kept, lowpoints, footprint)
+        if out_dir is not None:
+            result = _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs,
+                            footprint)
+            work.remove()                        # finished: the checkpoints are no longer needed
+            return result
+        deps = empty_depressions(columns) if out is None else _with_ids(out, lowpoints)[columns]
+        chunks = list(cells)
+        table = pd.concat(chunks, ignore_index=True) if chunks else empty_cells()
+        return Result(deps, table, meta, transform=transform, crs=crs, footprint=footprint)
+    finally:
+        parts.close()
+
+
+def _two_passes(boxes, blocks, ctx, work):
+    """Both passes over the tiles. Returns the per-tile pieces (an iterable) and the graph sizes.
+
+    With checkpoints (`work`), every tile's result is saved as soon as it is computed and tiles
+    saved by an earlier, interrupted run are loaded instead of computed again.
+    """
+    n = len(boxes)
+    say = print if ctx["verbose"] else (lambda *a, **k: None)
+    graph = work.load_json("graph") if work is not None else None
+    if work is not None and graph is not None and work.count("p2") == n:
+        # both passes finished earlier: only the footprint is needed from pass 1
+        say(f"resuming: both passes were finished earlier ({n} tiles)", flush=True)
+        for k, box in enumerate(boxes, 1):
+            _mark_blocks(blocks, work.load("p1", k, keys=["blk_r", "blk_c", "blk"]))
+        return (_unpack_piece(work.load("p2", k)) for k in range(1, n + 1)), graph
+
+    # ---- pass 1: flood every tile from its border and keep only the crossings
+    if work is not None and work.count("p1"):
+        say(f"resuming: pass 1 has {work.count('p1')} of {n} tiles done earlier, "
+            f"pass 2 has {work.count('p2')}", flush=True)
+    tiles = []
+    for k, box in enumerate(boxes, 1):
+        if work is not None and work.has("p1", k):
+            t = work.load("p1", k)
+        else:
+            t = _pass1_tile(box, ctx)
+            if work is not None:
+                work.save("p1", k, t)
+            say(f"pass 1, tile {k}/{n}: {len(t['z'])} seeds, {len(t['ea'])} crossings", flush=True)
+            _check_time(ctx, work, n)
+        _mark_blocks(blocks, t)
+        tiles.append(t)
+
+    # ---- the exact level of every border cell
+    levels, graph = _solve_borders(tiles, ctx["width"], ctx["height"])
+    if work is not None:
+        work.save_json("graph", graph)
+
+    # ---- pass 2: flood each tile from the exact border levels, then summarise its depressions
+    pieces = []
+    for k, box in enumerate(boxes, 1):
+        t, lv = tiles[k - 1], levels[k - 1]
+        tiles[k - 1] = levels[k - 1] = None          # release this tile's pass-1 data once used
+        if work is not None and work.has("p2", k):
+            continue
+        piece = _pass2_tile(box, t, lv, ctx) if len(t["z"]) else None
+        if work is not None:
+            work.save("p2", k, _pack_piece(piece))
+            _check_time(ctx, work, n)
+        elif piece is not None:
+            pieces.append(piece)
+        say(f"pass 2, tile {k}/{n}: {0 if piece is None else len(piece['agg'])} pieces", flush=True)
+    if work is not None:
+        return (_unpack_piece(work.load("p2", k)) for k in range(1, n + 1)), graph
+    return pieces, graph
+
+
+def _check_time(ctx, work, n):
+    if ctx["deadline"] is not None and time.monotonic() > ctx["deadline"]:
+        p1, p2 = work.count("p1"), work.count("p2")
+        raise Paused(f"stopped at the time limit after a whole tile: pass 1 has {p1} of {n} tiles "
+                     f"done, pass 2 has {p2} of {n}. Run the same command again to continue.",
+                     p1 + p2, 2 * n)
+
+
+def _mark_blocks(blocks, t):
+    r, c, flags = int(t["blk_r"]), int(t["blk_c"]), t["blk"]
+    blocks[r:r + flags.shape[0], c:c + flags.shape[1]] |= flags
+
+
+def _pass1_tile(box, ctx):
+    """Seeds, crossings and invalid-block flags of one tile (pass 1)."""
+    r0, r1, c0, c1 = box
+    height, width = ctx["height"], ctx["width"]
+    work, valid = _read_tile(ctx["src"], ctx["mask_src"], box)
+    br, bc, flags = invalid_block_flags(~valid, (r0, c0))
+    rows, cols, pinned, border = tile_seeds(valid, (r0 == 0, r1 == height, c0 == 0, c1 == width))
+    z = work[rows, cols]
+    level, root = flood_from_seeds(work, valid, rows, cols, z)
+    ea, eb, ew = region_edges(level, root)
+    edge_mask = np.zeros(valid.shape, dtype=bool)
+    edge_mask[0, :] = edge_mask[-1, :] = edge_mask[:, 0] = edge_mask[:, -1] = True
+    bad_r, bad_c = np.nonzero(edge_mask & ~valid)
+    return {"rows": rows, "cols": cols, "z": z, "pinned": pinned, "border": border,
+            "keys": (rows + r0).astype(np.int64) * width + (cols + c0),
+            "ea": ea, "eb": eb, "ew": ew,
+            "invalid_border_keys": (bad_r + r0).astype(np.int64) * width + (bad_c + c0),
+            "blk_r": np.int64(br), "blk_c": np.int64(bc), "blk": flags}
+
+
+def _pass2_tile(box, t, lv, ctx):
+    """The depression pieces of one tile (pass 2), with piece numbers local to the tile."""
+    r0, r1, c0, c1 = box
+    h, w = r1 - r0, c1 - c0
+    src, width = ctx["src"], ctx["width"]
+    work, valid = _read_tile(src, ctx["mask_src"], box)
+    filled, _ = flood_from_seeds(work, valid, t["rows"], t["cols"], lv)
+    depth = np.where(valid, filled - work, 0.0)
+    window_transform = src.window_transform(Window(c0, r0, w, h))
+    bmask = None
+    if ctx["buildings"] is not None:
+        bmask = rasterize_buildings(
+            _buildings_in(ctx["buildings"], _bounds(window_transform, (h, w))), window_transform,
+            (h, w), min_area=0.0 if ctx["geographic"] else 20.0)
+    drain_rc = ctx["drain_rc"]
+    near = (near_drain_mask(drain_rc[0], drain_rc[1], (h, w), (r0, c0), ctx["radius"])
+            if drain_rc is not None else None)
+    out = _tile_records(depth, box, width, ctx["areas"][r0:r1], bmask, near, ctx["min_depth"])
+    if out is None:
+        return None
+    agg, pixels, labels = out
+    lab2rec = np.full(int(labels.max()) + 1, -1, dtype=np.int64)
+    lab2rec[agg["lab"].to_numpy()] = np.arange(len(agg))
+    # border pixels, to join pieces of one depression across tile borders
+    ring = np.zeros((h, w), dtype=bool)
+    ring[0, :] = ring[-1, :] = ring[:, 0] = ring[:, -1] = True
+    pr, pc = np.nonzero(ring & (labels > 0))
+    # pixels of kept pieces, as H3 cells
+    lon, lat = lonlat(ctx["crs"], *pixel_centers(ctx["transform"], pixels["r"].to_numpy(),
+                                                 pixels["c"].to_numpy()))
+    cells = _cell_summary(lab2rec[pixels["lab"].to_numpy()], h3_ids(lat, lon, ctx["res"]),
+                          pixels["d"].to_numpy(), pixels["a"].to_numpy(), pixels["v"].to_numpy())
+    return {"agg": agg, "ring_keys": (pr + r0).astype(np.int64) * width + (pc + c0),
+            "ring_rec": lab2rec[labels[pr, pc]], "cells": cells}
+
+
+_CELL_PARTS = ("c_rec", "c_cell", "c_depth", "c_area", "c_volume")
+
+
+def _pack_piece(piece):
+    """A tile's pieces as named arrays for a checkpoint file (`empty` when it has none)."""
+    if piece is None:
+        return {"empty": np.bool_(True)}
+    agg = piece["agg"]
+    arrays = {f"agg__{c}": agg[c].to_numpy() for c in agg.columns}
+    arrays["agg_columns"] = np.array(list(agg.columns))
+    arrays.update(dict(zip(_CELL_PARTS, piece["cells"])))
+    return {**arrays, "ring_keys": piece["ring_keys"], "ring_rec": piece["ring_rec"],
+            "empty": np.bool_(False)}
+
+
+def _unpack_piece(arrays):
+    if bool(arrays["empty"]):
+        return None
+    agg = pd.DataFrame({c: arrays[f"agg__{c}"] for c in arrays["agg_columns"]})
+    return {"agg": agg, "ring_keys": arrays["ring_keys"], "ring_rec": arrays["ring_rec"],
+            "cells": tuple(arrays[k] for k in _CELL_PARTS)}
+
+
+def _add_piece(piece, records, rings, parts):
+    """Number a tile's pieces after those of the tiles before it and collect them."""
+    if piece is None:
+        return
+    offset = sum(len(r) for r in records) if records else 0
+    agg = piece["agg"]
+    records.append(agg.assign(rec=np.arange(offset, offset + len(agg))))
+    rings.append((piece["ring_keys"], piece["ring_rec"] + offset))
+    rec, cell, depth, area, volume = piece["cells"]
+    parts.add(rec + offset, cell, depth, area, volume)
 
 
 def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, drains,

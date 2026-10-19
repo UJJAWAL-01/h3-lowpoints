@@ -14,7 +14,8 @@ three files in a folder. This page describes every file, column and field.
 | `meta.json` | every saved result | settings, versions, counts |
 | `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
 | `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
-| `_spill/` | a disk-backed run, while it runs | temporary per-cell sums; removed when the run ends, even if it fails |
+| `_work/` | a disk-backed run, until it finishes | every finished tile's result and the run's settings (`manifest.json`), so an interrupted run can continue; removed once the tables are written |
+| `_spill/` | a disk-backed run, while it writes the tables | temporary per-cell sums; removed when the run ends, even if it fails |
 
 **Format.** CSV is the default and opens anywhere. Parquet (`format="parquet"`, needs
 `pip install h3-lowpoints[parquet]`) is typically several times smaller, keeps exact column types

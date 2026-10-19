@@ -38,10 +38,11 @@ def _block_shape(shape):
     return -(-shape[0] // BLOCK), -(-shape[1] // BLOCK)
 
 
-def mark_invalid_blocks(blocks, invalid, origin):
-    """Flag, in the whole-raster bitmap `blocks`, every 16 x 16 block that holds an invalid pixel.
+def invalid_block_flags(invalid, origin):
+    """(block row, block column, flags): the 16 x 16 blocks a window touches that hold an invalid pixel.
 
-    `invalid` is a window of the raster whose top-left pixel is `origin` = (row, col).
+    `invalid` is a window of the raster whose top-left pixel is `origin` = (row, col); `flags`
+    covers the blocks from (block row, block column) on.
     """
     r0, c0 = origin
     off_r, off_c = r0 % BLOCK, c0 % BLOCK
@@ -50,7 +51,15 @@ def mark_invalid_blocks(blocks, invalid, origin):
     padded = np.zeros((rows, cols), dtype=bool)
     padded[off_r:off_r + h, off_c:off_c + w] = invalid
     flags = padded.reshape(rows // BLOCK, BLOCK, cols // BLOCK, BLOCK).any(axis=(1, 3))
-    br, bc = r0 // BLOCK, c0 // BLOCK
+    return r0 // BLOCK, c0 // BLOCK, flags
+
+
+def mark_invalid_blocks(blocks, invalid, origin):
+    """Flag, in the whole-raster bitmap `blocks`, every 16 x 16 block that holds an invalid pixel.
+
+    `invalid` is a window of the raster whose top-left pixel is `origin` = (row, col).
+    """
+    br, bc, flags = invalid_block_flags(invalid, origin)
     blocks[br:br + flags.shape[0], bc:bc + flags.shape[1]] |= flags
 
 

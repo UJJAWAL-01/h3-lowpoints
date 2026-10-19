@@ -72,6 +72,9 @@ def build_parser():
     b.add_argument("--cache-dir", help="download each 3DEP tile here once instead of streaming it")
     b.add_argument("--format", default="csv", choices=["csv", "parquet"],
                    help="table format: csv (default) or parquet (needs pyarrow; smaller and faster)")
+    b.add_argument("--hours", type=float, metavar="H",
+                   help="stop after about H hours, at the end of a tile, and exit with code 3; run the "
+                        "same command again to continue (every tile is saved as it finishes)")
     b.add_argument("--spot-check", type=int, default=0, metavar="N",
                    help="also re-run N random windows tiled and whole and require identical answers")
     b.add_argument("--map", help="also write an interactive web map to this .html file")
@@ -181,7 +184,7 @@ def _build(args):
 
     from .sources.usgs import build_3dep_vrt
     from .store import write_meta
-    from .tiling import analyze_tiled
+    from .tiling import Paused, analyze_tiled
     from .verify import check_saved, spot_check
 
     out = Path(args.out)
@@ -193,8 +196,12 @@ def _build(args):
     timings["tiles"] = time.perf_counter() - start
     start = time.perf_counter()
     # the tables go to disk as they are produced, so the region is not limited by memory
-    result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth,
-                           verbose=True, out_dir=out, format=args.format)
+    try:
+        result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth,
+                               verbose=True, out_dir=out, format=args.format, hours=args.hours)
+    except Paused as stop:
+        print(f"part finished ({100 * stop.done / stop.total:.0f}% of the work done): {stop}")
+        return 3
     timings["analysis"] = time.perf_counter() - start
     result.meta["build"] = {"dataset": args.dataset, "bbox": list(args.bbox),
                             "seconds": {k: round(v, 1) for k, v in timings.items()}}

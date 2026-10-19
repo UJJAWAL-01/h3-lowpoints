@@ -151,6 +151,27 @@ with the region is the border graph (one node per tile-border pixel) and the per
 summaries; a hierarchical version of the method would bound those too ([Roadmap](roadmap.md)).
 The national run itself will be measured and its figures published with the data.
 
+## Running in parts
+
+A national run takes many hours. Every tile's result is saved to `_work/` in the output folder as
+soon as it is finished, so the run never has to be done in one go:
+
+- **Interrupted?** Run the same command again. Finished tiles are loaded, not recomputed; at most
+  the tile that was in progress (well under a minute) is redone. This covers crashes, shutdowns,
+  a lost internet connection and Ctrl+C.
+- **On purpose, in parts:** `--hours 2` (or `hours=2` in Python) stops cleanly at the end of the
+  first tile after two hours and exits with code 3, saying how far it got. Run the same command
+  again for the next part, whenever convenient, until it finishes.
+- **The same answer.** A run continued any number of times gives exactly the tables of a run never
+  interrupted; the tests stop runs at many points, in both passes and while the tables are being
+  written, and compare. A folder can only be continued with the settings it was started with.
+- **Disk.** The saved tiles take room until the run finishes: about 1.5 MB per tile for pass 1
+  and roughly the size of the cell table for pass 2. They are deleted once the tables are written.
+
+Why not simply cut the country into regions analyzed separately? Each region's edge would act as
+an outlet, draining water across lines that do not exist, and depressions crossing those lines
+would be cut in two. Saving tiles keeps the exact method and still allows the work to be split.
+
 ## Streaming or caching the tiles
 
 A tiled run reads every pixel twice (once per pass). `build` can get the 3DEP tiles in two ways,

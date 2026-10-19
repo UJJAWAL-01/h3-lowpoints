@@ -45,7 +45,7 @@ affine transform (as from rasterio), `crs` anything rasterio or pyproj accept (s
 `"EPSG:32614"`), `nodata` the value marking missing pixels, and `source` the name recorded as
 `meta["dem"]`.
 
-### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8)`
+### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", hours=None, mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8)`
 
 Analyze a raster of any size in square tiles. The result is identical to `analyze` on the same
 raster: tiles only decide how much memory is needed. See [Large regions](large-regions.md).
@@ -55,9 +55,15 @@ raster: tiles only decide how much memory is needed. See [Large regions](large-r
 | `tile` | Tile edge in pixels (default 4096). Affects memory and speed, never the result. |
 | `out_dir` | Write the tables to this folder as they are produced, instead of returning them. Use it when the output itself may not fit in memory (a state or a country). The returned `Result` then has `depressions = cells = None` and `path = out_dir`. |
 | `format` | `"csv"` (default) or `"parquet"`, for `out_dir`. |
+| `hours` | With `out_dir`: stop after about this many hours, at the end of a tile, by raising `h3lowpoints.tiling.Paused` (its `done` and `total` count tile steps, two per tile). Calling again with the same arguments continues. |
 | `mask_path` | Optional raster on exactly the same grid as the DEM; non-zero pixels are ignored like nodata. |
 | `verbose` | Print one line per tile per pass. |
 | others | As in `analyze`. |
+
+With `out_dir`, every tile's result is saved in `out_dir/_work` as soon as it is computed, so an
+interrupted run continues where it stopped when called again with the same arguments (other
+arguments are refused, so two runs are never mixed); `_work` is removed once the tables are
+written.
 
 Differences from `analyze`: `Result.labels` and `Result.depth` are `None`, and `id` numbers the
 depressions 1 to n. Raises `ValueError` for `tile <= 0` or a mask of another shape, and
