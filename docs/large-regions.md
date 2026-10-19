@@ -21,7 +21,9 @@ res.meta["n_depressions"], res.meta["output"]["n_cells"]
 ```
 
 The tables go straight to the output folder; `read_result("texas")` or the files themselves are
-used afterwards (see [Outputs](outputs.md)).
+used afterwards (see [Outputs](outputs.md)). Leave out `--cache-dir` to read the tiles over the
+internet instead of storing them: slower, but it needs almost no disk (see
+[Streaming or caching the tiles](#streaming-or-caching-the-tiles)).
 
 ## Why tiling is hard for depressions
 
@@ -133,26 +135,57 @@ the cell table.
 An estimate from the Texas measurement, not yet a measurement, for 3DEP 30 m at resolution 10
 and `min_depth` 0.5 m:
 
-| | Texas box | Lower 48 (estimate) |
-|---|---|---|
-| Pixels | 1.8 billion | 11 to 13 billion |
-| Analysis time | 25 minutes | 3 hours |
-| Extra memory at peak | 2.1 GB | 8 to 10 GB |
-| Output, Parquet | 0.33 GB | about 2 GB |
-| Tile download | 6 GB | 40 GB |
+| | Texas box (measured, tiles cached) | Lower 48, tiles cached (estimate) | Lower 48, tiles streamed (estimate) |
+|---|---|---|---|
+| Pixels | 1.8 billion | 11 to 13 billion | 11 to 13 billion |
+| Time | 11 min download + 25 min analysis | about 1 h download + 3 h analysis | 7 to 8 hours |
+| Extra memory at peak | 2.1 GB | 8 to 10 GB | 8 to 10 GB |
+| Disk during the run | 6 GB tiles + results | 40 GB tiles + about 5 GB | about 5 GB |
+| Disk afterwards (Parquet results) | 0.33 GB | about 2 GB | about 2 GB |
+| Internet traffic | 6 GB | 40 GB | 85 to 100 GB |
+
+The streamed column scales the 4-tile measurement below.
 
 So the national layer fits a single laptop with 16 GB of memory or more. The part that still grows
 with the region is the border graph (one node per tile-border pixel) and the per-depression
 summaries; a hierarchical version of the method would bound those too ([Roadmap](roadmap.md)).
 The national run itself will be measured and its figures published with the data.
 
+## Streaming or caching the tiles
+
+A tiled run reads every pixel twice (once per pass). `build` can get the 3DEP tiles in two ways,
+with exactly the same result:
+
+- **Streamed** (no `--cache-dir`): each part of a tile is read over the internet when it is
+  needed, and nothing is stored. Needs almost no disk, but every read waits on the network and
+  each tile is fetched twice.
+- **Cached** (`--cache-dir DIR`): each tile is downloaded once (about 40 MB per 1° tile at 30 m)
+  and read from disk. Faster, but needs room for all the tiles; delete the folder afterwards.
+
+Measured on one box of 2° × 2° (−99, 30, −97, 32: 4 tiles, 51.8 million pixels, 54,619
+depressions) on the same laptop and home internet connection, one run each way:
+
+| | Streamed | Cached |
+|---|---|---|
+| Getting the tiles | 1 s (only checks they exist) | 22 s (221 MB downloaded) |
+| Analysis | 114 s | 47 s |
+| Total | **114 s** | **69 s** |
+| Internet traffic | 398 MB | 221 MB |
+| Disk used | 8 MB (results) | 219 MB tiles + 8 MB results |
+| Extra memory at peak | 1.2 GB | 1.1 GB |
+| Result | identical | identical |
+
+So streaming took about 1.65 times as long in total and moved about 1.8 times as much data,
+in exchange for storing nothing. The ratio depends on the connection; measure a small box first
+on yours. If a run is interrupted, cached tiles already downloaded are kept (a half-downloaded
+tile is never used) and the next run fetches only the missing ones; the analysis itself starts
+again from the beginning. A streamed read that fails is retried three times, after which the run
+stops with an error rather than produce a wrong result.
+
 ## Practical advice
 
-- **Use `--cache-dir`.** A tiled run reads every pixel twice; a local copy of the tiles (about
-  40 MB per 1° tile at 30 m) is faster and more reliable than reading over HTTP twice. A run that
-  is interrupted picks up tile by tile (tiles already downloaded are kept; a half-downloaded tile
-  is fetched again, never used). Delete the cache
-  afterwards if space matters.
+- **Cache the tiles if you have the disk space**, stream them if you do not (see above). If your
+  internet plan has a data cap, note that a streamed national run moves 85 to 100 GB.
 - **Use Parquet** for large outputs: smaller files, exact types, fast to read, and DuckDB can
   query it without loading everything into memory.
 - **Keep the computer awake.** A sleeping laptop pauses the run (it resumes afterwards, but wall
@@ -161,5 +194,5 @@ The national run itself will be measured and its figures published with the data
   vertical error and also multiply the output size.
 - **Check the result.** `build` runs the invariants on completion and writes `verify.json`; add
   `--spot-check N` to re-run N random windows whole and tiled.
-- **Disk space.** Besides the tile cache and the results, the spill files need 40 bytes per
-  (depression piece, cell) pair while the run lasts.
+- **Disk space.** Besides any tile cache and the results, the spill files need 40 bytes per
+  (depression piece, cell) pair while the run lasts; they are removed when it ends.

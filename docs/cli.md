@@ -73,7 +73,7 @@ writes the tables as they are produced, then verifies the result. See
 | `--min-depth M` | `0.15` | Shallowest depression kept, metres. For 30 m data 0.5 to 1 is sensible. |
 | `--tile N` | `4096` | Tile size in pixels (memory and speed, never the result). |
 | `--format csv\|parquet` | `csv` | Table format. Parquet is recommended for large regions. |
-| `--cache-dir DIR` | | Download each 3DEP tile here once (about 40 MB per 1° tile at 30 m) instead of reading it over HTTP twice. An interrupted run keeps the tiles already downloaded. Recommended. |
+| `--cache-dir DIR` | | Download each 3DEP tile here once (about 40 MB per 1° tile at 30 m) instead of reading it over the internet twice. Faster (about 1.65× in a measured test) but needs disk for every tile; without it nothing is stored. An interrupted run keeps the tiles already downloaded. See [Large regions](large-regions.md#streaming-or-caching-the-tiles). |
 | `--spot-check N` | `0` | Also cut N random windows and require the whole and tiled analyses to agree exactly. |
 | `--map FILE.html` | | Also write the interactive map (for small regions; a state has millions of cells). |
 
