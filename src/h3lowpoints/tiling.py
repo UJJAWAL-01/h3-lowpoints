@@ -2,11 +2,15 @@
 
 `analyze_tiled` fills the DEM in two passes over the tiles (see `hydro/tiled.py` for the method),
 labels the depressions inside each tile, and joins the pieces of depressions that cross tile
-borders. Peak memory is one tile plus a graph over the tile-border cells, so a raster far larger
-than memory can be analyzed. The result equals `analyze` on the same DEM, to the last digit of
-every depth and to rounding in area and volume sums; `tests/test_tiling.py` checks that on random
-terrain, nodata, flats, mazes and geographic grids.
+borders. Memory is one tile, a graph over the tile-border cells and a summary of each depression,
+so a raster far larger than memory can be analyzed. With `out_dir` the tables are written to disk
+piece by piece instead of returned, and the per-cell sums wait on disk, so the size of the output
+does not limit the size of the region either. The result equals `analyze` on the same DEM, to the
+last digit of every depth and to rounding in area and volume sums; `tests/test_tiling.py` checks
+that on random terrain, nodata, flats, mazes and geographic grids.
 """
+from pathlib import Path
+
 import h3
 import numpy as np
 import pandas as pd
@@ -24,10 +28,11 @@ from .h3agg.aggregate import h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
-from .pipeline import CELL_TABLE, Result, base_meta, dep_columns, finish_cells, plan_analysis
-from .resolution import FINEST_H3
+from .pipeline import (CELL_TABLE, Result, add_coverage, base_meta, dep_columns, empty_cells,
+                       empty_depressions, plan_analysis)
+from .resolution import FINEST_H3, metres_to_cells
 from .sources._common import gdal_env
-from .resolution import metres_to_cells
+from .store import CHUNK_ROWS, CellParts, TableWriter, check_format, remove_other_formats, write_meta
 
 _TIE = 1e-9  # depths this close to the maximum count as tied for the lowest point
 
@@ -83,26 +88,39 @@ def _cell_summary(rec, cell, depth, area, volume):
             np.add.reduceat(area[order], start), np.add.reduceat(volume[order], start))
 
 
-def _final_cells(parts, comp, kept):
-    """The cell table: pieces of depressions that were kept, aggregated per H3 cell."""
-    rec = np.concatenate([p[0] for p in parts])
-    keep = kept[comp[rec]]
-    del rec
-    cell = np.concatenate([p[1] for p in parts])[keep]
-    depth = np.concatenate([p[2] for p in parts])[keep]
-    area = np.concatenate([p[3] for p in parts])[keep]
-    volume = np.concatenate([p[4] for p in parts])[keep]
-    if len(cell) == 0:                         # every depression was below min_depth
-        return pd.DataFrame({"h3": pd.Series(dtype="object"), "max_depth_m": [], "depress_area_m2": [],
-                             "depress_volume_m3": []})
-    order = np.argsort(cell, kind="stable")
-    cell = cell[order]
-    start = _runs(cell)
-    return pd.DataFrame({
-        "h3": [h3.int_to_str(int(c)) for c in cell[start]],
-        "max_depth_m": np.maximum.reduceat(depth[order], start),
-        "depress_area_m2": np.add.reduceat(area[order], start),
-        "depress_volume_m3": np.add.reduceat(volume[order], start)})
+def _cell_chunks(parts, comp, kept, lowpoints, footprint, rows=CHUNK_ROWS):
+    """The cell table, in pieces of about `rows` cells in ascending id order.
+
+    One partition of `parts` is loaded at a time; sums from pieces of depressions that were
+    dropped (`kept[comp[rec]]` is False) are left out. `lowpoints` are the integer ids of the
+    depressions' lowest-point cells, counted into `n_lowpoints`.
+    """
+    low_ids, low_counts = np.unique(lowpoints, return_counts=True)
+    pending, n_pending = [], 0
+    for key in parts.keys():
+        arr = parts.load(key)
+        arr = arr[kept[comp[arr["rec"]]]]
+        if len(arr) == 0:
+            continue
+        order = np.argsort(arr["cell"], kind="stable")
+        cell = arr["cell"][order]
+        start = _runs(cell)
+        cell = cell[start]
+        at = np.minimum(np.searchsorted(low_ids, cell), max(len(low_ids) - 1, 0))
+        n_low = (np.where(low_ids[at] == cell, low_counts[at], 0) if len(low_ids)
+                 else np.zeros(len(cell), dtype=np.int64))
+        pending.append(pd.DataFrame({
+            "h3": [h3.int_to_str(int(c)) for c in cell],
+            "max_depth_m": np.maximum.reduceat(arr["depth"][order], start),
+            "depress_area_m2": np.add.reduceat(arr["area"][order], start),
+            "depress_volume_m3": np.add.reduceat(arr["volume"][order], start),
+            "n_lowpoints": n_low.astype(np.int64)}))
+        n_pending += len(cell)
+        if n_pending >= rows:
+            yield add_coverage(pd.concat(pending, ignore_index=True), footprint)[CELL_TABLE]
+            pending, n_pending = [], 0
+    if pending:
+        yield add_coverage(pd.concat(pending, ignore_index=True), footprint)[CELL_TABLE]
 
 
 def _solve_borders(tiles, width, height):
@@ -184,16 +202,22 @@ def _tile_records(depth, box, width, areas, bmask, near, min_depth):
 
 def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, tile=4096,
                   res="auto", min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8,
-                  verbose=False):
+                  verbose=False, out_dir=None, format="csv"):
     """Analyze a large DEM in tiles. The result equals `analyze` on the same DEM.
 
     tile: tile edge in cells. It only trades memory for speed; it never changes the result.
     mask_path: optional raster on the same grid as the DEM; non-zero cells are ignored.
+    out_dir: write `depressions`, `cells` and `meta.json` to this folder as they are produced,
+        instead of holding the tables in memory. The returned `Result` then has
+        `depressions = cells = None` and `path = out_dir`; `Result.load()` reads them back.
+    format: "csv" (default) or "parquet" (needs the `parquet` extra), used with `out_dir`.
     Other arguments are as in `analyze`. `Result.labels` and `Result.depth` are not returned,
     and `id` numbers the depressions 1..n in raster-scan order of their first cell.
     """
     if tile <= 0:
         raise ValueError("tile must be positive")
+    if out_dir is not None:
+        check_format(format)
     has_drains = drains_xy is not None and len(drains_xy) > 0
     drains = np.asarray(drains_xy, dtype="float64").reshape(-1, 2) if has_drains else None
     with gdal_env(), rasterio.open(dem_path) as src:
@@ -208,7 +232,7 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
                 raise ValueError(f"mask {mask_src.shape} and DEM {src.shape} differ in shape")
             return _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
                         tier, geographic, areas, drains, buildings, tile, res, min_depth,
-                        drain_radius_m, drain_core_frac, verbose, requested)
+                        drain_radius_m, drain_core_frac, verbose, requested, out_dir, format)
         finally:
             if mask_src is not None:
                 mask_src.close()
@@ -216,7 +240,22 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
 
 def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
          geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
-         drain_core_frac, verbose, requested):
+         drain_core_frac, verbose, requested, out_dir, fmt):
+    if out_dir is not None:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+    parts = CellParts(res, None if out_dir is None else out_dir / "_spill")
+    try:
+        return _run_tiles(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
+                          tier, geographic, areas, drains, buildings, tile, res, min_depth,
+                          drain_radius_m, drain_core_frac, verbose, requested, out_dir, fmt, parts)
+    finally:
+        parts.close()
+
+
+def _run_tiles(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
+               geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
+               drain_core_frac, verbose, requested, out_dir, fmt, parts):
     boxes = list(_tile_boxes(height, width, tile))
     radius = metres_to_cells(drain_radius_m, size)
     drain_rc = drain_pixels(drains, transform, (height, width)) if drains is not None else None
@@ -247,7 +286,7 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
     levels, graph = _solve_borders(tiles, width, height)
 
     # ---- pass 2: flood each tile from the exact border levels, then summarise its depressions
-    records, rings, cell_parts = [], [], []
+    records, rings = [], []
     n_rec = 0
     for k, box in enumerate(boxes, 1):
         t, lv = tiles[k - 1], levels[k - 1]
@@ -282,7 +321,7 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         # pixels of kept pieces, as H3 cells
         lon, lat = lonlat(crs, *pixel_centers(transform, pixels["r"].to_numpy(),
                                               pixels["c"].to_numpy()))
-        cell_parts.append(_cell_summary(
+        parts.add(*_cell_summary(
             lab2rec[pixels["lab"].to_numpy()], h3_ids(lat, lon, res), pixels["d"].to_numpy(),
             pixels["a"].to_numpy(), pixels["v"].to_numpy()))
         del pixels
@@ -298,14 +337,37 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
     columns = dep_columns(drains is not None, has_buildings)
     footprint = Footprint((height, width), transform, crs, blocks, file_opener(dem_path, mask_path))
     if not records:
-        meta.update({"n_depressions": 0, "n_edge": 0})
-        return Result(pd.DataFrame(columns=columns), pd.DataFrame(columns=CELL_TABLE), meta,
-                      transform=transform, crs=crs, footprint=footprint)
+        out, lowpoints = None, np.zeros(0, dtype=np.uint64)
+        comp, kept = np.zeros(0, dtype=np.int64), np.zeros(0, dtype=bool)
+    else:
+        out, lowpoints, comp, kept = _join_pieces(records, rings, width, height, transform, crs,
+                                                  res, min_depth, drains, has_buildings,
+                                                  drain_core_frac)
+        del records, rings
+    meta.update({"n_depressions": 0 if out is None else len(out),
+                 "n_edge": 0 if out is None else int(out["edge"].sum())})
+    cells = _cell_chunks(parts, comp, kept, lowpoints, footprint)
+    if out_dir is not None:
+        return _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs,
+                      footprint)
+    deps = empty_depressions(columns) if out is None else _with_ids(out, lowpoints)[columns]
+    chunks = list(cells)
+    table = pd.concat(chunks, ignore_index=True) if chunks else empty_cells()
+    return Result(deps, table, meta, transform=transform, crs=crs, footprint=footprint)
 
-    # ---- join the pieces of each depression and apply min_depth to the whole depression
+
+def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, drains,
+                 has_buildings, drain_core_frac):
+    """Join the pieces of each depression across tile borders and apply min_depth to the whole.
+
+    Returns the depression table without its H3 id columns, the integer id of each lowest
+    point's cell, the depression (component) of every piece, and which components were kept.
+    """
     recs = pd.concat(records, ignore_index=True)
+    records.clear()                                  # the per-tile copies are no longer needed
     ring_keys = np.concatenate([r[0] for r in rings])
     ring_rec = np.concatenate([r[1] for r in rings])
+    rings.clear()
     ci, cj = neighbour_pairs(ring_keys, width, height)
     graph_m = coo_matrix((np.ones(len(ci), dtype=np.int8), (ring_rec[ci], ring_rec[cj])),
                          shape=(len(recs), len(recs)))
@@ -334,8 +396,6 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         "id": dep["id"].to_numpy(), "max_depth_m": dep["maxd"].to_numpy(),
         "area_m2": dep["area"].to_numpy(), "volume_m3": dep["volume"].to_numpy(),
         "lat": lat, "lon": lon,
-        "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
-        "h3_lowpoint_15": [h3.latlng_to_cell(la, lo, FINEST_H3) for la, lo in zip(lat, lon)],
         "edge": ((dep["rmin"] <= 1) | (dep["cmin"] <= 1) | (dep["rmax"] + 1 >= height - 1)
                  | (dep["cmax"] + 1 >= width - 1)).to_numpy()})
     if drains is not None:
@@ -347,8 +407,28 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
 
     kept = np.zeros(int(comp.max()) + 1, dtype=bool)
     kept[dep.index.to_numpy()] = True
-    cells = _final_cells(cell_parts, comp, kept)
-    del cell_parts, records, recs
-    meta.update({"n_depressions": len(out), "n_edge": int(out["edge"].sum())})
-    return Result(out[columns], finish_cells(cells, out["h3_lowpoint"], footprint),
-                  meta, transform=transform, crs=crs, footprint=footprint)
+    return out, h3_ids(lat, lon, res), comp, kept
+
+
+def _with_ids(out, lowpoints):
+    """The depression table with its H3 id columns, from the lowest points' integer cell ids."""
+    return out.assign(
+        h3_lowpoint=[h3.int_to_str(int(c)) for c in lowpoints],
+        h3_lowpoint_15=[h3.latlng_to_cell(la, lo, FINEST_H3)
+                        for la, lo in zip(out["lat"].to_numpy(), out["lon"].to_numpy())])
+
+
+def _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs, footprint):
+    """Write the tables piece by piece; return a `Result` that points at them."""
+    remove_other_formats(out_dir, fmt)
+    with TableWriter(out_dir / f"depressions.{fmt}", fmt) as w:
+        for s in range(0, 0 if out is None else len(out), CHUNK_ROWS):
+            w.write(_with_ids(out.iloc[s:s + CHUNK_ROWS], lowpoints[s:s + CHUNK_ROWS])[columns])
+        w.close(empty=empty_depressions(columns))
+    with TableWriter(out_dir / f"cells.{fmt}", fmt) as w:
+        for chunk in cells:
+            w.write(chunk)
+        w.close(empty=empty_cells())
+    meta["output"] = {"format": fmt, "n_cells": w.rows}
+    write_meta(out_dir, meta)
+    return Result(None, None, meta, transform=transform, crs=crs, footprint=footprint, path=out_dir)

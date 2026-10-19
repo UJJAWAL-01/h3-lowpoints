@@ -16,7 +16,10 @@ from h3lowpoints import analyze, analyze_tiled
 from h3lowpoints import tiling as T
 from h3lowpoints.cli import main
 from h3lowpoints.hydro.depressions import fill_depressions
+from h3lowpoints.pipeline import CELL_TABLE
 from h3lowpoints.sources._common import GDAL_CACHE_MB
+from h3lowpoints.store import PART_DEPTH, CellParts, partition_key
+from h3lowpoints.store import ids_to_int as S_ids
 from h3lowpoints.hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges,
                                      solve_levels, tile_seeds)
 
@@ -375,10 +378,13 @@ def test_cli_tile_option(tmp_path):
     p = write_dem(tmp_path / "d.tif", smooth(0, (60, 60)))
     a, b = tmp_path / "a", tmp_path / "b"
     assert main(["analyze", p, "--res", "10", "--min-depth", "0.05", "--out", str(a)]) == 0
-    assert main(["analyze", p, "--res", "10", "--min-depth", "0.05", "--tile", "13", "--out", str(b)]) == 0
+    assert main(["analyze", p, "--res", "10", "--min-depth", "0.05", "--tile", "13", "--out", str(b),
+                 "--map", str(tmp_path / "m.html")]) == 0
     x, y = pd.read_csv(a / "depressions.csv"), pd.read_csv(b / "depressions.csv")
     assert len(x) == len(y) > 0
     assert sorted(x["max_depth_m"].round(9)) == sorted(y["max_depth_m"].round(9))
+    assert (tmp_path / "m.html").exists() and not (b / "_spill").exists()
+    assert main(["verify", str(b)]) == 0
 
 
 def test_ids_number_depressions_in_the_same_scan_order_as_analyze(tmp_path):
@@ -616,16 +622,26 @@ def test_a_checkerboard_drains_through_its_diagonals(tmp_path):
 # The tiled run sums cells with sorted plain arrays instead of pandas groupby, to keep memory down.
 # pandas groupby (what it used before) is the oracle.
 
-def _random_parts(seed, n_parts=4, n=500):
+class _FullCoverage:
+    """Stands in for a DEM footprint: every cell fully covered."""
+
+    def coverage(self, cells):
+        n = len(cells)
+        return pd.DataFrame({"coverage": np.ones(n), "covered_area_m2": np.full(n, 100.0)})
+
+
+def _random_parts(seed, store, n_tiles=4, n=500):
+    """Random per-tile sums on real resolution-10 cells spread over many partitions."""
     rng = np.random.default_rng(seed)
-    parts, frames = [], []
-    for _ in range(n_parts):
+    pool = T.h3_ids(rng.uniform(29, 31, 60), rng.uniform(-99, -97, 60), 10)
+    frames = []
+    for _ in range(n_tiles):
         rec = rng.integers(0, 40, n)
-        cell = rng.integers(0, 25, n).astype(np.uint64) + np.uint64(0x8a2a1072b59ffff)
+        cell = pool[rng.integers(0, len(pool), n)]
         d, a, v = rng.random(n), rng.random(n) * 5, rng.random(n) * 3
-        parts.append(T._cell_summary(rec, cell, d, a, v))
+        store.add(*T._cell_summary(rec, cell, d, a, v))
         frames.append(pd.DataFrame({"rec": rec, "cell": cell, "d": d, "a": a, "v": v}))
-    return parts, pd.concat(frames, ignore_index=True)
+    return pd.concat(frames, ignore_index=True)
 
 
 @pytest.mark.parametrize("seed", range(5))
@@ -640,25 +656,54 @@ def test_cell_summary_matches_a_groupby(seed):
     pd.testing.assert_frame_equal(got, want, check_dtype=False, rtol=1e-12)
 
 
-@pytest.mark.parametrize("seed", range(5))
-def test_final_cells_matches_a_groupby(seed):
-    parts, raw = _random_parts(seed)
+@pytest.mark.parametrize("seed", range(4))
+@pytest.mark.parametrize("on_disk", [False, True])
+@pytest.mark.parametrize("rows", [1, 25, 10**6])
+def test_cell_chunks_match_a_groupby(tmp_path, seed, on_disk, rows):
+    store = CellParts(10, tmp_path / "spill" if on_disk else None)
+    raw = _random_parts(seed, store)
+    assert len(store.keys()) > 3                 # the cells really span several partitions
     rng = np.random.default_rng(seed + 100)
     comp = rng.integers(0, 12, 40)              # pieces joined into 12 depressions
     kept = rng.random(12) < 0.6
-    got = T._final_cells(parts, comp, kept)
+    lowpoints = raw["cell"].to_numpy()[rng.integers(0, len(raw), 30)]
+    chunks = list(T._cell_chunks(store, comp, kept, lowpoints, _FullCoverage(), rows=rows))
+    got = pd.concat(chunks, ignore_index=True)
+    if rows == 1:                                # memory stays bounded: one piece per partition
+        assert len(chunks) == len({int(k) for k in partition_key(S_ids(got["h3"]), 10)})
+    if rows == 10**6:
+        assert len(chunks) == 1
+    store.close()
     raw = raw[kept[comp[raw["rec"].to_numpy()]]]
     want = raw.groupby("cell").agg(max_depth_m=("d", "max"), depress_area_m2=("a", "sum"),
                                    depress_volume_m3=("v", "sum")).reset_index()
+    counts = pd.Series(lowpoints).value_counts()
+    want["n_lowpoints"] = want["cell"].map(counts).fillna(0).astype("int64")
     want.insert(0, "h3", [h3.int_to_str(int(c)) for c in want.pop("cell")])
-    pd.testing.assert_frame_equal(got, want, check_dtype=False, rtol=1e-12)
+    pd.testing.assert_frame_equal(got[want.columns], want, check_dtype=False, rtol=1e-12)
+    assert list(got.columns) == CELL_TABLE
+    assert not (tmp_path / "spill").exists()     # the spill folder is removed
 
 
-def test_final_cells_when_nothing_is_kept():
-    parts, _ = _random_parts(0)
-    got = T._final_cells(parts, np.zeros(40, dtype=np.int64), np.zeros(1, dtype=bool))
-    assert len(got) == 0
-    assert list(got.columns) == ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3"]
+def test_cell_chunks_when_nothing_is_kept():
+    store = CellParts(10)
+    _random_parts(0, store)
+    got = list(T._cell_chunks(store, np.zeros(40, dtype=np.int64), np.zeros(1, dtype=bool),
+                              np.zeros(0, dtype=np.uint64), _FullCoverage()))
+    assert got == []
+
+
+def test_partition_keys_sort_like_the_cells_they_hold():
+    rng = np.random.default_rng(5)
+    for res in (0, 3, 6, 9, 12, 15):
+        cells = np.sort(T.h3_ids(rng.uniform(-80, 80, 3000), rng.uniform(-180, 180, 3000), res))
+        key = partition_key(cells, res)
+        assert (key[1:] >= key[:-1]).all()
+        parent = max(0, res - PART_DEPTH)
+        want = [h3.str_to_int(h3.cell_to_parent(h3.int_to_str(int(c)), parent)) for c in cells]
+        # cells with the same key have the same parent, and different keys mean different parents
+        same = key[1:] == key[:-1]
+        np.testing.assert_array_equal(same, np.array(want[1:]) == np.array(want[:-1]))
 
 
 def test_runs_marks_every_change_of_any_key():

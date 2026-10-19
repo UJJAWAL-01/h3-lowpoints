@@ -1,4 +1,5 @@
 """The general verifier, the region builder (3DEP virtual rasters) and their commands."""
+import importlib.util
 import json
 
 import h3
@@ -56,6 +57,12 @@ def _neighbour(cell):
     return next(c for c in h3.grid_ring(cell, 1))
 
 
+def _outside(cell, cells):
+    """A cell near `cell` that is not in the cell table."""
+    listed = set(cells["h3"])
+    return next(c for k in range(1, 50) for c in h3.grid_ring(cell, k) if c not in listed)
+
+
 CORRUPTIONS = {
     "drop a cell": (lambda d, c, m: (d, c.iloc[1:], m), "cell areas add to"),
     "double an area": (lambda d, c, m: (d.assign(area_m2=d["area_m2"] * 2), c, m), "cell areas add to"),
@@ -71,7 +78,7 @@ CORRUPTIONS = {
     "share above 1": (lambda d, c, m: (d, c.assign(depressed_share=2.0), m), "depressed_share outside"),
     "meta count": (lambda d, c, m: (d, c, {**m, "n_depressions": m["n_depressions"] + 3}), "meta says"),
     "cells at mixed res": (lambda d, c, m: (d, c.assign(h3=[h3.cell_to_parent(x, 10) if i == 0 else x for i, x in enumerate(c["h3"])]), m), "not all at resolution"),
-    "lowpoint outside the table": (lambda d, c, m: (d.assign(h3_lowpoint=[x if i else _neighbour(x) for i, x in enumerate(d["h3_lowpoint"])]), c, m), "lowest points"),
+    "lowpoint outside the table": (lambda d, c, m: (d.assign(h3_lowpoint=[x if i else _outside(x, c) for i, x in enumerate(d["h3_lowpoint"])]), c, m), "lie in cells missing from the cell table"),
 }
 
 
@@ -224,7 +231,9 @@ def test_cli_verify_with_a_spot_check(tmp_path, capsys):
     assert "agree on 2 random windows" in capsys.readouterr().out
 
 
-def test_cli_build_from_local_tiles(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("fmt", ["csv", pytest.param("parquet", marks=pytest.mark.skipif(
+    importlib.util.find_spec("pyarrow") is None, reason="needs pyarrow"))])
+def test_cli_build_from_local_tiles(tmp_path, monkeypatch, capsys, fmt):
     box = _corner_tiles(tmp_path / "tiles") if (tmp_path / "tiles").mkdir() is None else None
     real = usgs.build_3dep_vrt
     monkeypatch.setattr(usgs, "build_3dep_vrt",
@@ -232,13 +241,16 @@ def test_cli_build_from_local_tiles(tmp_path, monkeypatch, capsys):
                                                      source=tmp_path / "tiles"))
     out = tmp_path / "region"
     code = main(["build", "--bbox", *map(str, box), "--out", str(out), "--res", "10", "--min-depth", "0.01",
-                 "--tile", "17", "--spot-check", "1", "--map", str(tmp_path / "m.html")])
+                 "--tile", "17", "--spot-check", "1", "--map", str(tmp_path / "m.html"),
+                 "--format", fmt])
     printed = capsys.readouterr().out
     assert code == 0 and "all invariants hold" in printed
     assert json.loads((out / "verify.json").read_text()) == {"problems": []}
     meta = json.loads((out / "meta.json").read_text())
     assert meta["build"]["dataset"] == "3dep" and set(meta["build"]["seconds"]) == {"tiles", "analysis"}
     assert (out / "dem.vrt").exists() and (tmp_path / "m.html").exists()
+    assert (out / f"cells.{fmt}").exists() and not (out / "_spill").exists()
+    assert meta["output"]["format"] == fmt and meta["n_depressions"] > 0
 
 
 @pytest.mark.network

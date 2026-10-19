@@ -18,6 +18,7 @@ import pandas as pd
 
 from ..h3agg.aggregate import rollup
 from ..pipeline import add_coverage
+from ..store import missing_files
 
 _TEMPLATE = Path(__file__).with_name("map_template.html")
 
@@ -141,10 +142,11 @@ def build_map(cells, depressions, meta, path, *, footprint=None, title=None, max
 
 
 def map_from_dir(directory, path, **kwargs):
-    """Build the map from a folder written by `Result.save` (depressions.csv, cells.csv, meta.json)."""
-    folder = Path(directory)
-    missing = [n for n in ("depressions.csv", "cells.csv", "meta.json") if not (folder / n).exists()]
+    """Build the map from a saved result folder (depressions, cells as CSV or Parquet, meta.json)."""
+    from ..pipeline import read_result
+
+    missing = missing_files(directory)
     if missing:
-        raise ValueError(f"{folder} is missing {', '.join(missing)}; was it written by Result.save?")
-    return build_map(pd.read_csv(folder / "cells.csv"), pd.read_csv(folder / "depressions.csv"),
-                     json.loads((folder / "meta.json").read_text()), path, **kwargs)
+        raise ValueError(f"{directory} is missing {', '.join(missing)}; was it written by Result.save?")
+    res = read_result(directory)
+    return build_map(res.cells, res.depressions, res.meta, path, **kwargs)

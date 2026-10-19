@@ -1,7 +1,9 @@
 # What is computed
 
 This page is the contract for the core of the library: what a "depression" is, and what the
-results mean at the edges. Behaviour described here is covered by the tests in `tests/`.
+results mean at the edges. Behaviour described here is covered by the tests in `tests/`. For a
+gentler introduction see [Concepts](concepts.md); for every output column see
+[Outputs](outputs.md).
 
 ## The fill
 
@@ -9,8 +11,12 @@ results mean at the edges. Behaviour described here is covered by the tests in `
 every outlet cell, it raises each cell to the lowest level water could stand at there. Outlets are
 
 - cells on the raster border,
-- cells next to nodata (a void or masked area is treated as a place water can leave),
-- cells marked in an optional `drains` raster.
+- cells next to nodata (a void or masked area is treated as a place water can leave).
+
+`depth_from_array` also accepts a `drains` raster of extra outlets for custom workflows. The
+`analyze` functions do not use it: drains supplied as `drains_xy` are reported on
+(`dist_to_drain_m`, `drain_at_core`) but do not drain water in the fill, so a depression with a
+drain still appears, flagged, rather than disappearing.
 
 Depth is the filled elevation minus the original elevation. The result is checked in
 `tests/test_fill_reference.py` against morphological reconstruction (Soille), an independent
@@ -79,14 +85,9 @@ few tens of bytes each; very small tiles make that graph the larger part, as the
 shows. `Result.labels` and `Result.depth` are not returned, and `id` numbers the depressions 1 to
 n in raster-scan order instead of carrying raster label values.
 
-For large regions the output itself becomes the larger part. Each tile's pixels are summed per
-depression piece and H3 cell as soon as the tile is done, the tile's own data is released, and
-the final tables are built with sorted arrays; coverage is measured a fixed number of cells at a
-time, and GDAL's read cache is capped at 256 MB (its default is 5% of the machine's memory, while
-each window is read only once). On the USGS 3DEP 30 m box around Texas (1.82 billion pixels,
-120 tiles of 4096, res 10, 1.75 million depressions, 7.9 million cells) the extra memory at peak
-fell from 11.0 GB to 3.6 GB with identical output, in 24 minutes on a laptop. The result tables
-take about 1.3 GB of that; the rest is assembly that lasts a few seconds.
+For large regions the output itself becomes the larger part of the memory. How the tiled run
+keeps it bounded (per-tile summaries, partitions spilled to disk, tables written as they are
+produced) and what a state-sized run costs are described in [Large regions](large-regions.md).
 
 `tests/test_tiling.py` compares both modes depression by depression and cell by cell on random
 terrain, terraces full of ties, integer DEMs, a serpentine corridor that routes water through
@@ -156,4 +157,5 @@ supply a mask if open water should not count.
 
 A depression is a feature of the elevation model. It does not know whether water collects there,
 whether a culvert the DEM misses drains it, or whether it is a pond. The planned susceptibility
-layer (see [roadmap.md](roadmap.md)) is the step towards that question.
+layer (see [roadmap.md](roadmap.md)) is the step towards that question. The full list of limits
+is in [Accuracy and limits](limitations.md).

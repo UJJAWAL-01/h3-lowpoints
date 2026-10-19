@@ -21,6 +21,27 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **Results written to disk as they are produced, in CSV or Parquet.** `analyze_tiled(out_dir=...)`
+  keeps its per-cell sums in partition files on disk (one per coarse H3 parent) and writes the
+  depression and cell tables piece by piece, so the size of the output no longer limits the size
+  of the region; `h3lowpoints build` and `analyze --tile` work this way. `Result.save(format=
+  "parquet")`, `--format parquet` and the `parquet` extra add Parquet output; `read_result` loads
+  any saved result; `check_saved` and `h3lowpoints verify` check the cell table in pieces.
+- **Complete documentation** in `docs/`, starting at `docs/index.md`: getting started, concepts
+  from scratch, every output column and metadata field, the Python API, the command line, data
+  sources, large regions, the map, verification, accuracy and limits, and a glossary.
+  `tests/test_docs.py` keeps it in step with the code (links, options, functions, columns, fields).
+
+### Fixed
+- **H3 ids that look like numbers.** Reading a saved CSV turned resolution-14 ids such as
+  `8e4516503458447` (about one in ten thousand) into infinity, corrupting `h3lowpoints map` and
+  `verify` on 1 m lidar results. H3 columns are now always read as text, and CSV numbers read back
+  exactly (`float_precision="round_trip"`).
+- **A CRS given as text.** `analyze_array(arr, transform, "EPSG:32614")` crashed although any CRS
+  pyproj accepts is documented as valid.
+- Empty tables keep their column types (integers, booleans, text) instead of becoming text.
+
+### Added (earlier in this release)
 - **A third of the memory for large regions.** `analyze_tiled` releases each tile once it is
   summarised and assembles the cell table with sorted arrays instead of pandas groupby; coverage
   is measured in chunks with a summed-area table; GDAL's read cache is capped at 256 MB. The 3DEP

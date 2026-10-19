@@ -1,85 +1,94 @@
 # Roadmap
 
-Direction: a **global depression layer on H3**, usable at every H3 resolution for visualization,
-with a **susceptibility layer** for possible waterlogging built later from globally available
-inputs. Nothing below is released yet; each phase is finished and tested before the next starts.
+The library works anywhere in the world on any elevation data you supply. The published data
+products it builds (a national depression layer, and later a susceptibility layer) cover the
+**United States**, where free, bare-earth, nationally consistent elevation data exists (USGS
+3DEP). Everything is meant to cost nothing to run or to host: results are published as open
+data files and static web pages.
 
-## Phase 1: the depression layer, globally
+Each step is finished, tested and documented before the next starts. Nothing is released yet.
 
-Done:
+## Done
 
-- **A global DEM source.** `h3lowpoints fetch-dem` reads Copernicus GLO-30 (30 m, open data, no
-  login) from AWS. The US 3DEP 1 m reader stays as the high-resolution tier, and any national
-  lidar DEM works through `analyze`.
-- **Native geographic coordinates.** Latitude/longitude DEMs are analyzed as they are, with exact
-  WGS 84 pixel areas per row; no resampling to UTM.
-- **Exact tiled filling** (Barnes 2016): `analyze_tiled` equals `analyze` whatever the tile size,
-  so a DEM larger than memory gives the same answer.
-- **A mask.** `analyze(mask=...)` and `analyze_tiled(mask_path=...)` ignore cells such as open
-  water, which then act as outlets. Copernicus does not publish a water mask with the AWS tiles,
-  so supply one (for example from ESA WorldCover or JRC Global Surface Water).
+**The depression layer, at any resolution**
 
-- **Coverage per cell.** Every H3 cell reports how much of it the DEM covered, so a partly covered
-  cell is never read as "less depressed" than a fully covered one.
-- **An interactive map** (`Result.to_html`, `h3lowpoints map`, `examples/gallery.py`) to see all of
-  this on a basemap at every resolution.
+- Priority-flood fill and 8-connected depressions, checked against an independent method.
+- Native longitude/latitude grids with exact ellipsoid pixel areas; projected grids in metres or
+  feet.
+- Every H3 resolution: `res="auto"` picks the finest the data supports, every lowest point is
+  also given at resolution 15, and coarser tables are exact roll-ups.
+- Coverage per cell, so partly covered cells are never read as less depressed.
+- Masks for water or areas to ignore.
+- An interactive 3D web map, self-contained, shareable by link.
 
-Still to do:
+**Regions of any size**
 
-- **Continental scale.** Exact tiling holds one graph node per tile-border cell and per outlet
-  cell. A continent needs the same method applied to blocks, joined hierarchically.
-- Cost: about 1.7e11 land pixels at 30 m. The speed of one run is measured in the changelog;
-  a global figure will be measured, not guessed.
+- Exact tiled analysis (`analyze_tiled`): identical to the whole-raster result for any tile size.
+- Bounded memory: per-tile summaries, per-partition spill files, tables written to disk as they
+  are produced, CSV or Parquet output. Memory no longer grows with the size of the output.
+- `h3lowpoints build`: any US box straight from 3DEP tiles, verified on completion.
 
-Regions at scale (done): `h3lowpoints build` streams 3DEP tiles through the exact tiled analysis
-and verifies the result (docs/verification.md).
+**Data readers**
 
-US data (done): USGS 3DEP at 30 m, 10 m and 1 m lidar, NLCD imperviousness, ESA WorldCover and NOAA
-Atlas 14 design rainfall can all be fetched for any box (`h3lowpoints.sources`).
+- USGS 3DEP 30 m, 10 m and 1 m lidar; Copernicus GLO-30 worldwide; NLCD imperviousness; ESA
+  WorldCover; NOAA Atlas 14 design rainfall.
 
-Honest limit: GLO-30 is a surface model with vertical error of a few metres. It resolves large
-basins, not street-level ponding. Street-scale depressions need lidar-derived DEMs, which exist
-openly only for some countries.
+**Verification anyone can run**
 
-## Phase 2: H3 resolution policy (in place: `res="auto"`, `h3_lowpoint_15`, summaries at res 0 to 3)
+- Invariants for any result (`h3lowpoints verify`, also in pieces for national results), spot
+  checks of the tiling on the user's own data, and oracle and mutation tests in the suite.
 
-H3 cell area: res 0 is 4.36 million km², res 3 is 12,393 km², res 5 is 253 km², res 7 is
-5.2 km², res 9 is 0.105 km², res 11 is 0.0021 km².
+## Next
+
+1. **National US layer.** Run `build` over the conterminous US from 3DEP 30 m (11 to 13
+   billion pixels; estimated 3 hours and under 10 GB of memory on a laptop, see
+   [Large regions](large-regions.md)), verify it, and publish the tables (Parquet) as open data on Zenodo with a DOI, plus
+   coarse summary maps. Resolution and `min_depth` will be chosen from the measured cost and the
+   data's vertical accuracy, and documented with the release.
+2. **General validation tools.** Score any set of observed locations (flood reports, high-water
+   marks, insurance claims, anything with coordinates) against the depressions: how much more
+   often observations fall in or near depressions than random locations do, with confidence
+   intervals that respect spatial clustering (block bootstrap). Works for any region and any
+   observations; never tuned to one city.
+3. **Physical susceptibility index.** For each depression, compare the water it could receive
+   with the storage it has:
+   - its contributing catchment, from flow routing on the filled surface;
+   - runoff = design rainfall (Atlas 14) × catchment area × a runoff coefficient from land cover
+     and imperviousness (NLCD, WorldCover);
+   - storage = the depression's volume;
+   - the fill ratio, runoff / storage, is the index.
+
+   Every term can be inspected, and the index needs no training labels. It will be validated with
+   the tools of step 2 and documented with its evidence and its limits.
+4. **Machine learning, only if it earns its place.** Train on the step 3 features, judge it by
+   leave-one-region-out validation (never scored on the place it learned from), and keep it only
+   if it beats the physical index on unseen regions. Labels of street-level waterlogging are
+   scarce and biased towards where people report; that is audited first.
+5. **The explorer web app.** A website in the spirit of h3geo.org, in a black-and-white design,
+   that runs entirely in the visitor's browser (no server, no cost): try the analysis on a small
+   box, browse the national layer at every resolution, view depressions flat, as wells below the
+   ground or as columns, and read this documentation.
+6. **Release 0.1.** Publish on PyPI, the documentation and app on GitHub Pages, and the data on
+   Zenodo.
+
+## Also planned
+
+- **Vertical units.** An option to read heights in feet (or any factor), with the unit recorded
+  in `meta.json`; today heights must be in metres ([Accuracy and limits](limitations.md)).
+- **Continental scale beyond one machine.** The border graph of the exact tiling grows with the
+  number of tile-border pixels; a hierarchical version (blocks of tiles joined the same way) would
+  remove that last limit for continents.
+- More data readers: other national lidar programs, FABDEM, water masks (JRC Global Surface
+  Water).
+
+## H3 resolution policy
 
 | H3 res | Cell area | What is shown |
 |---|---|---|
-| 0 to 3 | 12,000 km² and up | Summary statistics only: depressed share of the covered land, total volume, deepest depression. Never "hotspots": a cell this large contains thousands of unrelated features. |
-| 4 to 6 | 36 to 1,800 km² | Regional summaries and, later, the share of land that is susceptible |
-| 7 to 9 | 0.1 to 5 km² | Neighbourhood-scale hotspots, where the DEM supports them |
-| 10 and finer | under 0.02 km² | Only with DEMs of 2 m or finer |
+| 0 to 3 | 12,000 km² and up | Summaries only: share of the covered land that is depressed, counts, total volume. Never "hotspots": a cell this large holds thousands of unrelated features. |
+| 4 to 6 | 36 to 1,800 km² | Regional summaries |
+| 7 to 9 | 0.1 to 5 km² | Neighbourhood patterns, where the data supports them |
+| 10 and finer | 0.015 km² and less | Individual depressions; 12 and finer only with data of 5 m or finer |
 
-The library already refuses to claim more than the DEM supports (H3 cells need at least four
-pixels). This phase adds the upper end: coarse cells report shares and totals instead of flags.
-
-## Phase 3: a physical susceptibility index (no labels needed)
-
-For each depression, compare the water it could receive with the storage it has:
-
-- its **contributing catchment**, from flow routing on the filled DEM;
-- **runoff** = design rainfall x catchment x a runoff coefficient from land cover (ESA WorldCover);
-- **storage** = the depression's volume;
-- the **fill ratio** runoff / storage is the index.
-
-Rainfall starts as a user-supplied number with a sensible default, with an optional global
-raster later. Permanent water (JRC Global Surface Water) is excluded. The index is transparent:
-every term can be inspected, and it works anywhere the inputs exist.
-
-## Phase 4: machine learning, only if the data supports it
-
-Global labels of street-level waterlogging do not exist. Candidate sources (satellite flood maps,
-city flood reports, insurance claims) cover mostly river floods or a few cities, and each is
-biased towards where people report. So before any model:
-
-1. audit the label sources and what they actually measure;
-2. train on the Phase 3 features, not raw rasters;
-3. judge it with **leave-one-region-out** validation, so a model is never scored on the place it
-   learned from.
-
-If a model does not beat the physical index on unseen regions, the physical index stays the
-answer. The previous Austin-only classes and their 311 comparison were removed for exactly this
-reason: one city is not evidence for a global method.
+The library never reports a resolution finer than the data supports without a warning (cells must
+hold at least four pixels).

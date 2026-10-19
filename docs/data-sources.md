@@ -1,0 +1,163 @@
+# Data sources
+
+The library analyzes any elevation raster you give it. For convenience it can also download
+open data for any box. This page describes each dataset: what it measures, how good it is,
+where it exists, its licence, how the library reads it, and the surprises found while testing it.
+
+No data is bundled with the library. Everything is read from the publisher's own servers, over
+HTTPS, with no account or key, and only the parts a box needs are downloaded (the files are
+cloud-optimized GeoTIFFs, which allow reading windows by HTTP range requests).
+
+## Choosing elevation data
+
+| Dataset | Pixel | Surface | Vertical accuracy (typical) | Area | Use for |
+|---|---|---|---|---|---|
+| USGS 3DEP 1 m lidar | 1 m | bare earth | ~10 cm | most of the US | street-scale depressions: sags, low corners, pits |
+| USGS 3DEP 1/3″ | ~10 m | bare earth | about 1 m; better where built from lidar | the US | neighbourhood basins |
+| USGS 3DEP 1″ | ~30 m | bare earth | about 1 m or more; varies with the source survey | the US | large basins, regional and national overviews |
+| Copernicus GLO-30 | ~30 m | **surface** (roofs, trees) | ~2 to 4 m | the world | large basins outside the US |
+
+Rules of thumb:
+
+- Prefer **bare earth**. A surface model holds water on roofs and in gaps between trees, which
+  produces depressions that are not in the ground.
+- Set **`min_depth` above the vertical error**: about 0.15 m on lidar, 0.5 to 1 m on 10 to 30 m
+  data. The library warns when `min_depth` is under 1 m on data coarser than 2 m.
+- The finest H3 resolution follows from the pixel size (`res="auto"`): 14 for 1 m, 11 for 10 m,
+  10 for 30 m.
+
+Accuracy figures are the publishers' typical values, not guarantees for any one place; check the
+metadata of the survey covering your area.
+
+## USGS 3DEP 30 m and 10 m
+
+- **What:** the US 3D Elevation Program's seamless bare-earth elevation at 1 arc-second (~30 m)
+  and 1/3 arc-second (~10 m), built from the best source available for each area (increasingly
+  lidar).
+- **Where:** the United States. Missing tiles (open sea, outside the US) are nodata.
+- **Licence:** public domain (US Government work). Credit "USGS 3D Elevation Program" is good
+  practice.
+- **Format:** 1° × 1° GeoTIFF tiles in NAD83 longitude/latitude, heights in metres, on the public
+  `prd-tnm` bucket.
+- **Library:** `fetch_3dep` (a GeoTIFF for a box), `build_3dep_vrt` (a virtual raster for a box
+  of any size), `h3lowpoints fetch-dem --from 3dep|3dep10`, `h3lowpoints build`.
+
+Things learnt while testing:
+
+- **Tiles are named by their north-west corner**: `n31w098` covers 30° to 31° N and 98° to 97° W.
+- **Neighbouring tiles overlap by 6 pixels, and the overlaps disagree.** The tiles are produced
+  separately and the shared strips can differ by centimetres, enough to change the outline of a
+  shallow depression along a seam. The library therefore takes every pixel from the tile whose
+  own 1° cell contains it (never from a neighbour's overlap), copying values exactly with no
+  resampling. `fetch_3dep` and `build_3dep_vrt` give identical pixels.
+- **Size:** a 1° tile at 30 m is about 40 MB; Texas needs 155 tiles (6 GB). `build` can stream
+  tiles over HTTP or download them once into `--cache-dir`, which is faster because a tiled
+  analysis reads everything twice.
+
+## USGS 3DEP 1 m lidar
+
+- **What:** bare-earth elevation at 1 m from airborne lidar surveys, published per survey
+  project.
+- **Where:** most, not all, of the United States; coverage keeps growing. Where several surveys
+  overlap, they differ in date.
+- **Licence:** public domain.
+- **Format:** 10 km × 10 km tiles in the UTM zone of each survey, heights in metres, listed in
+  the USGS National Map catalogue (TNM API).
+- **Library:** `fetch_lidar`, `h3lowpoints fetch-dem --from lidar` (boxes up to 100 km² by
+  default).
+
+How the library assembles a box:
+
+- It asks the catalogue for every 1 m tile touching the box and sorts them **newest survey
+  first**; where surveys overlap, the newest wins.
+- The output is on the pixel grid of the survey covering the box's centre, so its values are
+  copied, not resampled. Tiles from a survey in another UTM zone are reprojected (bilinear) onto
+  that grid.
+- Downtown Austin at 1 m gives H3 resolution 14 (`auto`), and lowest points to the metre.
+
+## Copernicus GLO-30
+
+- **What:** a global digital **surface** model at 1 arc-second (~30 m) from the TanDEM-X radar
+  mission, distributed by the European Space Agency.
+- **Where:** the whole land surface. Tiles that would be entirely ocean do not exist.
+- **Licence:** free to use with attribution, as given by the Copernicus programme ("produced using
+  Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018
+  provided under COPERNICUS by the European Union and ESA; all rights reserved"). Check the
+  current terms before redistributing derived data.
+- **Format:** 1° × 1° cloud-optimized GeoTIFFs in WGS 84, heights in metres above the EGM2008
+  geoid, on AWS open data.
+- **Library:** `fetch_dem`, `h3lowpoints fetch-dem` (the default source).
+
+Things to know:
+
+- It is a **surface model**: buildings and forest canopy are included. It shows large basins
+  (the below-sea-level polders around Rotterdam come out as one large depression), not
+  street-level ponding.
+- **Ocean inside a tile is valid elevation 0 m**, not nodata, so it does not lower coverage. Supply
+  a mask if open water should not count.
+- **Lakes and rivers are flattened but not marked.** A flattened lake surface has no depth in the
+  fill. Use a water mask (for example permanent water from WorldCover) if lakes should be
+  excluded.
+- **Tiles narrow towards the poles.** Above 50° latitude tiles have fewer columns. A box spanning
+  bands of different widths is mosaicked at the finest width, with a warning.
+
+## NLCD percent impervious
+
+- **What:** the US National Land Cover Database's share of each 30 m pixel covered by pavement,
+  roofs and other impervious surfaces, 0 to 100%.
+- **Where:** the lower 48 states. Years 2001, 2004, 2006, 2008, 2011, 2013, 2016, 2019, 2021.
+- **Licence:** public domain (MRLC consortium, US Government).
+- **Format:** served by MRLC's web coverage service in NAD83 / Conus Albers (EPSG:5070).
+- **Library:** `fetch_impervious`, `h3lowpoints fetch-landcover --from nlcd`. Output values are
+  0 to 100, with 255 for no data.
+
+A trap found while testing: **the service labels 0 as "no data"**, but in this product 0 means
+"0% impervious" (a park, a field, a forest). Read naively, every unbuilt pixel would vanish. The
+library drops that label and treats only values above 100 as no data.
+
+This is an input for the planned susceptibility layer (rain on impervious ground runs off).
+
+## ESA WorldCover
+
+- **What:** global land-cover classes at 10 m for 2021: tree cover, shrubland, grassland,
+  cropland, built-up, bare or sparse vegetation, snow and ice, permanent water bodies, herbaceous
+  wetland, mangroves, moss and lichen (codes 10 to 100, in `WORLDCOVER_CLASSES`).
+- **Where:** the world.
+- **Licence:** CC BY 4.0. Credit "© ESA WorldCover project 2021 / Contains modified Copernicus
+  Sentinel data (2021) processed by ESA WorldCover consortium".
+- **Format:** 3° × 3° tiles in WGS 84 on AWS.
+- **Library:** `fetch_worldcover`, `h3lowpoints fetch-landcover` (the default). Output is uint8
+  class codes, 0 for no data.
+
+Its "permanent water bodies" class is a convenient water mask for `analyze(mask=...)`.
+
+## NOAA Atlas 14 design rainfall
+
+- **What:** how much rain falls in a storm of a given duration (5 minutes to 60 days) and rarity
+  (expected once in 1 to 1000 years), from NOAA's Precipitation Frequency Data Server.
+- **Where:** the parts of the US covered by Atlas 14. In tests in 2026 every place tried had
+  estimates **except Washington and Oregon**. Wherever the server has no estimates, the library
+  raises an error asking you to supply a depth yourself.
+- **Licence:** public domain.
+- **Library:** `design_rainfall` (the whole table, in millimetres), `rainfall_depth` (one value),
+  `h3lowpoints rainfall LAT LON`.
+
+Durations are labelled as NOAA labels them: `5-min`, `10-min`, `15-min`, `30-min`, `60-min`,
+`2-hr`, `3-hr`, `6-hr`, `12-hr`, `24-hr`, `2-day`, `3-day`, `4-day`, `7-day`, `10-day`, `20-day`,
+`30-day`, `45-day`, `60-day`. Values are partial-duration-series estimates at a point; over a city
+they change little, so one point near the centre is a fair design value.
+
+## Your own data
+
+Any single-band elevation raster with a coordinate reference system works: national lidar from
+other countries, FABDEM, NASADEM, a drone survey. Requirements and tips:
+
+- a projected CRS in metres or feet, or longitude/latitude in degrees;
+- a north-up grid (no rotation);
+- missing pixels marked by the file's nodata value or NaN;
+- **heights in metres**: the library does not convert vertical units (see
+  [Accuracy and limits](limitations.md));
+- a mask (`mask=` or `mask_path=`) for water or areas to ignore.
+
+Drains (inlets, grates) and building footprints can come from any vector file; see `read_drains`
+and `read_buildings` in the [Python API](python-api.md). City open-data portals often publish both.

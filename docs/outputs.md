@@ -1,36 +1,216 @@
 # Outputs
 
-`Result.save(dir)` writes three files; `Result.depressions`, `Result.cells` and `Result.meta` hold
-the same content in memory. Columns appear only when the data behind them was supplied.
+An analysis produces three things: a **depression table** (one row per depression), a **cell
+table** (one row per H3 cell that holds depressed ground) and **meta** (every setting and version
+used). In Python they are `Result.depressions`, `Result.cells` and `Result.meta`; on disk they are
+three files in a folder. This page describes every file, column and field.
 
-## depressions (one row per depression)
+## Files
 
-| Column | Meaning |
-|---|---|
-| `id` | Label of the depression: the raster label for `analyze`, 1 to n in scan order for `analyze_tiled` |
-| `max_depth_m` | Deepest point, metres |
-| `area_m2`, `volume_m3` | Area and volume of the filled region |
-| `lat`, `lon`, `h3_lowpoint` | Deepest point, and the H3 cell (at the table's resolution) containing it |
-| `h3_lowpoint_15` | The resolution-15 H3 cell (about 1 m across, the finest H3 has) containing the deepest point |
-| `edge` | Within one cell of the raster border; size unknown (see [definition.md](definition.md)) |
-| `dist_to_drain_m`, `drain_at_core` | With `drains_xy`: distance to the nearest drain, and whether a drain lies near the deep core |
-| `building_overlap`, `likely_building_artifact` | With `buildings`: share of the depression under footprints, and whether it is at least 50% |
+| File | Written by | Content |
+|---|---|---|
+| `depressions.csv` or `depressions.parquet` | every saved result | the depression table |
+| `cells.csv` or `cells.parquet` | every saved result | the cell table |
+| `meta.json` | every saved result | settings, versions, counts |
+| `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
+| `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
+| `_spill/` | a disk-backed run, while it runs | temporary per-cell sums; removed when the run ends, even if it fails |
 
-## cells (one row per H3 cell that holds depression pixels)
+**Format.** CSV is the default and opens anywhere. Parquet (`format="parquet"`, needs
+`pip install h3-lowpoints[parquet]`) is typically several times smaller, keeps exact column types
+and reads much faster; it is the better choice for large regions. A folder holds one format: saving
+in the other format replaces the old files.
 
-`h3`, `max_depth_m`, `depress_area_m2`, `depress_volume_m3`, `n_lowpoints`, `covered_area_m2`,
-`coverage`, `depressed_share`. Depth is the maximum over the cell's pixels; area and volume are
-sums, and `n_lowpoints` counts the depressions whose deepest point lies in the cell, so cells roll
-up exactly with `Result.at_resolution`. `coverage` (0 to 1) is the share of the cell the DEM
-covers, `covered_area_m2` that share times the cell's exact area, and `depressed_share` the
-depressed area over the covered area, capped at 1 (see [definition.md](definition.md)).
+**CSV details.** Comma-separated with a header row, no index column, booleans as `True`/`False`,
+numbers written with enough digits to read back exactly.
 
-The table's resolution is `Result.res` (also `meta["params"]["res"]`); `meta["res_requested"]`
-records what was asked for, such as "auto".
+**Parquet details.** Compressed with zstd. Column types: text for H3 ids, 64-bit floats for
+measurements, 64-bit integers for `id` and `n_lowpoints`, booleans for flags.
+
+**Row order.** Depressions are ordered by the position of their first pixel in reading order
+(top row first, left to right). Cells are ordered by ascending H3 id (as a 64-bit integer), which
+groups neighbouring cells under the same coarse parent together.
+
+> **Reading the CSV files yourself:** read the H3 columns as text. Some H3 ids look like numbers
+> in scientific notation: tools that guess column types, pandas among them, read the
+> resolution-14 id `8e4516503458447` as `8 × 10^4516503458447`, i.e. infinity, and the id is lost.
+> About one resolution-14 id in ten thousand is affected. In pandas use
+> `pd.read_csv(path, dtype={"h3": str})` (and the same for `h3_lowpoint`, `h3_lowpoint_15`), or
+> use `h3lowpoints.read_result`, which does this for you. Parquet has no such problem.
+
+## The depression table
+
+One row per depression. The first nine columns are always present; the others appear only when
+the data behind them was supplied.
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | Identifier of the depression within this result. |
+| `max_depth_m` | float | m | Depth at the deepest point: filled level minus ground height. Always at least `min_depth`. |
+| `area_m2` | float | m² | Ground area of the depression: the sum of its pixels' ground areas. |
+| `volume_m3` | float | m³ | Water it holds when full: the sum over its pixels of depth × pixel area. |
+| `lat`, `lon` | float | degrees (WGS 84) | Centre of the deepest pixel. |
+| `h3_lowpoint` | text | | H3 cell, at the table's resolution, containing (`lat`, `lon`). Matches a row of the cell table. |
+| `h3_lowpoint_15` | text | | Resolution-15 H3 cell containing (`lat`, `lon`): the lowest point to the finest precision H3 has. |
+| `edge` | boolean | | True when the depression comes within one pixel of the raster's edge: it may continue beyond the data, so its area and volume are lower bounds. |
+| `dist_to_drain_m` | float | m | Only with drains: distance from the lowest point to the nearest drain. |
+| `drain_at_core` | boolean | | Only with drains: a drain lies within `drain_radius_m` of the depression's deep core. |
+| `building_overlap` | float | 0 to 1 | Only with buildings: share of the depression's pixels under building footprints. |
+| `likely_building_artifact` | boolean | | Only with buildings: `building_overlap` is at least 0.5. |
+
+How each value is computed, and the edge cases:
+
+- **`id`.** From `analyze`, the label the depression had when the raster was labelled; labels of
+  depressions dropped by `min_depth` are not reused, so ids can have gaps. From `analyze_tiled`
+  (and `build`), 1 to n in order. In both cases the order is the reading order of each
+  depression's first pixel. An id identifies a row within one result only; use `h3_lowpoint_15`
+  or `lat`/`lon` to match depressions across runs.
+- **Depth units.** Heights are taken to be metres. If a DEM stores heights in feet, depths and
+  volumes come out in feet (and feet × m²) although the columns say metres; convert such a DEM
+  first. See [Accuracy and limits](limitations.md).
+- **Pixel areas.** On a projected grid every pixel has the same area (pixel width × height,
+  converted to metres when the CRS is in feet). On a longitude/latitude grid each row's pixel area
+  is computed exactly on the WGS 84 ellipsoid.
+- **Lowest point.** The pixel with the greatest depth. If several pixels share it (within
+  1 nanometre), the first in reading order is used, so the result does not depend on how the
+  raster was tiled.
+- **`h3_lowpoint` vs the parent of `h3_lowpoint_15`.** H3 cells do not nest exactly, so near a
+  cell edge the coarse parent of `h3_lowpoint_15` can differ from `h3_lowpoint`. `h3_lowpoint` is
+  the one consistent with the cell table (both use the point's exact position).
+- **Precision of the lowest point.** `h3_lowpoint_15` is about 1 m across, but the position is
+  only as precise as the elevation pixel it came from: on 30 m data it marks a 1 m cell inside a
+  30 m pixel.
+- **`edge`.** Measured on the depression's bounding box against the raster border. Nodata inside
+  the raster is not an edge: water can leave there.
+- **Drains.** `dist_to_drain_m` is geodesic (on the WGS 84 ellipsoid) for degree grids and
+  straight-line for projected grids, to the nearest of all drains supplied. The **core** of a
+  depression is its pixels at least `drain_core_frac` (default 0.8) of its maximum depth deep.
+  "Within `drain_radius_m`" (default 5 m) uses whole pixels, rounded up, in a square
+  neighbourhood.
+- **Buildings.** Footprints are burned onto the pixel grid (a pixel counts when its centre is
+  inside a footprint). On projected grids footprints under 20 square map units are ignored (20 m²
+  in metre-based CRSs), to skip sheds and slivers; on degree grids none are ignored.
+
+## The cell table
+
+One row per H3 cell that contains at least one pixel of a depression that was kept. Cells with no
+depressed pixel are not listed.
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `h3` | text | | The cell's H3 id. All rows have the same resolution, `Result.res`. |
+| `max_depth_m` | float | m | Greatest depth over the depressed pixels in the cell. |
+| `depress_area_m2` | float | m² | Ground area of the depressed pixels in the cell. |
+| `depress_volume_m3` | float | m³ | Water held by the depressed pixels in the cell. |
+| `n_lowpoints` | integer | | Number of depressions whose lowest point (`h3_lowpoint`) is this cell. |
+| `covered_area_m2` | float | m² | `coverage` × the cell's exact area. |
+| `coverage` | float | 0 to 1 | Share of the cell the elevation data covers. |
+| `depressed_share` | float | 0 to 1 | `depress_area_m2` / `covered_area_m2`, capped at 1. |
+
+Details:
+
+- **Which pixels count.** A pixel belongs to the H3 cell containing its centre. A depression
+  larger than a cell contributes to every cell its pixels fall in, and a cell can hold parts of
+  several depressions.
+- **Roll-up.** `Result.at_resolution(r)` gives the table at any coarser resolution `r`:
+  `max_depth_m` is the maximum of the children, area, volume and `n_lowpoints` add up, and
+  coverage is measured afresh from the data footprint (it cannot be added up, because the finer
+  table lists only cells with depressions).
+- **Coverage.** The area of the cell's pixel positions that hold valid data, divided by the area
+  of all pixel positions inside the cell (by the same centre rule), where positions beyond the
+  raster count as not covered. Nodata, NaN and masked pixels are not covered. Cells wholly inside
+  valid data have coverage exactly 1. A cell that touches the edge or nodata and whose bounding
+  box spans more than 40,000 pixels is measured on a regular sample of those pixels, with an
+  error well under 1%.
+- **`depressed_share`.** The two areas come from different counts (the exact H3 area against a
+  sum of whole pixels), so for a cell that is almost entirely depressed the ratio could exceed 1
+  by a fraction of a percent; it is capped at 1.
+- **Exactness.** The sums in the cell table equal the sums in the depression table (area and
+  volume), and `n_lowpoints` adds up to the number of depressions. `h3lowpoints verify` checks
+  this for any saved result.
 
 ## meta.json
 
-Package and H3 versions, the DEM path and CRS, `cell_size_m`, `resolution_tier`, every
-parameter used, counts of drains, buildings and
-depressions, and for tiled runs the tile size and the size of the border graph. Keep it with the results: it is what
-makes a run reproducible.
+| Field | Meaning |
+|---|---|
+| `package_version`, `h3_version` | Versions of h3-lowpoints and of the H3 library used. |
+| `dem` | Path (or name) of the elevation data analyzed. |
+| `crs` | Its coordinate reference system. |
+| `shape` | `[rows, columns]` of the raster. |
+| `cell_size_m` | Typical pixel size in metres (the side of a square with the area of a pixel in the middle row). |
+| `geographic` | True for a longitude/latitude grid. |
+| `resolution_tier` | `fine` (pixels up to 2 m), `medium` (up to 12 m) or `coarse`. |
+| `res_requested` | The resolution asked for, such as `"auto"` or `12`. |
+| `params.res` | The resolution used (`Result.res`). |
+| `params.min_depth` | Shallowest depression kept, metres. |
+| `params.drain_radius_m`, `params.drain_core_frac` | Drain settings (used only with drains). |
+| `n_drains` | Number of drains supplied (0 for none). |
+| `n_buildings` | Number of building footprints supplied, or `null` when none were. |
+| `n_depressions` | Rows in the depression table. |
+| `n_edge` | Depressions with `edge = True`. |
+| `tiling` | Tiled runs only: `tile` (tile size in pixels), `n_tiles`, `n_border_cells` and `n_crossings` (the size of the graph joining the tiles; see [Large regions](large-regions.md)). |
+| `output` | Saved results: `format` (`csv` or `parquet`) and `n_cells` (rows in the cell table). |
+| `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis. |
+
+Example (from `examples/quickstart.py`):
+
+```json
+{
+  "res_requested": 12,
+  "package_version": "0.0.1",
+  "h3_version": "4.5.0",
+  "dem": "my_first_run/dem.tif",
+  "crs": "EPSG:32614",
+  "shape": [300, 300],
+  "cell_size_m": 1.0,
+  "geographic": false,
+  "resolution_tier": "fine",
+  "params": {"res": 12, "min_depth": 0.15, "drain_radius_m": 5.0, "drain_core_frac": 0.8},
+  "n_drains": 1,
+  "n_buildings": 1,
+  "n_depressions": 3,
+  "n_edge": 0,
+  "output": {"format": "csv", "n_cells": 13}
+}
+```
+
+Keep `meta.json` with the tables: it is what makes a result reproducible and checkable.
+
+## Opening results in other tools
+
+**pandas**
+
+```python
+from h3lowpoints import read_result
+res = read_result("results")              # CSV or Parquet; H3 ids kept as text
+res.cells.sort_values("depressed_share", ascending=False).head()
+```
+
+**DuckDB**
+
+```sql
+SELECT * FROM read_parquet('results/cells.parquet') ORDER BY depress_volume_m3 DESC LIMIT 10;
+SELECT * FROM read_csv('results/cells.csv', types={'h3': 'VARCHAR'});
+```
+
+**QGIS, kepler.gl, deck.gl (cell outlines)**
+
+```python
+from h3lowpoints.viz.deck import cells_to_geojson
+cells_to_geojson(res.cells, "cells.geojson")    # one polygon per cell, columns as properties
+```
+
+Open `cells.geojson` in QGIS, or drag it into kepler.gl. kepler.gl can also draw the cell table
+directly: add an H3 layer and choose the `h3` column. The depression table can be loaded as
+points from its `lon` and `lat` columns.
+
+**GeoPandas**
+
+```python
+import geopandas as gpd
+import h3
+from shapely.geometry import Polygon
+
+outline = [Polygon([(lng, lat) for lat, lng in h3.cell_to_boundary(c)]) for c in res.cells["h3"]]
+cells = gpd.GeoDataFrame(res.cells, geometry=outline, crs=4326)
+```

@@ -1,4 +1,3 @@
-import json
 from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
@@ -15,6 +14,8 @@ from .geometry import cell_size_m, crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import depression_cells, lonlat, pixel_centers, rollup
 from .hydro.depressions import depth_from_array, label_depressions, lowest_points, touches_edge
 from .resolution import FINEST_H3, check_resolution, guide_for_cell_size, metres_to_cells, resolve_resolution
+from .store import (check_format, missing_files, read_meta, read_table, remove_other_formats,
+                    write_meta, write_table)
 
 CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint",
                 "h3_lowpoint_15", "edge"]
@@ -22,6 +23,25 @@ CELL_TABLE = ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3", "n_lo
               "covered_area_m2", "coverage", "depressed_share"]
 DRAIN_COLUMNS = ["dist_to_drain_m", "drain_at_core"]
 BUILDING_COLUMNS = ["building_overlap", "likely_building_artifact"]
+TEXT_COLUMNS = {"h3", "h3_lowpoint", "h3_lowpoint_15"}
+BOOL_COLUMNS = {"edge", "drain_at_core", "likely_building_artifact"}
+INT_COLUMNS = {"id", "n_lowpoints"}
+
+
+def _empty(columns):
+    """A table with no rows whose columns have the types they have when there are rows."""
+    def dtype(c):
+        return ("object" if c in TEXT_COLUMNS else "bool" if c in BOOL_COLUMNS
+                else "int64" if c in INT_COLUMNS else "float64")
+    return pd.DataFrame({c: pd.Series(dtype=dtype(c)) for c in columns})
+
+
+def empty_depressions(columns=CORE_COLUMNS):
+    return _empty(columns)
+
+
+def empty_cells():
+    return _empty(CELL_TABLE)
 
 
 @dataclass
@@ -31,6 +51,8 @@ class Result:
     depressions  one row per depression (columns depend on what was requested, see docs/outputs.md)
     cells        one row per H3 cell that contains depression pixels
     meta         parameters, versions and resolution notes
+    path         the folder holding the tables, when they were written to disk instead of
+                 returned (`analyze_tiled(out_dir=...)`); `load()` reads them back
     """
     depressions: pd.DataFrame
     cells: pd.DataFrame
@@ -40,6 +62,7 @@ class Result:
     transform: object = field(repr=False, default=None)
     crs: object = field(repr=False, default=None)
     footprint: object = field(repr=False, default=None)
+    path: object = None
 
     def at_resolution(self, res):
         """Cell table at a coarser H3 resolution, rolled up without re-analysis.
@@ -69,13 +92,39 @@ class Result:
         return build_map(self.cells, self.depressions, self.meta, path, footprint=self.footprint,
                          **kwargs)
 
-    def save(self, outdir):
+    def save(self, outdir, format="csv"):
+        """Write `depressions`, `cells` (as .csv or .parquet) and `meta.json` to a folder."""
+        check_format(format)
+        if self.depressions is None:
+            raise ValueError(f"the tables are already on disk in {self.path}; use load() to read them")
         out = Path(outdir)
         out.mkdir(parents=True, exist_ok=True)
-        self.depressions.to_csv(out / "depressions.csv", index=False)
-        self.cells.to_csv(out / "cells.csv", index=False)
-        (out / "meta.json").write_text(json.dumps(self.meta, indent=2, default=str))
+        remove_other_formats(out, format)
+        write_table(self.depressions, out / f"depressions.{format}", format)
+        write_table(self.cells, out / f"cells.{format}", format)
+        write_meta(out, {**self.meta, "output": {"format": format, "n_cells": len(self.cells)}})
         return out
+
+    def load(self):
+        """A copy of this result with its tables read from `path` (for results written to disk)."""
+        if self.path is None:
+            return self
+        loaded = read_result(self.path)
+        return Result(loaded.depressions, loaded.cells, self.meta, transform=self.transform,
+                      crs=self.crs, footprint=self.footprint, path=self.path)
+
+
+def read_result(folder):
+    """A result saved in a folder (by `Result.save`, `analyze_tiled(out_dir=...)` or the CLI).
+
+    The returned `Result` has the two tables and `meta`; it has no footprint, so
+    `at_resolution` rolls up without measuring coverage afresh.
+    """
+    missing = missing_files(folder)
+    if missing:
+        raise FileNotFoundError(f"{folder} is missing {', '.join(missing)}")
+    return Result(read_table(folder, "depressions"), read_table(folder, "cells"), read_meta(folder),
+                  path=Path(folder))
 
 
 def add_coverage(cells, footprint):
@@ -102,8 +151,7 @@ def finish_cells(cells, lowpoints, footprint):
     cells = cells.assign(n_lowpoints=cells["h3"].map(counts).fillna(0).astype("int64"))
     cells = add_coverage(cells, footprint)
     if len(cells) == 0:
-        return pd.DataFrame({c: pd.Series(dtype="float64" if c != "h3" else "object")
-                             for c in CELL_TABLE})
+        return empty_cells()
     return cells[CELL_TABLE].reset_index(drop=True)
 
 
@@ -190,7 +238,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         meta.update({"n_depressions": 0, "n_edge": 0})
         footprint = Footprint.from_array(invalid, transform, crs)
         cells = finish_cells(depression_cells(depth, labels, transform, crs, res), [], footprint)
-        return Result(pd.DataFrame(columns=columns), cells, meta, labels, depth, transform, crs,
+        return Result(empty_depressions(columns), cells, meta, labels, depth, transform, crs,
                       footprint)
 
     mx, area, vol = (np.asarray(st[k]) for k in ("max_depth_m", "area_m2", "volume_m3"))

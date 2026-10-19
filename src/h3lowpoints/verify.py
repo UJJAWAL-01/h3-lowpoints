@@ -12,17 +12,16 @@ and coverage are consistent, values are finite and in range. `spot_check` cuts r
 a DEM and requires the whole-raster and tiled analyses to agree on each. Neither needs ground
 truth, so both can be run on any region the library is used on.
 """
-import json
 import tempfile
 from pathlib import Path
 
 import h3
 import numpy as np
-import pandas as pd
 import rasterio
 from rasterio.windows import Window
 
 from .resolution import FINEST_H3
+from .store import CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta, read_table
 
 REL = 1e-6        # relative tolerance for sums compared across tables (float summation order)
 
@@ -33,8 +32,12 @@ def _close(a, b, rel=REL):
 
 def check_tables(depressions, cells, meta):
     """Problems found in a result given as its three tables (empty list = all invariants hold)."""
+    return _check(depressions, [cells], meta)
+
+
+def _check(d, cell_chunks, meta):
+    """The checks, with the cell table given as any number of pieces (read one at a time)."""
     problems = []
-    d, c = depressions, cells
     res = (meta.get("params") or {}).get("res")
     min_depth = (meta.get("params") or {}).get("min_depth", 0.0)
     add = problems.append
@@ -42,8 +45,9 @@ def check_tables(depressions, cells, meta):
     if meta.get("n_depressions") is not None and meta["n_depressions"] != len(d):
         add(f"meta says {meta['n_depressions']} depressions, the table has {len(d)}")
     if len(d) == 0:
-        if len(c):
-            add(f"no depressions but {len(c)} cells")
+        n_cells = sum(len(c) for c in cell_chunks)
+        if n_cells:
+            add(f"no depressions but {n_cells} cells")
         return problems
 
     # --- depressions
@@ -61,7 +65,7 @@ def check_tables(depressions, cells, meta):
     if not d["lat"].between(-90, 90).all() or not d["lon"].between(-180, 180).all():
         add("a lowest point lies outside valid latitude/longitude")
     if res is not None:
-        wrong = [x for x in d["h3_lowpoint"] if h3.get_resolution(x) != res]
+        wrong = [x for x in d["h3_lowpoint"] if not _valid(x) or h3.get_resolution(x) != res]
         if wrong:
             add(f"{len(wrong)} h3_lowpoint ids are not at the table's resolution {res}")
     if "h3_lowpoint_15" in d:
@@ -70,55 +74,107 @@ def check_tables(depressions, cells, meta):
         if mismatched:
             add(f"{mismatched} h3_lowpoint_15 ids do not contain their lowest point")
 
-    # --- cells
-    if c["h3"].duplicated().any():
+    # --- cells, one piece at a time; only their ids (8 bytes per cell) are kept to the end
+    valid_low = [x for x in d["h3_lowpoint"] if _valid(x)]
+    low_ids, low_counts = np.unique(ids_to_int(valid_low), return_counts=True)
+    ids, flags = [], set()
+    area = volume = 0.0
+    deepest, n_low, n_low_found, has_counts = -np.inf, 0, 0, False
+    max_dep = d["max_depth_m"].max()
+    for c in cell_chunks:
+        if len(c) == 0:
+            continue
+        valid = np.array([_valid(x) for x in c["h3"]])
+        if not valid.all():
+            flags.add("invalid")
+        cell = ids_to_int(["0" if not ok else x for x, ok in zip(c["h3"], valid)])
+        ids.append(cell)
+        if res is not None and ((cell >> np.uint64(52)) & np.uint64(15) != res)[valid].any():
+            flags.add("res")
+        area += float(c["depress_area_m2"].sum())
+        volume += float(c["depress_volume_m3"].sum())
+        deepest = max(deepest, float(c["max_depth_m"].max()))
+        if (c["max_depth_m"] > max_dep * (1 + REL)).any():
+            flags.add("too deep")
+        if "n_lowpoints" in c:
+            has_counts = True
+            n = c["n_lowpoints"].to_numpy()
+            n_low += int(n.sum())
+            if len(low_ids):
+                at = np.minimum(np.searchsorted(low_ids, cell), len(low_ids) - 1)
+                expected = np.where(low_ids[at] == cell, low_counts[at], 0)
+            else:
+                expected = np.zeros(len(cell), dtype=np.int64)
+            n_low_found += int(expected.sum())
+            if (n != expected).any():
+                flags.add("n_lowpoints")
+        if "coverage" in c:
+            cov = c["coverage"]
+            if not cov.between(0, 1).all() or (cov <= 0).any():
+                flags.add("coverage range")
+            nominal = np.array([h3.cell_area(x, unit="m^2") if ok else np.nan
+                                for x, ok in zip(c["h3"], valid)])
+            if (c["covered_area_m2"] > nominal * (1 + REL)).any():
+                flags.add("covered too big")
+            if not np.allclose(c["covered_area_m2"][valid], (c["coverage"] * nominal)[valid], rtol=1e-6):
+                flags.add("covered not coverage")
+        if "depressed_share" in c and not c["depressed_share"].between(0, 1).all():
+            flags.add("share")
+    ids = np.concatenate(ids) if ids else np.zeros(0, dtype=np.uint64)
+
+    if "invalid" in flags:
+        add("the cell table holds ids that are not valid H3 cells")
+    if len(np.unique(ids)) != len(ids):
         add("cell ids are not unique")
-    if res is not None and any(h3.get_resolution(x) != res for x in c["h3"]):
+    if "res" in flags:
         add(f"cells are not all at resolution {res}")
-    if not _close(c["depress_area_m2"].sum(), d["area_m2"].sum()):
-        add(f"cell areas add to {c['depress_area_m2'].sum():.6g} m2, depressions to {d['area_m2'].sum():.6g}")
-    if not _close(c["depress_volume_m3"].sum(), d["volume_m3"].sum()):
-        add(f"cell volumes add to {c['depress_volume_m3'].sum():.6g} m3, depressions to {d['volume_m3'].sum():.6g}")
-    if not _close(c["max_depth_m"].max(), d["max_depth_m"].max()):
+    if not _close(area, d["area_m2"].sum()):
+        add(f"cell areas add to {area:.6g} m2, depressions to {d['area_m2'].sum():.6g}")
+    if not _close(volume, d["volume_m3"].sum()):
+        add(f"cell volumes add to {volume:.6g} m3, depressions to {d['volume_m3'].sum():.6g}")
+    if not _close(deepest, max_dep):
         add("the deepest cell and the deepest depression differ")
-    if (c["max_depth_m"] > d["max_depth_m"].max() * (1 + REL)).any():
+    if "too deep" in flags:
         add("a cell is deeper than every depression")
-    if "n_lowpoints" in c:
-        if int(c["n_lowpoints"].sum()) != len(d):
-            add(f"n_lowpoints adds to {int(c['n_lowpoints'].sum())}, not {len(d)} depressions")
-        counts = d["h3_lowpoint"].value_counts()
-        listed = c.set_index("h3")["n_lowpoints"]
-        missing = [x for x in counts.index if x not in listed.index]
-        if missing:
-            add(f"{len(missing)} lowest points lie in cells missing from the cell table")
-        elif not (listed.reindex(counts.index) == counts).all():
+    if has_counts:
+        if n_low != len(d):
+            add(f"n_lowpoints adds to {n_low}, not {len(d)} depressions")
+        if n_low_found < len(valid_low):
+            add(f"{len(valid_low) - n_low_found} lowest points lie in cells missing from the cell table")
+        elif "n_lowpoints" in flags:
             add("n_lowpoints does not match the lowest points in each cell")
-    if "coverage" in c:
-        if not c["coverage"].between(0, 1).all() or (c["coverage"] <= 0).any():
-            add("coverage outside (0, 1]")
-        nominal = np.array([h3.cell_area(x, unit="m^2") for x in c["h3"]])
-        if (c["covered_area_m2"] > nominal * (1 + REL)).any():
-            add("a covered area is larger than its H3 cell")
-        if not np.allclose(c["covered_area_m2"], c["coverage"] * nominal, rtol=1e-6):
-            add("covered_area_m2 is not coverage times the cell's area")
-    if "depressed_share" in c and not c["depressed_share"].between(0, 1).all():
+    if "coverage range" in flags:
+        add("coverage outside (0, 1]")
+    if "covered too big" in flags:
+        add("a covered area is larger than its H3 cell")
+    if "covered not coverage" in flags:
+        add("covered_area_m2 is not coverage times the cell's area")
+    if "share" in flags:
         add("depressed_share outside [0, 1]")
     return problems
 
 
+def _valid(cell):
+    return isinstance(cell, str) and h3.is_valid_cell(cell)
+
+
 def check_result(result):
-    """Problems found in a `Result` (empty list = all invariants hold)."""
+    """Problems found in a `Result` (empty list = all invariants hold).
+
+    A result written to disk (`analyze_tiled(out_dir=...)`) is checked from its files.
+    """
+    if result.depressions is None and result.path is not None:
+        return check_saved(result.path)
     return check_tables(result.depressions, result.cells, result.meta)
 
 
-def check_saved(folder):
-    """Problems found in a folder written by `Result.save`."""
-    folder = Path(folder)
-    missing = [n for n in ("depressions.csv", "cells.csv", "meta.json") if not (folder / n).exists()]
+def check_saved(folder, rows=CHUNK_ROWS):
+    """Problems found in a saved result folder (CSV or Parquet), reading the cells in pieces."""
+    missing = missing_files(folder)
     if missing:
         return [f"{folder} is missing {', '.join(missing)}"]
-    return check_tables(pd.read_csv(folder / "depressions.csv"), pd.read_csv(folder / "cells.csv"),
-                        json.loads((folder / "meta.json").read_text()))
+    return _check(read_table(folder, "depressions"), iter_table(folder, "cells", rows=rows),
+                  read_meta(folder))
 
 
 def compare_results(a, b, rel=1e-9):

@@ -2,7 +2,7 @@ import h3
 import numpy as np
 import pandas as pd
 from h3.api import numpy_int
-from pyproj import Transformer
+from pyproj import CRS, Transformer
 
 from ..geometry import pixel_areas_m2
 from ..hydro.depressions import pixel_weights
@@ -17,7 +17,11 @@ def pixel_centers(transform, rows, cols):
 
 
 def lonlat(crs, x, y):
-    """Longitude and latitude of map coordinates (a no-op for WGS 84)."""
+    """Longitude and latitude of map coordinates (a no-op for WGS 84).
+
+    `crs` is anything pyproj accepts: a rasterio or pyproj CRS, "EPSG:32614", a WKT string.
+    """
+    crs = CRS.from_user_input(crs)
     if crs.to_epsg() == 4326:
         return np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64")
     return Transformer.from_crs(crs, 4326, always_xy=True).transform(x, y)

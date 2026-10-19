@@ -1,7 +1,7 @@
 from .dem_io import reproject_to_utm
 from .h3agg.aggregate import rollup
-from .pipeline import Result, analyze, analyze_array, resolution_guide
+from .pipeline import Result, analyze, analyze_array, read_result, resolution_guide
 from .tiling import analyze_tiled
 
 __all__ = ["Result", "analyze", "analyze_array", "analyze_tiled",
-           "reproject_to_utm", "resolution_guide", "rollup"]
+           "read_result", "reproject_to_utm", "resolution_guide", "rollup"]

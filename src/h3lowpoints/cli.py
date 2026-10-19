@@ -32,13 +32,16 @@ def build_parser():
                    help="H3 resolution 0-15, or 'auto' (default) for the finest the DEM supports")
     a.add_argument("--min-depth", type=float, default=0.15, help="minimum depression depth in metres")
     a.add_argument("--tile", type=int, default=0,
-                   help="process in tiles of this many cells (for DEMs larger than memory); "
-                        "0 = whole raster. The result does not depend on the tile size")
+                   help="process in tiles of this many pixels (for DEMs larger than memory), writing "
+                        "the tables as they are produced; 0 = whole raster (default). The result "
+                        "does not depend on the tile size")
 
+    a.add_argument("--format", default="csv", choices=["csv", "parquet"],
+                   help="table format: csv (default) or parquet (needs pyarrow)")
     a.add_argument("--map", help="also write an interactive web map to this .html file")
 
     m = sub.add_parser("map", help="make an interactive web map from a results folder")
-    m.add_argument("results", help="folder written by 'analyze' (depressions.csv, cells.csv, meta.json)")
+    m.add_argument("results", help="folder written by 'analyze' or 'build'")
     m.add_argument("--out", default="map.html", help="output .html file (default map.html)")
     m.add_argument("--title", help="title shown on the map")
 
@@ -67,6 +70,8 @@ def build_parser():
     b.add_argument("--min-depth", type=float, default=0.15, help="minimum depression depth in metres")
     b.add_argument("--tile", type=int, default=4096, help="tile size in pixels (memory, not result)")
     b.add_argument("--cache-dir", help="download each 3DEP tile here once instead of streaming it")
+    b.add_argument("--format", default="csv", choices=["csv", "parquet"],
+                   help="table format: csv (default) or parquet (needs pyarrow; smaller and faster)")
     b.add_argument("--spot-check", type=int, default=0, metavar="N",
                    help="also re-run N random windows tiled and whole and require identical answers")
     b.add_argument("--map", help="also write an interactive web map to this .html file")
@@ -154,16 +159,19 @@ def _analyze(args):
     if args.tile:
         from .tiling import analyze_tiled
 
+        # tables go straight to the output folder, so their size is not limited by memory
         result = analyze_tiled(dem, drains_xy=drains, buildings=buildings, tile=args.tile,
-                               res=args.res, min_depth=args.min_depth)
+                               res=args.res, min_depth=args.min_depth, out_dir=args.out,
+                               format=args.format)
+        out = result.path
     else:
         result = analyze(dem, drains_xy=drains, res=args.res, min_depth=args.min_depth,
                          buildings=buildings)
-    out = result.save(args.out)
+        out = result.save(args.out, format=args.format)
     print(f"{result.meta['n_depressions']} depressions on H3 resolution {result.res} written to {out}")
     print(f"  {result.meta['n_edge']} cut off by the data border")
     if args.map:
-        print(f"map written to {result.to_html(args.map)}")
+        print(f"map written to {result.load().to_html(args.map)}")
     return 0
 
 
@@ -172,8 +180,9 @@ def _build(args):
     import time
 
     from .sources.usgs import build_3dep_vrt
+    from .store import write_meta
     from .tiling import analyze_tiled
-    from .verify import check_result, spot_check
+    from .verify import check_saved, spot_check
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -183,12 +192,14 @@ def _build(args):
                          cache_dir=args.cache_dir)
     timings["tiles"] = time.perf_counter() - start
     start = time.perf_counter()
-    result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth, verbose=True)
+    # the tables go to disk as they are produced, so the region is not limited by memory
+    result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth,
+                           verbose=True, out_dir=out, format=args.format)
     timings["analysis"] = time.perf_counter() - start
     result.meta["build"] = {"dataset": args.dataset, "bbox": list(args.bbox),
                             "seconds": {k: round(v, 1) for k, v in timings.items()}}
-    result.save(out)
-    problems = check_result(result)
+    write_meta(out, result.meta)
+    problems = check_saved(out)
     if args.spot_check:
         problems += spot_check(str(vrt), windows=args.spot_check, res=result.res, min_depth=args.min_depth)
     (out / "verify.json").write_text(json.dumps({"problems": problems}, indent=2))
@@ -196,7 +207,7 @@ def _build(args):
           f"({timings['tiles']:.0f} s for tiles, {timings['analysis']:.0f} s for the analysis)")
     print("verification: " + ("all invariants hold" if not problems else f"{len(problems)} problem(s), see verify.json"))
     if args.map:
-        print(f"map written to {result.to_html(args.map)}")
+        print(f"map written to {result.load().to_html(args.map)}")
     return 0 if not problems else 1
 
 

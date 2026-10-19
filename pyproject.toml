@@ -30,7 +30,8 @@ dependencies = [
 [project.optional-dependencies]
 sources = ["geopandas", "pyogrio", "shapely"]   # reading drain and building files
 viz = ["pydeck"]
-dev = ["pytest", "ruff", "shapely"]
+parquet = ["pyarrow>=14"]                       # writing and reading .parquet results
+dev = ["pytest", "ruff", "shapely", "pyarrow>=14"]
 
 [project.scripts]
 h3lowpoints = "h3lowpoints.cli:main"

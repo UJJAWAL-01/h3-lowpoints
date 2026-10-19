@@ -250,3 +250,14 @@ def test_resolution_tier_uses_ground_size_not_degrees():
 
 def test_authalic_radius_is_the_published_value():
     assert EARTH_RADIUS_M == pytest.approx(6371007.1809, abs=1e-3)
+
+
+@pytest.mark.parametrize("crs", ["EPSG:32614", CRS.from_epsg(32614), rasterio.crs.CRS.from_epsg(32614),
+                                 CRS.from_epsg(32614).to_wkt()], ids=["text", "pyproj", "rasterio", "wkt"])
+def test_any_form_of_crs_gives_the_same_result(crs):
+    # the API accepts any CRS pyproj understands; a plain "EPSG:..." string used to crash
+    arr = np.full((40, 40), 10.0)
+    arr[10:20, 10:20] = 9.0
+    want = analyze_array(arr, from_origin(500000, 3350000, 1, 1), rasterio.crs.CRS.from_epsg(32614), res=12)
+    got = analyze_array(arr, from_origin(500000, 3350000, 1, 1), crs, res=12)
+    assert got.depressions.equals(want.depressions) and got.cells.equals(want.cells)
