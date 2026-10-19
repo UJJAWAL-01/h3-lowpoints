@@ -133,8 +133,8 @@ See [Verification](verification.md) for what each check means.
 
 ## Data sources: `h3lowpoints.sources`
 
-All readers read only the parts of remote files a box needs (remote raster reads are retried up
-to three times), and treat only an HTTP 404 answer as "no tile here": any other failure raises,
+All readers read only the parts of remote files a box needs (a failed remote raster read is
+retried up to ten times with a doubling delay, riding out at least 17 minutes of lost connection), and treat only an HTTP 404 answer as "no tile here": any other failure raises,
 so a broken connection is never mistaken for missing data. Details and licences: [Data sources](data-sources.md).
 
 ### `sources.copernicus.fetch_dem(bbox, out_path, *, source=None, max_tiles=16)`

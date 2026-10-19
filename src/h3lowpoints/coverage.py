@@ -126,8 +126,10 @@ class Footprint:
         A summed-area table over the block bitmap answers each box with four lookups.
         """
         if getattr(self, "_prefix", None) is None:
-            prefix = np.zeros((self.blocks.shape[0] + 1, self.blocks.shape[1] + 1), dtype=np.int64)
-            prefix[1:, 1:] = self.blocks.cumsum(axis=0).cumsum(axis=1)
+            # counts never exceed the number of blocks, so 32 bits suffice below 2**31 blocks
+            dtype = np.int32 if self.blocks.size < 2**31 else np.int64
+            prefix = np.zeros((self.blocks.shape[0] + 1, self.blocks.shape[1] + 1), dtype=dtype)
+            prefix[1:, 1:] = self.blocks.cumsum(axis=0, dtype=dtype).cumsum(axis=1, dtype=dtype)
             self._prefix = prefix
         h, w = self.shape
         r0, r1, c0, c1 = (boxes[:, i] for i in range(4))

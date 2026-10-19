@@ -179,8 +179,9 @@ So streaming took about 1.65 times as long in total and moved about 1.8 times as
 in exchange for storing nothing. The ratio depends on the connection; measure a small box first
 on yours. If a run is interrupted, cached tiles already downloaded are kept (a half-downloaded
 tile is never used) and the next run fetches only the missing ones; the analysis itself starts
-again from the beginning. A streamed read that fails is retried three times, after which the run
-stops with an error rather than produce a wrong result.
+again from the beginning. A streamed read that fails is retried up to ten times with a delay that at least doubles
+(at least 17 minutes in all), after which the run stops with an error rather than produce a wrong
+result.
 
 ## Practical advice
 

@@ -84,11 +84,15 @@ def remote(url):
 # GDAL's block cache defaults to 5% of the machine's memory (over 1 GB on many laptops). The
 # readers and the tiled analysis read each window once, so a small cache costs nothing.
 GDAL_CACHE_MB = 256
+# A failed remote read is retried with a delay that starts at 1 s and at least doubles: ten retries ride out
+# at least 17 minutes of lost connection, which matters in a streamed run of many hours. Missing files
+# (HTTP 404) are not retried.
+HTTP_RETRIES = 10
 
 
 @contextlib.contextmanager
 def gdal_env():
-    with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY="3",
+    with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY=str(HTTP_RETRIES),
                       GDAL_HTTP_RETRY_DELAY="1", CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
                       GDAL_HTTP_USERAGENT=USER_AGENT, GDAL_CACHEMAX=GDAL_CACHE_MB):
         yield
