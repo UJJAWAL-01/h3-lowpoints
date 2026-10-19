@@ -194,3 +194,34 @@ def test_leftovers_of_a_killed_run_are_not_counted_twice(raster, reference, tmp_
     stale.tofile(out / "_spill" / f"{int(partition_key(cell, 12)[0]):016x}.bin")
     analyze_tiled(raster, out_dir=out, **KW)
     same(out, reference)
+
+
+def test_a_resumed_pass_2_reuses_the_saved_border_levels(raster, reference, tmp_path, monkeypatch):
+    # the border solve needs every tile in memory (13 GB for the lower 48): do it once only
+    out = tmp_path / "run"
+    with monkeypatch.context() as m:
+        fail_on_call(m, "_pass2_tile", 4)
+        with pytest.raises(RuntimeError):
+            analyze_tiled(raster, out_dir=out, **KW)
+    solves = {"n": 0}
+    real = T._solve_borders
+
+    def counting(*a, **k):
+        solves["n"] += 1
+        return real(*a, **k)
+    monkeypatch.setattr(T, "_solve_borders", counting)
+    analyze_tiled(raster, out_dir=out, **KW)
+    assert solves["n"] == 0
+    same(out, reference)
+
+
+def test_levels_missing_from_an_older_run_are_solved_again(raster, reference, tmp_path, monkeypatch):
+    # a run interrupted after the solve but before every level was saved solves again
+    out = tmp_path / "run"
+    with monkeypatch.context() as m:
+        fail_on_call(m, "_pass2_tile", 4)
+        with pytest.raises(RuntimeError):
+            analyze_tiled(raster, out_dir=out, **KW)
+    (out / "_work" / "lv_000007.npz").unlink()
+    analyze_tiled(raster, out_dir=out, **KW)
+    same(out, reference)

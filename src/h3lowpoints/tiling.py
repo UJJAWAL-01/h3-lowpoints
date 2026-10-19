@@ -345,6 +345,15 @@ def _two_passes(boxes, blocks, ctx, work):
         for k, box in enumerate(boxes, 1):
             _mark_blocks(blocks, work.load("p1", k, keys=["blk_r", "blk_c", "blk"]))
         return (_unpack_piece(work.load("p2", k)) for k in range(1, n + 1)), graph
+    if work is not None and graph is not None and work.count("lv") == n:
+        # pass 1 and the border levels finished earlier: pass 2 loads each tile's seeds and
+        # levels when it needs them, so a resumed pass 2 neither repeats the solve nor holds
+        # every tile in memory
+        say(f"resuming: pass 1 and the border levels were finished earlier; pass 2 has "
+            f"{work.count('p2')} of {n} tiles done", flush=True)
+        for k, box in enumerate(boxes, 1):
+            _mark_blocks(blocks, work.load("p1", k, keys=["blk_r", "blk_c", "blk"]))
+        return _pass2(boxes, None, None, ctx, work, say), graph
 
     # ---- pass 1: flood every tile from its border and keep only the crossings
     if work is not None and work.count("p1"):
@@ -366,15 +375,31 @@ def _two_passes(boxes, blocks, ctx, work):
     # ---- the exact level of every border cell
     levels, graph = _solve_borders(tiles, ctx["width"], ctx["height"])
     if work is not None:
-        work.save_json("graph", graph)
+        for k, lv in enumerate(levels, 1):
+            work.save("lv", k, {"lv": lv})
+        work.save_json("graph", graph)          # last: its presence means every level is saved
+    return _pass2(boxes, tiles, levels, ctx, work, say), graph
 
-    # ---- pass 2: flood each tile from the exact border levels, then summarise its depressions
+
+def _pass2(boxes, tiles, levels, ctx, work, say):
+    """Pass 2: flood each tile from the exact border levels, then summarise its depressions.
+
+    `tiles` and `levels` are the pass-1 results in memory, or None to load each tile's from the
+    checkpoints when it is needed.
+    """
+    n = len(boxes)
     pieces = []
     for k, box in enumerate(boxes, 1):
-        t, lv = tiles[k - 1], levels[k - 1]
-        tiles[k - 1] = levels[k - 1] = None          # release this tile's pass-1 data once used
         if work is not None and work.has("p2", k):
+            if tiles is not None:
+                tiles[k - 1] = levels[k - 1] = None
             continue
+        if tiles is None:
+            t = work.load("p1", k, keys=["rows", "cols", "z"])
+            lv = work.load("lv", k)["lv"]
+        else:
+            t, lv = tiles[k - 1], levels[k - 1]
+            tiles[k - 1] = levels[k - 1] = None      # release this tile's pass-1 data once used
         piece = _pass2_tile(box, t, lv, ctx) if len(t["z"]) else None
         if work is not None:
             work.save("p2", k, _pack_piece(piece))
@@ -383,8 +408,8 @@ def _two_passes(boxes, blocks, ctx, work):
             pieces.append(piece)
         say(f"pass 2, tile {k}/{n}: {0 if piece is None else len(piece['agg'])} pieces", flush=True)
     if work is not None:
-        return (_unpack_piece(work.load("p2", k)) for k in range(1, n + 1)), graph
-    return pieces, graph
+        return (_unpack_piece(work.load("p2", k)) for k in range(1, n + 1))
+    return pieces
 
 
 def _check_time(ctx, work, n):

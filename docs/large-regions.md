@@ -165,6 +165,10 @@ soon as it is finished, so the run never has to be done in one go:
 - **The same answer.** A run continued any number of times gives exactly the tables of a run never
   interrupted; the tests stop runs at many points, in both passes and while the tables are being
   written, and compare. A folder can only be continued with the settings it was started with.
+- **Memory between the passes.** Joining the passes needs every tile's border summary in
+  memory at once: for the lower 48 states this step peaked at 13 GB, for a few minutes. Its
+  result (the exact water level of every tile-border pixel) is saved, so later parts of pass 2
+  load one tile at a time and stay near 2 GB.
 - **Disk.** The saved tiles take room until the run finishes: about 1.5 MB per tile for pass 1
   and roughly the size of the cell table for pass 2. They are deleted once the tables are written.
 
