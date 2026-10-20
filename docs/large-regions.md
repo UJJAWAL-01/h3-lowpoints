@@ -126,30 +126,36 @@ How the memory came down over the course of development, for this same run with 
 About 0.9 GB of the 2.1 GB does not grow with the region (one tile and the GDAL cache); the rest
 is the border graph and one summary row per depression piece.
 
-## Scaling to the whole country
+## The whole country: the lower 48 states
 
-The lower 48 states are roughly six to seven times the Texas box. Time grows with the number of
-pixels; memory now grows only with the border graph and the per-depression summaries, not with
-the cell table.
+Measured on 19 October 2026: USGS 3DEP 30 m over the box −124.85, 24.4, −66.9, 49.4 (the lower
+48 states, with the coastal waters and the parts of Canada and Mexico that 3DEP covers), H3
+resolution 10, `min_depth` 0.5 m, tiles of 4096, tiles **streamed** (none stored), on the same
+laptop, run in four parts with `--hours`.
 
-An estimate from the Texas measurement, not yet a measurement, for 3DEP 30 m at resolution 10
-and `min_depth` 0.5 m:
+| | |
+|---|---|
+| Raster | 208,620 × 90,000 = 18.8 billion pixel positions, 1,122 tiles (many partly or wholly sea) |
+| Depressions | 12,304,679 (240 touching the edge of the data) |
+| H3 cells (resolution 10) | 82,027,455 |
+| Border graph | 14.3 million tile-border pixels, 69.1 million crossings |
+| Time, in four parts | 7.3 hours (2.0 + 2.0 + 2.0 + 1.2) |
+| Extra memory at peak | 13.0 GB, for a few minutes while the border levels are solved; 12.4 GB while the tables are assembled; about 2 GB the rest of the time |
+| Disk at peak | 12.5 GB (saved tiles and spill files, during the final step) |
+| Disk afterwards (Parquet) | 3.1 GB: 0.41 GB depressions + 2.69 GB cells |
+| Internet traffic | 100.5 GB |
+| Verification | every invariant holds; 3 random windows re-run whole and tiled agree exactly |
 
-| | Texas box (measured, tiles cached) | Lower 48, tiles cached (estimate) | Lower 48, tiles streamed (estimate) |
-|---|---|---|---|
-| Pixels | 1.8 billion | 11 to 13 billion | 11 to 13 billion |
-| Time | 11 min download + 25 min analysis | about 1 h download + 3 h analysis | 7 to 8 hours |
-| Extra memory at peak | 2.1 GB | 8 to 10 GB | 8 to 10 GB |
-| Disk during the run | 6 GB tiles + results | 40 GB tiles + about 5 GB | about 5 GB |
-| Disk afterwards (Parquet results) | 0.33 GB | about 2 GB | about 2 GB |
-| Internet traffic | 6 GB | 40 GB | 85 to 100 GB |
+Compared with the estimate made from Texas beforehand: the time (7 to 8 hours estimated) and the
+traffic (85 to 100 GB) were as expected; memory (8 to 10 GB estimated) and output size (2 GB)
+were higher, because the country has more depressions and cells per pixel than Texas.
 
-The streamed column scales the 4-tile measurement below.
-
-So the national layer fits a single laptop with 16 GB of memory or more. The part that still grows
-with the region is the border graph (one node per tile-border pixel) and the per-depression
-summaries; a hierarchical version of the method would bound those too ([Roadmap](roadmap.md)).
-The national run itself will be measured and its figures published with the data.
+Memory peaks twice. The **border solve** needs every tile's border summary at once (here
+14.3 million border pixels); its result is saved, so a run resumed after it does not repeat it.
+The **final assembly** holds one summary row per depression piece and joins pieces across tile
+borders. Both grow with the region, so a computer with **16 GB of memory** is the practical
+minimum for the lower 48 at resolution 10. A hierarchical version of the method would bound them
+([Roadmap](roadmap.md)).
 
 ## Running in parts
 

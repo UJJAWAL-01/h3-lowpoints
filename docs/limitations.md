@@ -43,6 +43,14 @@ and the world, or from choices the library makes and states.
   measured). Ocean inside a GLO-30 tile is valid elevation 0 m, not nodata: it does not lower
   coverage, and water crosses it to the raster edge like any land, so land below sea level beside
   it fills up to 0 m as a depression. Supply a water mask where this matters.
+- **Lakes held by their outlets.** A lake whose outlet is a dam, a set of locks or a narrow river
+  appears as one huge depression when the outlet stands higher than the lake surface in the
+  data. In the national 3DEP 30 m run, the five largest depressions found were the Great Lakes:
+  Lake Superior's surface is a flat 183 m while its outlet at Sault Ste. Marie reads 184 to 186 m,
+  so the model fills the whole lake (82,400 km²). Correct for the data, meaningless for ponding:
+  mask permanent water (for example the "permanent water bodies" class of ESA WorldCover) before
+  reading such results. By contrast, the next largest, the Great Basin of Nevada and the
+  Bonneville basin around the Great Salt Lake, really have no outlet.
 - **Survey seams.** Where two surveys meet, a small step in the data can create or cut off shallow
   depressions along the seam. The library takes each 3DEP pixel from its own tile so it adds no
   seam of its own, but it cannot remove seams in the data.
