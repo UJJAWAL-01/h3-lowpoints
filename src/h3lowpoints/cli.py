@@ -197,24 +197,33 @@ def _build(args):
     vrt = build_3dep_vrt(tuple(args.bbox), out / "dem.vrt", resolution=30 if args.dataset == "3dep" else 10,
                          cache_dir=args.cache_dir)
     timings["tiles"] = time.perf_counter() - start
+    began = time.perf_counter()                   # --hours covers the mask and the analysis
     mask = None
-    if args.water_mask:
-        from .sources.landcover import build_water_mask
-
-        mask = out / "water.tif"
-        if not mask.exists():                 # built once; a run continued later reuses it
-            start = time.perf_counter()
-            print("building the water mask from ESA WorldCover", flush=True)
-            build_water_mask(vrt, mask, cache_dir=args.cache_dir, verbose=True)
-            timings["water_mask"] = time.perf_counter() - start
-    start = time.perf_counter()
-    # the tables go to disk as they are produced, so the region is not limited by memory
     try:
+        if args.water_mask:
+            from .sources.landcover import build_water_mask
+
+            mask = out / "water.vrt"
+            if not mask.exists():                 # built once, tile by tile; later parts reuse it
+                start = time.perf_counter()
+                print("building the water mask from ESA WorldCover", flush=True)
+                build_water_mask(vrt, mask, cache_dir=args.cache_dir, tile=args.tile,
+                                 hours=args.hours, verbose=True)
+                timings["water_mask"] = time.perf_counter() - start
+        hours = None
+        if args.hours is not None:
+            hours = args.hours - (time.perf_counter() - began) / 3600
+            if hours <= 0:
+                print("part finished: the time limit was used building the water mask. "
+                      "Run the same command again to continue.")
+                return 3
+        start = time.perf_counter()
+        # the tables go to disk as they are produced, so the region is not limited by memory
         result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth,
-                               verbose=True, out_dir=out, format=args.format, hours=args.hours,
+                               verbose=True, out_dir=out, format=args.format, hours=hours,
                                mask_path=None if mask is None else str(mask))
     except Paused as stop:
-        print(f"part finished ({100 * stop.done / stop.total:.0f}% of the work done): {stop}")
+        print(f"part finished ({100 * stop.done / stop.total:.0f}% of this stage done): {stop}")
         return 3
     timings["analysis"] = time.perf_counter() - start
     result.meta["build"] = {"dataset": args.dataset, "bbox": list(args.bbox),
@@ -222,7 +231,7 @@ def _build(args):
     if mask is not None:
         result.meta["build"]["water_mask"] = (
             "ESA WorldCover 2021 v200, class 80 (permanent water bodies): a pixel is water when at "
-            "least 5 of 9 evenly spaced points in it are; file water.tif")
+            "least 5 of 9 evenly spaced points in it are; file water.vrt")
     write_meta(out, result.meta)
     problems = check_saved(out)
     if args.spot_check:

@@ -66,7 +66,7 @@ def test_the_mask_matches_sampling_by_hand(tmp_path, seed):
     dem_tr = from_origin(-98.0 + 5 * PX1 + EPS, 31.0 - 5 * PX1 - EPS, PX1, PX1)
     shape = (100, 130)
     dem = write(tmp_path / "dem.tif", np.zeros(shape), "EPSG:4269", dem_tr, -9999.0)
-    out = landcover.build_water_mask(dem, tmp_path / "water.tif", source=tmp_path, block=37)
+    out = landcover.build_water_mask(dem, tmp_path / "water.tif", source=tmp_path, tile=37)
     with rasterio.open(out) as m, rasterio.open(dem) as d:
         assert m.transform == d.transform and m.shape == d.shape and m.dtypes[0] == "uint8"
         got = m.read(1)
@@ -105,7 +105,7 @@ def test_no_tiles_is_an_error_and_a_failed_build_leaves_no_mask(tmp_path, monkey
         return real_write(self, *a, **k)
     monkeypatch.setattr(rasterio.io.DatasetWriter, "write", failing_write)
     with pytest.raises(RuntimeError):
-        landcover.build_water_mask(dem, tmp_path / "w.tif", source=tmp_path, block=8)
+        landcover.build_water_mask(dem, tmp_path / "w.tif", source=tmp_path, tile=8)
     assert not (tmp_path / "w.tif").exists()                     # never a half-built mask
     monkeypatch.undo()
     with rasterio.open(landcover.build_water_mask(dem, tmp_path / "w.tif", source=tmp_path)) as m:
@@ -117,7 +117,7 @@ def _build(tmp_path, monkeypatch, out, *extra):
     monkeypatch.setattr(usgs, "build_3dep_vrt",
                         lambda b, path, **k: real_vrt(b, path, resolution=30, source=tmp_path / "tiles"))
     monkeypatch.setattr(landcover, "build_water_mask",
-                        lambda dem, path, **k: real_mask(dem, path, source=tmp_path / "wc", block=k.get("block", 2048)))
+                        lambda dem, path, **k: real_mask(dem, path, source=tmp_path / "wc", tile=k.get("tile", 4096)))
     box = (-97 - 30 * PX1, 31 - 30 * PX1, -97 + 30 * PX1, 31 + 30 * PX1)
     return main(["build", "--bbox", *map(str, box), "--out", str(out), "--res", "10",
                  "--min-depth", "0.5", "--tile", "17", *extra])
@@ -141,9 +141,9 @@ def test_build_with_a_water_mask(tmp_path, monkeypatch, capsys):
     assert near(plain.depressions).any()                         # the pit is a depression ...
     assert not near(masked.depressions).any()                    # ... until it is open water
     assert len(masked.depressions) == len(plain.depressions) - 1     # the other pits are unchanged
-    assert (tmp_path / "masked" / "water.tif").exists()
+    assert (tmp_path / "masked" / "water.vrt").exists()
     assert "WorldCover" in json.loads((tmp_path / "masked" / "meta.json").read_text())["build"]["water_mask"]
-    with rasterio.open(tmp_path / "masked" / "water.tif") as m, \
+    with rasterio.open(tmp_path / "masked" / "water.vrt") as m, \
             rasterio.open(tmp_path / "masked" / "dem.vrt") as d:
         assert m.transform == d.transform and m.shape == d.shape and m.read(1).any()
 
@@ -156,3 +156,50 @@ def test_live_worldcover_water(tmp_path):
                     from_origin(lon - 15 * PX1, lat + 15 * PX1, PX1, PX1), -9999.0)
         with rasterio.open(landcover.build_water_mask(dem, tmp_path / f"{name}_w.tif")) as m:
             assert (m.read(1) == want).mean() > 0.95, name
+
+
+@pytest.mark.parametrize("tile", [13, 40, 4096])
+def test_a_mask_built_tile_by_tile_equals_one_built_whole(tmp_path, tile):
+    wc = blobs((400, 500), 7)
+    fake_worldcover(tmp_path, 30, -99, -98.0 + 10 * WPX, 31.0 - 7 * WPX, wc)
+    dem = write(tmp_path / "dem.tif", np.zeros((100, 130)), "EPSG:4269",
+                from_origin(-98.0 + 5 * PX1 + EPS, 31.0 - 5 * PX1 - EPS, PX1, PX1), -9999.0)
+    whole = landcover.build_water_mask(dem, tmp_path / "whole.tif", source=tmp_path)
+    tiled = landcover.build_water_mask(dem, tmp_path / "tiled.vrt", source=tmp_path, tile=tile)
+    with rasterio.open(whole) as a, rasterio.open(tiled) as b:
+        assert a.transform == b.transform and a.shape == b.shape
+        np.testing.assert_array_equal(a.read(1), b.read(1))
+    files = list((tmp_path / "tiled_tiles").iterdir())
+    if tile == 13:          # tiles without water store only an empty marker
+        assert any(f.suffix == ".none" for f in files) and any(f.suffix == ".tif" for f in files)
+
+
+def test_a_mask_build_split_by_its_time_limit_gives_the_same_mask(tmp_path, monkeypatch):
+    from h3lowpoints.store import Paused
+
+    wc = blobs((400, 500), 8)
+    fake_worldcover(tmp_path, 30, -99, -98.0 + 10 * WPX, 31.0 - 7 * WPX, wc)
+    dem = write(tmp_path / "dem.tif", np.zeros((100, 130)), "EPSG:4269",
+                from_origin(-98.0 + 5 * PX1 + EPS, 31.0 - 5 * PX1 - EPS, PX1, PX1), -9999.0)
+    whole = landcover.build_water_mask(dem, tmp_path / "whole.tif", source=tmp_path)
+    clock = {"t": 0.0}
+    import time as _time
+    monkeypatch.setattr(_time, "monotonic", lambda: clock.__setitem__("t", clock["t"] + 1000.0) or clock["t"])
+    parts = 0
+    while True:
+        try:
+            out = landcover.build_water_mask(dem, tmp_path / "parts.vrt", source=tmp_path, tile=20, hours=1)
+            break
+        except Paused as stop:
+            parts += 1
+            assert not (tmp_path / "parts.vrt").exists() and stop.total == 35
+        assert parts < 50
+    assert parts >= 3
+    monkeypatch.undo()
+    with rasterio.open(whole) as a, rasterio.open(out) as b:
+        np.testing.assert_array_equal(a.read(1), b.read(1))
+
+
+def test_the_output_must_be_a_tif_or_a_vrt(tmp_path):
+    with pytest.raises(ValueError, match=r"\.tif .*\.vrt"):
+        landcover.build_water_mask(tmp_path / "dem.tif", tmp_path / "mask.png")

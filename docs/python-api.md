@@ -55,7 +55,7 @@ raster: tiles only decide how much memory is needed. See [Large regions](large-r
 | `tile` | Tile edge in pixels (default 4096). Affects memory and speed, never the result. |
 | `out_dir` | Write the tables to this folder as they are produced, instead of returning them. Use it when the output itself may not fit in memory (a state or a country). The returned `Result` then has `depressions = cells = None` and `path = out_dir`. |
 | `format` | `"csv"` (default) or `"parquet"`, for `out_dir`. |
-| `hours` | With `out_dir`: stop after about this many hours, at the end of a tile, by raising `h3lowpoints.tiling.Paused` (its `done` and `total` count tile steps, two per tile). Calling again with the same arguments continues. |
+| `hours` | With `out_dir`: stop after about this many hours, at the end of a tile, by raising `Paused` (`h3lowpoints.store.Paused`, also importable as `h3lowpoints.tiling.Paused`; its `done` and `total` count tile steps, two per tile). Calling again with the same arguments continues. |
 | `mask_path` | Optional raster on exactly the same grid as the DEM; non-zero pixels are ignored like nodata. |
 | `verbose` | Print one line per tile per pass. |
 | others | As in `analyze`. |
@@ -180,13 +180,22 @@ The 1 m lidar tiles in the USGS catalogue touching a box, newest survey first (d
 ESA WorldCover 2021 land-cover classes (global, 10 m) as a GeoTIFF (WGS 84, uint8, 0 = no data).
 Class codes and names are in `sources.landcover.WORLDCOVER_CLASSES`.
 
-### `sources.landcover.build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, block=2048, verbose=False)`
+### `sources.landcover.build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, tile=4096, hours=None, verbose=False)`
 
 A water mask on exactly the pixel grid of an elevation raster (any CRS), from ESA WorldCover: a
 pixel is 1 (water) when at least 5 of 9 evenly spaced points inside it fall on class 80,
 "permanent water bodies", else 0. Pass it as `mask_path` to `analyze_tiled`. `source` is a
 folder of local WorldCover tiles, `cache_dir` downloads each tile once; otherwise tiles are read
-over the internet. Written under a temporary name and renamed when complete. Returns the path.
+over the internet.
+
+- `out_path` ending in `.tif`: one GeoTIFF, written under a temporary name and renamed when
+  complete (areas up to a few hundred million pixels).
+- `out_path` ending in `.vrt`: built `tile` × `tile` pixels at a time, one small GeoTIFF per tile
+  holding water in `<name>_tiles/`, the `.vrt` written last. An interrupted build continues where
+  it stopped, and `hours` stops it at the end of a tile by raising `Paused` (for regions).
+
+Rasters in longitude/latitude are sampled directly, treating their datum as WGS 84; other CRSs go
+through a warped view of WorldCover. Returns the path.
 
 ### `sources.landcover.worldcover_vrt(bbox, path, *, source=None, cache_dir=None, workers=8)`
 

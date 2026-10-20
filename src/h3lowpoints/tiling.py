@@ -34,8 +34,8 @@ from .pipeline import (CELL_TABLE, Result, add_coverage, base_meta, dep_columns,
                        empty_depressions, plan_analysis)
 from .resolution import FINEST_H3, metres_to_cells
 from .sources._common import gdal_env
-from .store import (CHUNK_ROWS, CellParts, Checkpoints, TableWriter, check_format, remove_other_formats,
-                    write_meta)
+from .store import (CHUNK_ROWS, CellParts, Checkpoints, Paused, TableWriter, check_format,
+                    remove_other_formats, write_meta)
 
 _TIE = 1e-9  # depths this close to the maximum count as tied for the lowest point
 
@@ -248,17 +248,6 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
                 mask_src.close()
 
 
-class Paused(Exception):
-    """A run written to disk stopped at its time limit (`hours`); run it again to continue.
-
-    `done` and `total` count tile steps: every tile is processed twice, once per pass.
-    """
-
-    def __init__(self, message, done, total):
-        super().__init__(message)
-        self.done, self.total = done, total
-
-
 def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radius_m,
               drain_core_frac, drains, buildings, mask_path):
     """What a resumed run must share with the run it continues."""
@@ -273,7 +262,8 @@ def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radiu
         "drains": None if drains is None else hashlib.sha256(drains.tobytes()).hexdigest(),
         "buildings": None if buildings is None else len(buildings),
         "mask": None if mask_path is None else str(mask_path),
-        "package_version": _package_version()}
+        "package_version": _package_version(),
+        "checkpoint_format": 2}                     # 2: one outlet node per tile
 
 
 def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
@@ -372,7 +362,7 @@ def _two_passes(boxes, blocks, ctx, work):
             t = _pass1_tile(box, ctx)
             if work is not None:
                 work.save("p1", k, t)
-            say(f"pass 1, tile {k}/{n}: {len(t['z'])} seeds, {len(t['ea'])} crossings", flush=True)
+            say(f"pass 1, tile {k}/{n}: {int(t['n_seeds'])} seeds, {len(t['ea'])} crossings", flush=True)
             _check_time(ctx, work, n)
         _mark_blocks(blocks, t)
         if work is None:                         # the checkpoints hold it otherwise
@@ -402,12 +392,12 @@ def _pass2(boxes, tiles, levels, ctx, work, say):
                 tiles[k - 1] = levels[k - 1] = None
             continue
         if tiles is None:
-            t = work.load("p1", k, keys=["rows", "cols", "z"])
+            t = work.load("p1", k, keys=["n_seeds"])
             lv = work.load("lv", k)["lv"]
         else:
             t, lv = tiles[k - 1], levels[k - 1]
             tiles[k - 1] = levels[k - 1] = None      # release this tile's pass-1 data once used
-        piece = _pass2_tile(box, t, lv, ctx) if len(t["z"]) else None
+        piece = _pass2_tile(box, lv, ctx) if int(t["n_seeds"]) else None
         if work is not None:
             work.save("p2", k, _pack_piece(piece))
             _check_time(ctx, work, n)
@@ -457,24 +447,52 @@ def _pass1_tile(box, ctx):
     z = work[rows, cols]
     level, root = flood_from_seeds(work, valid, rows, cols, z)
     ea, eb, ew = region_edges(level, root)
+    # The tile's border seeds are the graph's nodes. Every other seed is an outlet beside nodata
+    # or water, whose level is its own elevation and never needs solving: they become a single
+    # node, an outlet below everything, keeping for each region only its lowest crossing to any
+    # of them. A crossing into an outlet is never below the outlet's elevation, so every border
+    # level comes out the same, and the graph no longer grows with the length of shorelines.
+    nb = int(border.sum())
+    to_node = np.full(len(z), nb, dtype=np.int64)
+    to_node[border] = np.arange(nb)
+    a, b = to_node[ea], to_node[eb]
+    keep = (a != nb) | (b != nb)
+    a, b, ew = np.minimum(a, b)[keep], np.maximum(a, b)[keep], ew[keep]
+    order = np.lexsort((ew, b, a))
+    a, b, ew = a[order], b[order], ew[order]
+    first = np.ones(len(a), dtype=bool)
+    first[1:] = (a[1:] != a[:-1]) | (b[1:] != b[:-1])
     edge_mask = np.zeros(valid.shape, dtype=bool)
     edge_mask[0, :] = edge_mask[-1, :] = edge_mask[:, 0] = edge_mask[:, -1] = True
     bad_r, bad_c = np.nonzero(edge_mask & ~valid)
-    return {"rows": rows, "cols": cols, "z": z, "pinned": pinned, "border": border,
-            "keys": (rows + r0).astype(np.int64) * width + (cols + c0),
-            "ea": ea, "eb": eb, "ew": ew,
+    br_rows, br_cols = rows[border], cols[border]
+    return {"z": np.r_[z[border], -1e30], "pinned": np.r_[pinned[border], True],
+            "border": np.r_[np.ones(nb, dtype=bool), False],
+            "keys": np.r_[(br_rows + r0).astype(np.int64) * width + (br_cols + c0), -1],
+            "ea": a[first], "eb": b[first], "ew": ew[first], "n_seeds": np.int64(len(z)),
             "invalid_border_keys": (bad_r + r0).astype(np.int64) * width + (bad_c + c0),
             "blk_r": np.int64(br), "blk_c": np.int64(bc), "blk": flags,
             **dict(zip(("inv_any", "inv_z"), pack_invalid(~valid)))}
 
 
-def _pass2_tile(box, t, lv, ctx):
-    """The depression pieces of one tile (pass 2), with piece numbers local to the tile."""
+def _pass2_tile(box, lv, ctx):
+    """The depression pieces of one tile (pass 2), with piece numbers local to the tile.
+
+    `lv` are the solved levels of the tile's border seeds (and, last, of its outlet node). The
+    seeds are found again from the tile, exactly as in pass 1: border seeds start at their solved
+    level, outlets beside nodata or water at their own elevation.
+    """
     r0, r1, c0, c1 = box
     h, w = r1 - r0, c1 - c0
     src, width = ctx["src"], ctx["width"]
     work, valid = _read_tile(src, ctx["mask_src"], box)
-    filled, _ = flood_from_seeds(work, valid, t["rows"], t["cols"], lv)
+    rows, cols, _, border = tile_seeds(valid, (r0 == 0, r1 == ctx["height"], c0 == 0,
+                                               c1 == width))
+    levels = work[rows, cols]
+    if int(border.sum()) != len(lv) - 1:
+        raise RuntimeError("pass 1 and pass 2 found different seeds in a tile")
+    levels[border] = lv[:-1]
+    filled, _ = flood_from_seeds(work, valid, rows, cols, levels)
     depth = np.where(valid, filled - work, 0.0)
     window_transform = src.window_transform(Window(c0, r0, w, h))
     bmask = None

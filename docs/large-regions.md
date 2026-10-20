@@ -186,9 +186,14 @@ would be cut in two. Saving tiles keeps the exact method and still allows the wo
 
 Run regions with `--water-mask` when lakes and reservoirs should count as open water (see
 [Data sources](data-sources.md#water-mask-from-esa-worldcover)). The mask is built once before the
-analysis. Every pixel next to water becomes an outlet, so the border graph grows (about 9 times
-on a box of Lake Erie), and cells along shores are only partly covered, so their coverage is
-measured exactly, pixel by pixel. Pass 1 records each tile's invalid pixels (compressed, about
+analysis, tile by tile, as `water.vrt` and one small file per tile holding water in
+`water_tiles/`; like the analysis it continues where it stopped and counts against `--hours`. For
+the lower 48 it is estimated at about 2 hours (52 million pixels of Wisconsin took 19 s; the time
+goes into decompressing WorldCover). Every pixel next to water is an outlet, but outlets inside a
+tile share one node of the border graph ([Definition](definition.md#tiles)), so the graph does
+not grow with shorelines: on a box of Great Salt Lake it has 24,827 nodes with the mask against
+25,194 without. Cells along shores are only partly covered, so their coverage is measured
+exactly, pixel by pixel. Pass 1 records each tile's invalid pixels (compressed, about
 a bit per pixel before compression), and coverage reads those records rather than the elevation
 data again, which for streamed tiles would mean the internet once per shoreline cell. On the
 Lake Erie box the masked analysis takes 10 s (15 s without the mask, since there is less land);

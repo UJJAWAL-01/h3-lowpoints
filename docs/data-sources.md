@@ -136,7 +136,11 @@ Its "permanent water bodies" class is a convenient water mask for `analyze(mask=
 `build_water_mask` (and `h3lowpoints build --water-mask`) turns WorldCover into a mask on the
 elevation raster's own pixel grid: each elevation pixel is sampled at 3 × 3 evenly spaced points,
 and it is water when at least 5 of the 9 fall on "permanent water bodies". A test compares this
-pixel for pixel with the same sampling done by hand.
+pixel for pixel with the same sampling done by hand. For grids in longitude/latitude (all of
+3DEP) each point is looked up directly in the WorldCover pixel containing it, treating the grid's
+datum as WGS 84; other CRSs are sampled through a warped view of WorldCover. On 52 million pixels
+of Wisconsin the two ways agree on all but 0.02% of pixels, which lie on the edges of water where
+the metre between NAD83 and WGS 84 moves a sample point into the next WorldCover pixel.
 
 Why it matters: lakes are flat in elevation data, and a lake whose outlet (a dam, locks, a narrow
 river) stands higher than its surface fills as one huge depression. Measured on two boxes of 3DEP

@@ -11,6 +11,7 @@
   as "no data", but 0 means "0% impervious" (a field or a park), so that label is dropped and
   values above 100 are treated as no data instead.
 """
+import contextlib
 import urllib.error
 import urllib.parse
 from pathlib import Path
@@ -188,25 +189,74 @@ def worldcover_vrt(bbox, path, *, source=None, cache_dir=None, workers=8):
     return out
 
 
-def build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, block=2048, verbose=False):
+def _water(samples):
+    """1 where at least 5 of a pixel's 3 x 3 samples are permanent water, from the sample array."""
+    h, w = samples.shape[0] // SAMPLES, samples.shape[1] // SAMPLES
+    hits = (samples == WATER_CLASS).reshape(h, SAMPLES, w, SAMPLES).sum(axis=(1, 3))
+    return (hits * 2 > SAMPLES * SAMPLES).astype("uint8")
+
+
+def _sample_geographic(wc, dem_transform, r0, r1, c0, c1):
+    """WorldCover classes at the 3 x 3 sample points of pixels r0:r1, c0:c1 of a lon/lat grid.
+
+    Each point is looked up in the WorldCover pixel that contains it (WorldCover is WGS 84 and
+    the grid is treated as WGS 84 too: datum differences are about a metre, far below a pixel).
+    """
+    from rasterio.windows import Window
+
+    k = (np.arange(SAMPLES) + 0.5) / SAMPLES
+    xs = dem_transform.c + (np.arange(c0, c1)[:, None] + k).ravel() * dem_transform.a
+    ys = dem_transform.f + (np.arange(r0, r1)[:, None] + k).ravel() * dem_transform.e
+    t = wc.transform
+    cols = np.floor((xs - t.c) / t.a).astype(np.int64)
+    rows = np.floor((ys - t.f) / t.e).astype(np.int64)
+    rmin, cmin = int(rows.min()), int(cols.min())
+    window = Window(cmin, rmin, int(cols.max()) - cmin + 1, int(rows.max()) - rmin + 1)
+    block = wc.read(1, window=window, boundless=True, fill_value=0)
+    return block[np.ix_(rows - rmin, cols - cmin)]
+
+
+def _sample_warped(samples, r0, r1, c0, c1):
+    """The same for any CRS, through a WarpedVRT on a grid three times finer than the DEM."""
+    from rasterio.windows import Window
+
+    n = SAMPLES
+    return samples.read(1, window=Window(c0 * n, r0 * n, (c1 - c0) * n, (r1 - r0) * n))
+
+
+def build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, tile=4096, hours=None,
+                     verbose=False):
     """A water mask on exactly the pixel grid of an elevation raster, from ESA WorldCover.
 
     A pixel is water (1) when at least 5 of SAMPLES x SAMPLES = 9 evenly spaced points inside it
     fall on WorldCover "permanent water bodies"; otherwise 0. Pass the result as `mask_path` to
-    `analyze_tiled` so open water acts as a place water leaves instead of as terrain. Works for
-    elevation rasters in any CRS. The file is written under a temporary name and renamed when
-    complete, so an existing `out_path` is always a whole mask. Returns the path.
+    `analyze_tiled` so open water acts as a place water leaves instead of as terrain.
+
+    out_path ending in `.tif`: one GeoTIFF, written under a temporary name and renamed when
+        complete. Suits areas up to a few hundred million pixels.
+    out_path ending in `.vrt`: built tile by tile (`tile` pixels square), one small GeoTIFF per
+        tile that holds water (in the folder `<name>_tiles`); the `.vrt` that joins them is
+        written last. Tiles already built are kept, so an interrupted build continues where it
+        stopped, and `hours` stops it at the end of a tile by raising `Paused`. For regions.
+    Elevation rasters in longitude/latitude are sampled directly (fast); other CRSs through a
+    warped view of WorldCover. Returns the path.
     """
     import os
+    import time
+    from xml.sax.saxutils import escape
 
     from affine import Affine
     from rasterio.enums import Resampling
     from rasterio.vrt import WarpedVRT
     from rasterio.windows import Window
 
+    from ..store import Paused
+
     out = Path(out_path)
+    if out.suffix.lower() not in (".tif", ".vrt"):
+        raise ValueError("out_path must end in .tif (one file) or .vrt (built tile by tile)")
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_name(out.stem + ".part.tif")
+    deadline = None if hours is None else time.monotonic() + hours * 3600
     n = SAMPLES
     with gdal_env(), rasterio.open(dem_path) as dem:
         west, south, east, north = transform_bounds(dem.crs, "EPSG:4326", *dem.bounds, densify_pts=21)
@@ -215,23 +265,76 @@ def build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, block=2
                 min(90.0, north + pad))
         vrt = worldcover_vrt(bbox, out.with_name(out.stem + ".worldcover.vrt"), source=source,
                              cache_dir=cache_dir)
-        fine = dem.transform @ Affine.scale(1 / n)
-        profile = {"driver": "GTiff", "height": dem.height, "width": dem.width, "count": 1,
-                   "dtype": "uint8", "crs": dem.crs, "transform": dem.transform, "tiled": True,
+        profile = {"driver": "GTiff", "count": 1, "dtype": "uint8", "crs": dem.crs, "tiled": True,
                    "blockxsize": 512, "blockysize": 512, "compress": "deflate", "BIGTIFF": "IF_SAFER"}
+        boxes = [(r0, min(r0 + tile, dem.height), c0, min(c0 + tile, dem.width))
+                 for r0 in range(0, dem.height, tile) for c0 in range(0, dem.width, tile)]
+        warp = None if dem.crs.is_geographic else dict(
+            crs=dem.crs, transform=dem.transform @ Affine.scale(1 / n), width=dem.width * n,
+            height=dem.height * n, resampling=Resampling.nearest, nodata=0)
         with rasterio.open(vrt) as wc, \
-                WarpedVRT(wc, crs=dem.crs, transform=fine, width=dem.width * n,
-                          height=dem.height * n, resampling=Resampling.nearest, nodata=0) as samples, \
-                rasterio.open(tmp, "w", **profile) as dst:
-            rows = range(0, dem.height, block)
-            for i, r0 in enumerate(rows, 1):
-                h = min(block, dem.height - r0)
-                for c0 in range(0, dem.width, block):
-                    w = min(block, dem.width - c0)
-                    s = samples.read(1, window=Window(c0 * n, r0 * n, w * n, h * n))
-                    water = (s == WATER_CLASS).reshape(h, n, w, n).sum(axis=(1, 3))
-                    dst.write((water * 2 > n * n).astype("uint8"), 1, window=Window(c0, r0, w, h))
+                (WarpedVRT(wc, **warp) if warp else contextlib.nullcontext(None)) as warped:
+            def water(r0, r1, c0, c1):                 # in strips of rows, to bound memory
+                strips = []
+                for r in range(r0, r1, 1024):
+                    s = min(r + 1024, r1)
+                    samples = (_sample_geographic(wc, dem.transform, r, s, c0, c1) if warped is None
+                               else _sample_warped(warped, r, s, c0, c1))
+                    strips.append(_water(samples))
+                return np.vstack(strips)
+
+            if out.suffix.lower() == ".tif":
+                tmp = out.with_name(out.stem + ".part.tif")
+                with rasterio.open(tmp, "w", height=dem.height, width=dem.width,
+                                   transform=dem.transform, **profile) as dst:
+                    for i, (r0, r1, c0, c1) in enumerate(boxes, 1):
+                        dst.write(water(r0, r1, c0, c1), 1, window=Window(c0, r0, c1 - c0, r1 - r0))
+                        if verbose:
+                            print(f"water mask: tile {i}/{len(boxes)}", flush=True)
+                os.replace(tmp, out)
+                return out
+
+            folder = out.with_name(out.stem + "_tiles")
+            folder.mkdir(exist_ok=True)
+            done = 0
+            for i, (r0, r1, c0, c1) in enumerate(boxes, 1):
+                path, none = folder / f"w_{i:06d}.tif", folder / f"w_{i:06d}.none"
+                if path.exists() or none.exists():
+                    done += 1
+                    continue
+                arr = water(r0, r1, c0, c1)
+                if arr.any():
+                    tmp = folder / f"tmp_w_{i:06d}.tif"
+                    window = Window(c0, r0, c1 - c0, r1 - r0)
+                    with rasterio.open(tmp, "w", height=r1 - r0, width=c1 - c0,
+                                       transform=dem.window_transform(window), **profile) as dst:
+                        dst.write(arr, 1)
+                    os.replace(tmp, path)
+                else:
+                    none.touch()                     # no water here: nothing to store
+                done += 1
                 if verbose:
-                    print(f"water mask: row {i}/{len(rows)}", flush=True)
-    os.replace(tmp, out)
+                    print(f"water mask: tile {i}/{len(boxes)}", flush=True)
+                if deadline is not None and time.monotonic() > deadline and done < len(boxes):
+                    raise Paused(f"stopped at the time limit while building the water mask: {done} of "
+                                 f"{len(boxes)} tiles done. Run the same command again to continue.",
+                                 done, len(boxes))
+        sources = []
+        for i, (r0, r1, c0, c1) in enumerate(boxes, 1):
+            path = folder / f"w_{i:06d}.tif"
+            if path.exists():
+                sources.append(
+                    f'    <SimpleSource><SourceFilename relativeToVRT="1">{escape(folder.name)}/{path.name}'
+                    f'</SourceFilename><SourceBand>1</SourceBand>'
+                    f'<SrcRect xOff="0" yOff="0" xSize="{c1 - c0}" ySize="{r1 - r0}"/>'
+                    f'<DstRect xOff="{c0}" yOff="{r0}" xSize="{c1 - c0}" ySize="{r1 - r0}"/></SimpleSource>')
+        g = dem.transform
+        text = (f'<VRTDataset rasterXSize="{dem.width}" rasterYSize="{dem.height}">\n'
+                f'  <SRS>{escape(dem.crs.to_wkt())}</SRS>\n'
+                f'  <GeoTransform>{g.c!r}, {g.a!r}, {g.b!r}, {g.f!r}, {g.d!r}, {g.e!r}</GeoTransform>\n'
+                f'  <VRTRasterBand dataType="Byte" band="1">\n' + "\n".join(sources) +
+                '\n  </VRTRasterBand>\n</VRTDataset>\n')
+    tmp = out.with_name(out.stem + ".part.vrt")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, out)                             # last: its presence means the mask is whole
     return out

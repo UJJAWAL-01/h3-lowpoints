@@ -55,10 +55,17 @@ approximately, in two passes (Barnes, Callaghan and Wheeler 2016):
    its own elevation. Every cell learns which seed it was reached from, its *root*. Wherever two
    neighbouring cells have different roots, the larger of their levels is the lowest level at
    which water can cross between those two roots; only the lowest crossing per pair is kept.
+   Seeds inside the tile (cells beside nodata, a mask or open water) are outlets: their level is
+   their own elevation, so they are merged into one outlet node per tile, keeping each region's
+   lowest crossing to any of them. A crossing into an outlet is never lower than the outlet's
+   elevation, so this gives the same levels, and the graph no longer grows with the length of
+   coastlines and lake shores.
 2. **Between passes.** Border cells of neighbouring tiles that touch (diagonals included) are
    joined by single steps, and a minimax shortest path from the real outlets gives every border
    cell its exact final level.
-3. **Pass 2.** Each tile is flooded again, now starting its border cells at those exact levels.
+3. **Pass 2.** Each tile is flooded again, now starting its border cells at those exact levels
+   (its seeds are found again from the tile, exactly as in pass 1; outlets start at their own
+   elevation).
    Depressions are labelled inside the tile, and pieces that meet across a tile border are
    joined, so a depression crossing many tiles is still one depression with one lowest point.
 
@@ -80,9 +87,11 @@ What this costs, measured on 38.9 million pixels of real Copernicus terrain arou
 
 Each tile is read and flooded twice, yet the tiled run costs only a few percent more time here,
 because its working arrays are smaller and fit the cache better. Memory is one tile plus the
-graph, which has a node for every tile-border cell and every outlet cell (a coastline counts), a
-few tens of bytes each; very small tiles make that graph the larger part, as the 512-cell row
-shows. `Result.labels` and `Result.depth` are not returned, and `id` numbers the depressions 1 to
+graph, which has a node for every tile-border cell and one outlet node per tile, a few tens of
+bytes each; very small tiles make that graph the larger part, as the 512-cell row shows (that
+measurement predates the outlet nodes, when every outlet cell was a node). On a box of western
+Lake Erie with open water masked, merging the outlets shrank the graph from 111,962 nodes and
+314,818 crossings to 9,664 and 32,378, with identical results. `Result.labels` and `Result.depth` are not returned, and `id` numbers the depressions 1 to
 n in raster-scan order instead of carrying raster label values.
 
 For large regions the output itself becomes the larger part of the memory. How the tiled run

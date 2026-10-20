@@ -26,6 +26,17 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
   `h3lowpoints build --water-mask` uses it, so lakes and reservoirs act as open water instead of
   filling as giant depressions (the national run found the Great Lakes as its five largest).
   Checked pixel for pixel against sampling by hand, and on Lake Erie and the Great Salt Lake.
+- **One outlet node per tile.** Cells beside nodata, a mask or open water are outlets whose level
+  is their own elevation; they are merged into one node of the border graph per tile, keeping
+  each region's lowest crossing, and pass 2 finds the seeds again from the tile instead of
+  keeping them. Identical results; with water masked the graph shrank 12 times on western Lake
+  Erie and 20 times on Great Salt Lake (now no larger than without the mask), which keeps a
+  national run with the mask within a laptop's memory. Checkpoints now record a format version,
+  so older ones are refused instead of misread.
+- **The water mask is built tile by tile and much faster.** `build_water_mask(..., "water.vrt")`
+  writes one small file per tile holding water, continues where it stopped, and honours `hours`;
+  rasters in longitude/latitude are sampled directly instead of through GDAL's warper.
+  `build --water-mask` uses it and shares the `--hours` budget with the analysis.
 - **Coverage no longer re-reads the elevation data.** Pass 1 records each tile's invalid pixels
   (compressed, saved with the checkpoints), and partly covered cells are measured from those
   records. With the water mask, where every shoreline cell is partly covered, the Lake Erie box

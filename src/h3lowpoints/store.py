@@ -25,6 +25,18 @@ CHUNK_ROWS = 500_000            # rows read or written at a time
 PART_DEPTH = 6                  # partitions are parents this many levels coarser than the cells
 
 
+class Paused(Exception):
+    """A long job written to disk stopped at its time limit (`hours`); run it again to continue.
+
+    `done` and `total` count its steps (for the tiled analysis: every tile twice, once per pass;
+    for a water mask: tiles).
+    """
+
+    def __init__(self, message, done, total):
+        super().__init__(message)
+        self.done, self.total = done, total
+
+
 def check_format(fmt):
     if fmt not in FORMATS:
         raise ValueError(f"format must be one of {', '.join(FORMATS)}, got {fmt!r}")
