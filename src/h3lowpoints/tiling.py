@@ -23,7 +23,8 @@ from scipy.sparse.csgraph import connected_components
 
 from .context.buildings import rasterize_buildings
 from .context.drains import drain_pixels, near_drain_mask
-from .coverage import Footprint, file_opener, invalid_block_flags
+from .coverage import (Footprint, file_opener, invalid_block_flags, pack_invalid, tile_opener,
+                       unpack_invalid)
 from .geometry import crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
@@ -290,7 +291,7 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
            "res": res, "min_depth": min_depth, "radius": metres_to_cells(drain_radius_m, size),
            "drain_rc": drain_pixels(drains, transform, (height, width)) if drains is not None else None,
            "deadline": None if hours is None else time.monotonic() + hours * 3600,
-           "verbose": verbose}
+           "verbose": verbose, "invalid": {}}
     boxes = list(_tile_boxes(height, width, tile))
     blocks = np.zeros((-(-height // 16), -(-width // 16)), dtype=bool)   # blocks holding invalid pixels
     pieces, graph = _two_passes(boxes, blocks, ctx, work)
@@ -300,7 +301,10 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
     meta["tiling"] = {"tile": tile, "n_tiles": len(boxes), **graph}
     has_buildings = buildings is not None
     columns = dep_columns(drains is not None, has_buildings)
-    footprint = Footprint((height, width), transform, crs, blocks, file_opener(dem_path, mask_path))
+    # coverage reads which pixels are valid from the records pass 1 kept, not from the DEM again
+    # (a streamed DEM would be read over the internet once per partly covered cell)
+    footprint = Footprint((height, width), transform, crs, blocks,
+                          tile_opener(tile, (height, width), _invalid_reader(boxes, ctx, work)))
     parts = CellParts(res, None if out_dir is None else out_dir / "_spill")
     try:
         records, rings = [], []
@@ -321,6 +325,7 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
             result = _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs,
                             footprint)
             work.remove()                        # finished: the checkpoints are no longer needed
+            footprint._opener = file_opener(dem_path, mask_path)   # their records went with them
             return result
         deps = empty_depressions(columns) if out is None else _with_ids(out, lowpoints)[columns]
         chunks = list(cells)
@@ -370,6 +375,8 @@ def _two_passes(boxes, blocks, ctx, work):
             say(f"pass 1, tile {k}/{n}: {len(t['z'])} seeds, {len(t['ea'])} crossings", flush=True)
             _check_time(ctx, work, n)
         _mark_blocks(blocks, t)
+        if work is None:                         # the checkpoints hold it otherwise
+            ctx["invalid"][k] = {"inv_any": t["inv_any"], "inv_z": t["inv_z"]}
         tiles.append(t)
 
     # ---- the exact level of every border cell
@@ -412,6 +419,21 @@ def _pass2(boxes, tiles, levels, ctx, work, say):
     return pieces
 
 
+def _invalid_reader(boxes, ctx, work):
+    """invalid_tile(k) for `tile_opener`: tile k's invalid pixels as recorded in pass 1."""
+    def invalid_tile(k):
+        r0, r1, c0, c1 = boxes[k - 1]
+        if work is not None:
+            try:
+                rec = work.load("p1", k, keys=["inv_any", "inv_z"])
+            except KeyError:                    # checkpoints of an older version: read the DEM
+                return ~_read_tile(ctx["src"], ctx["mask_src"], boxes[k - 1])[1]
+        else:
+            rec = ctx["invalid"][k]
+        return unpack_invalid(rec["inv_any"], rec["inv_z"], (r1 - r0, c1 - c0))
+    return invalid_tile
+
+
 def _check_time(ctx, work, n):
     if ctx["deadline"] is not None and time.monotonic() > ctx["deadline"]:
         p1, p2 = work.count("p1"), work.count("p2")
@@ -442,7 +464,8 @@ def _pass1_tile(box, ctx):
             "keys": (rows + r0).astype(np.int64) * width + (cols + c0),
             "ea": ea, "eb": eb, "ew": ew,
             "invalid_border_keys": (bad_r + r0).astype(np.int64) * width + (bad_c + c0),
-            "blk_r": np.int64(br), "blk_c": np.int64(bc), "blk": flags}
+            "blk_r": np.int64(br), "blk_c": np.int64(bc), "blk": flags,
+            **dict(zip(("inv_any", "inv_z"), pack_invalid(~valid)))}
 
 
 def _pass2_tile(box, t, lv, ctx):

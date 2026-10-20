@@ -26,6 +26,10 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
   `h3lowpoints build --water-mask` uses it, so lakes and reservoirs act as open water instead of
   filling as giant depressions (the national run found the Great Lakes as its five largest).
   Checked pixel for pixel against sampling by hand, and on Lake Erie and the Great Salt Lake.
+- **Coverage no longer re-reads the elevation data.** Pass 1 records each tile's invalid pixels
+  (compressed, saved with the checkpoints), and partly covered cells are measured from those
+  records. With the water mask, where every shoreline cell is partly covered, the Lake Erie box
+  went from 72 s to 10 s and the Great Salt Lake box from 75 s to 25 s, with identical results.
 - Converting coordinates reuses one transformer per CRS (building one took 10 ms, which dominated
   coverage measured cell by cell).
 - **Long runs in parts, safe against interruption.** A run written to disk saves every tile's

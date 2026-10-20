@@ -19,6 +19,8 @@ the cost bounded at the price of a coverage error well under 1%.
 """
 import contextlib
 import math
+import zlib
+from collections import OrderedDict
 
 import h3
 import numpy as np
@@ -227,5 +229,62 @@ def file_opener(dem_path, mask_path=None):
                     invalid |= mask.read(1, window=window).astype(bool)
                 return invalid
             yield read
+    return opener
+
+
+def pack_invalid(invalid):
+    """A tile's invalid pixels, compressed: (any invalid?, zlib-compressed bit array)."""
+    if not invalid.any():
+        return np.bool_(False), np.zeros(0, dtype=np.uint8)
+    packed = zlib.compress(np.packbits(invalid, axis=None).tobytes(), 1)
+    return np.bool_(True), np.frombuffer(packed, dtype=np.uint8)
+
+
+def unpack_invalid(any_invalid, packed, shape):
+    """The boolean array `pack_invalid` stored, or None when the tile has no invalid pixel."""
+    if not bool(any_invalid):
+        return None
+    bits = np.frombuffer(zlib.decompress(np.asarray(packed, dtype=np.uint8).tobytes()), dtype=np.uint8)
+    return np.unpackbits(bits, count=shape[0] * shape[1]).reshape(shape).astype(bool)
+
+
+def tile_opener(tile, shape, invalid_tile, budget=100_000_000):
+    """An opener for `Footprint` that reads validity from per-tile records instead of the DEM.
+
+    `invalid_tile(k)` returns the boolean invalid pixels of tile k (numbered 1.. row by row, as
+    the tiled analysis numbers them), or None when the tile has none. Recently used tiles are kept
+    unpacked, up to `budget` pixels (6 tiles of 4096, about 100 MB; small tiles are kept by the
+    thousand), since cells are measured in id order, which is close to spatial order.
+    """
+    width = shape[1]
+    per_row = -(-width // tile)
+    keep = max(6, budget // (tile * tile))
+
+    @contextlib.contextmanager
+    def opener():
+        recent = OrderedDict()
+
+        def invalid(k):
+            if k in recent:
+                recent.move_to_end(k)
+            else:
+                recent[k] = invalid_tile(k)
+                if len(recent) > keep:
+                    recent.popitem(last=False)
+            return recent[k]
+
+        def read(r0, r1, c0, c1):
+            out = np.zeros((r1 - r0, c1 - c0), dtype=bool)
+            for tr in range(r0 // tile, (r1 - 1) // tile + 1):
+                for tc in range(c0 // tile, (c1 - 1) // tile + 1):
+                    a = invalid(tr * per_row + tc + 1)
+                    if a is None:
+                        continue
+                    ar, ac = tr * tile, tc * tile
+                    rs, re = max(r0, ar), min(r1, ar + a.shape[0])
+                    cs, ce = max(c0, ac), min(c1, ac + a.shape[1])
+                    out[rs - r0:re - r0, cs - c0:ce - c0] = a[rs - ar:re - ar, cs - ac:ce - ac]
+            return out
+        yield read
     return opener
 

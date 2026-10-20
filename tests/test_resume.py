@@ -225,3 +225,29 @@ def test_levels_missing_from_an_older_run_are_solved_again(raster, reference, tm
     (out / "_work" / "lv_000007.npz").unlink()
     analyze_tiled(raster, out_dir=out, **KW)
     same(out, reference)
+
+
+def test_checkpoints_without_validity_records_still_give_the_same_result(raster, reference, tmp_path, monkeypatch):
+    # tiles saved by an older version have no record of their invalid pixels: the DEM is read
+    out = tmp_path / "run"
+    with monkeypatch.context() as m:
+        fail_on_call(m, "_pass2_tile", 2)
+        with pytest.raises(RuntimeError):
+            analyze_tiled(raster, out_dir=out, **KW)
+    for path in sorted((out / "_work").glob("p1_*.npz"))[::2]:
+        with np.load(path) as f:
+            kept = {k: f[k] for k in f.files if k not in ("inv_any", "inv_z")}
+        np.savez(path, **kept)
+    analyze_tiled(raster, out_dir=out, **KW)
+    same(out, reference)
+
+
+def test_a_finished_run_still_measures_coverage_when_rolled_up(raster, tmp_path):
+    # the checkpoints holding the validity records are gone once a run finishes
+    disk = analyze_tiled(raster, out_dir=tmp_path / "run", **KW)
+    memory = analyze_tiled(raster, **KW)
+    assert not (tmp_path / "run" / "_work").exists()
+    a, b = disk.load().at_resolution(9), memory.at_resolution(9)
+    pd.testing.assert_frame_equal(a.sort_values("h3").reset_index(drop=True),
+                                  b.sort_values("h3").reset_index(drop=True), check_dtype=False)
+    assert (a["coverage"] < 1).any()

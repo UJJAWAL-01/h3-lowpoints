@@ -318,3 +318,45 @@ def test_the_dem_is_not_opened_when_no_cell_is_partial():
     assert fp.coverage([cell_at(500150.0, 3349850.0)])["coverage"].iloc[0] == 1.0 and not opened
     fp.coverage([cell_at(500000.5, 3349999.5)])               # a corner cell leaves the raster
     assert opened
+
+
+# ------------------------------------------------------------------ validity kept per tile
+# The tiled analysis records each tile's invalid pixels in pass 1, so coverage never re-reads
+# the DEM (over the internet, for a streamed DEM). Reading through those records must give
+# exactly what reading the raster gives.
+
+@pytest.mark.parametrize("seed", range(4))
+def test_packed_tiles_unpack_exactly(seed):
+    rng = np.random.default_rng(seed)
+    shape = (int(rng.integers(1, 90)), int(rng.integers(1, 90)))
+    invalid = rng.random(shape) < rng.choice([0.0, 0.01, 0.5, 1.0])
+    any_invalid, packed = cov.pack_invalid(invalid)
+    back = cov.unpack_invalid(any_invalid, packed, shape)
+    if invalid.any():
+        np.testing.assert_array_equal(back, invalid)
+    else:
+        assert back is None and len(packed) == 0
+
+
+@pytest.mark.parametrize("tile", [1, 7, 16, 33, 500])
+def test_reading_through_tile_records_equals_reading_the_raster(tile):
+    invalid = blobs((150, 170), 6, 5)
+    boxes = [(r0, min(r0 + tile, 150), c0, min(c0 + tile, 170))
+             for r0 in range(0, 150, tile) for c0 in range(0, 170, tile)]
+    records = {k: cov.pack_invalid(invalid[r0:r1, c0:c1]) for k, (r0, r1, c0, c1) in enumerate(boxes, 1)}
+
+    def invalid_tile(k):
+        r0, r1, c0, c1 = boxes[k - 1]
+        return cov.unpack_invalid(*records[k], (r1 - r0, c1 - c0))
+    rng = np.random.default_rng(tile)
+    with cov.tile_opener(tile, (150, 170), invalid_tile)() as read:
+        for _ in range(200):
+            r0, c0 = int(rng.integers(0, 150)), int(rng.integers(0, 170))
+            r1, c1 = int(rng.integers(r0 + 1, 151)), int(rng.integers(c0 + 1, 171))
+            np.testing.assert_array_equal(read(r0, r1, c0, c1), invalid[r0:r1, c0:c1])
+    tr = from_origin(500000, 3350000, 1, 1)
+    cells = sorted(brute_coverage(invalid, tr, UTM, 12))
+    direct = Footprint.from_array(invalid, tr, UTM).coverage(cells)
+    fp = Footprint(invalid.shape, tr, UTM, Footprint.from_array(invalid, tr, UTM).blocks,
+                   cov.tile_opener(tile, (150, 170), invalid_tile))
+    np.testing.assert_array_equal(fp.coverage(cells).to_numpy(), direct.to_numpy())

@@ -136,7 +136,9 @@ full area of the H3 cell.
 
 It is found cheaply: a bitmap with one flag per 16 x 16 block of pixels marks where invalid pixels
 are, so only the cells whose bounding box touches a flagged block or leaves the raster are
-measured, by assigning each pixel position in the box to its H3 cell. That is exact. A cell larger
+measured, by assigning each pixel position in the box to its H3 cell. In a tiled run, which
+pixels are invalid is recorded per tile during pass 1, so this never reads the elevation data a
+second time. That is exact. A cell larger
 than 40,000 pixel positions is measured on a regular sub-lattice anchored to the pixel grid, with a
 coverage error well under 1%, and the result never depends on how the raster was tiled. On 38.9
 million pixels of real terrain the extra time was about 2 to 3 seconds of 28.
