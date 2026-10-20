@@ -182,6 +182,17 @@ Why not simply cut the country into regions analyzed separately? Each region's e
 an outlet, draining water across lines that do not exist, and depressions crossing those lines
 would be cut in two. Saving tiles keeps the exact method and still allows the work to be split.
 
+## Open water: the water mask
+
+Run regions with `--water-mask` when lakes and reservoirs should count as open water (see
+[Data sources](data-sources.md#water-mask-from-esa-worldcover)). The mask is built once before the
+analysis. Every pixel next to water becomes an outlet, so the border graph grows (about 9 times
+on a box of Lake Erie), and cells along shores are only partly covered, so their coverage is
+measured exactly. Measuring that coverage currently re-reads the elevation data cell by cell,
+which is slow when the tiles are streamed: on the Lake Erie box the analysis took 72 s with the
+mask against 15 s without. Making that step read a local record of valid pixels instead is the
+next improvement before a national run with the mask.
+
 ## Streaming or caching the tiles
 
 A tiled run reads every pixel twice (once per pass). `build` can get the 3DEP tiles in two ways,

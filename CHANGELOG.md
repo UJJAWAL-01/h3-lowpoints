@@ -21,6 +21,13 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **A water mask from ESA WorldCover.** `build_water_mask` puts WorldCover's permanent water on an
+  elevation raster's own pixel grid (water when at least 5 of 9 sample points are), and
+  `h3lowpoints build --water-mask` uses it, so lakes and reservoirs act as open water instead of
+  filling as giant depressions (the national run found the Great Lakes as its five largest).
+  Checked pixel for pixel against sampling by hand, and on Lake Erie and the Great Salt Lake.
+- Converting coordinates reuses one transformer per CRS (building one took 10 ms, which dominated
+  coverage measured cell by cell).
 - **Long runs in parts, safe against interruption.** A run written to disk saves every tile's
   result as soon as it is computed (`out_dir/_work`), so after a crash, shutdown or lost
   connection the same call continues where it stopped, redoing at most one tile, with exactly the

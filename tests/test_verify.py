@@ -12,7 +12,7 @@ from scipy import ndimage
 from h3lowpoints import analyze, analyze_tiled
 from h3lowpoints import verify as V
 from h3lowpoints.cli import main
-from h3lowpoints.sources import usgs
+from h3lowpoints.sources import _common, usgs
 from test_sources import PX1, f, fake_3dep_tile
 
 
@@ -199,7 +199,7 @@ def test_tile_cache_downloads_once_and_never_leaves_a_partial_file(tmp_path, mon
         def __exit__(self, *a):
             self.f.close()
 
-    monkeypatch.setattr(usgs, "url_exists", lambda url: True)
+    monkeypatch.setattr(_common, "url_exists", lambda url: True)          # download_once lives in _common
     monkeypatch.setattr(usgs.urllib.request, "urlopen", lambda req, timeout=None: calls.append(1) or Resp())
     cache = tmp_path / "cache"
     first = usgs._download(usgs.tile_url(30, -98), cache)
@@ -207,7 +207,7 @@ def test_tile_cache_downloads_once_and_never_leaves_a_partial_file(tmp_path, mon
     assert first == second and len(calls) == 1
     assert not list(cache.glob("*.part"))
     assert open(first, "rb").read() == open(src, "rb").read()
-    monkeypatch.setattr(usgs, "url_exists", lambda url: False)
+    monkeypatch.setattr(_common, "url_exists", lambda url: False)
     assert usgs._download(usgs.tile_url(40, -100), cache) is None
 
 

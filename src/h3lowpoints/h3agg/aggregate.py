@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import h3
 import numpy as np
 import pandas as pd
@@ -16,15 +18,26 @@ def pixel_centers(transform, rows, cols):
     return np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64")
 
 
+@lru_cache(maxsize=32)
+def _to_lonlat(crs_text):
+    """The transformer to longitude/latitude for a CRS (None for WGS 84), built once per CRS.
+
+    Building a transformer takes about 10 ms, which dominated runs that convert coordinates for
+    many small batches (such as measuring coverage cell by cell).
+    """
+    crs = CRS.from_user_input(crs_text)
+    return None if crs.to_epsg() == 4326 else Transformer.from_crs(crs, 4326, always_xy=True)
+
+
 def lonlat(crs, x, y):
     """Longitude and latitude of map coordinates (a no-op for WGS 84).
 
     `crs` is anything pyproj accepts: a rasterio or pyproj CRS, "EPSG:32614", a WKT string.
     """
-    crs = CRS.from_user_input(crs)
-    if crs.to_epsg() == 4326:
+    transformer = _to_lonlat(crs.to_wkt() if hasattr(crs, "to_wkt") else str(crs))
+    if transformer is None:
         return np.asarray(x, dtype="float64"), np.asarray(y, dtype="float64")
-    return Transformer.from_crs(crs, 4326, always_xy=True).transform(x, y)
+    return transformer.transform(x, y)
 
 
 def h3_ids(lat, lon, res):

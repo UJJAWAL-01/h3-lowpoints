@@ -127,3 +127,111 @@ def fetch_impervious(bbox, out_path, *, year=2021, max_area_km2=20_000.0, data=N
     if not np.any(array != IMPERVIOUS_NODATA):
         raise ValueError("NLCD impervious holds no data for this box (outside the lower 48 US?)")
     return write_raster(out_path, array, transform, crs, IMPERVIOUS_NODATA, "uint8")
+
+
+# ------------------------------------------------------------------ water mask
+
+WATER_CLASS = 80          # WorldCover "permanent water bodies"
+SAMPLES = 3               # each elevation pixel is sampled at SAMPLES x SAMPLES evenly spaced points
+
+
+def worldcover_vrt(bbox, path, *, source=None, cache_dir=None, workers=8):
+    """A virtual raster of the WorldCover tiles over a lon/lat box (any size).
+
+    Tiles that do not exist (open ocean) read as 0, no data. `cache_dir` downloads each tile
+    once instead of reading it over the internet. Returns the path.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from xml.sax.saxutils import escape
+
+    from ._common import download_once
+
+    bbox = check_bbox(bbox)
+    tiles = degree_tiles(bbox, size=3)
+    west, south = min(lon for _, lon in tiles), min(lat for lat, _ in tiles)
+    east, north = max(lon for _, lon in tiles) + 3, max(lat for lat, _ in tiles) + 3
+    pixel = 1 / 12000
+
+    def probe(tile):
+        lat, lon = tile
+        if cache_dir is not None and source is None:
+            url = f"{WORLDCOVER}/{worldcover_tile_name(lat, lon)}.tif"
+            loc = download_once(url, cache_dir)
+        else:
+            loc = _locate_worldcover(lat, lon, source)
+        if loc is None:
+            return None
+        with rasterio.open(loc) as src:
+            return loc, src.transform, src.width, src.height
+
+    with gdal_env(), ThreadPoolExecutor(max_workers=workers) as pool:
+        found = [info for info in pool.map(probe, tiles) if info]
+    if not found:
+        raise ValueError("No WorldCover tiles cover this box")
+    sources = []
+    for loc, tr, w, h in found:
+        dx, dy = round((tr.c - west) / pixel), round((north - tr.f) / pixel)
+        sources.append(
+            f'    <SimpleSource><SourceFilename relativeToVRT="0">{escape(loc)}</SourceFilename>'
+            f'<SourceBand>1</SourceBand><SrcRect xOff="0" yOff="0" xSize="{w}" ySize="{h}"/>'
+            f'<DstRect xOff="{dx}" yOff="{dy}" xSize="{w}" ySize="{h}"/></SimpleSource>')
+    width, height = round((east - west) / pixel), round((north - south) / pixel)
+    wkt = rasterio.crs.CRS.from_epsg(4326).to_wkt()
+    text = (f'<VRTDataset rasterXSize="{width}" rasterYSize="{height}">\n'
+            f'  <SRS dataAxisToSRSAxisMapping="2,1">{escape(wkt)}</SRS>\n'
+            f'  <GeoTransform>{float(west)!r}, {pixel!r}, 0, {float(north)!r}, 0, {-pixel!r}</GeoTransform>\n'
+            f'  <VRTRasterBand dataType="Byte" band="1">\n    <NoDataValue>0</NoDataValue>\n'
+            + "\n".join(sources) + '\n  </VRTRasterBand>\n</VRTDataset>\n')
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    return out
+
+
+def build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, block=2048, verbose=False):
+    """A water mask on exactly the pixel grid of an elevation raster, from ESA WorldCover.
+
+    A pixel is water (1) when at least 5 of SAMPLES x SAMPLES = 9 evenly spaced points inside it
+    fall on WorldCover "permanent water bodies"; otherwise 0. Pass the result as `mask_path` to
+    `analyze_tiled` so open water acts as a place water leaves instead of as terrain. Works for
+    elevation rasters in any CRS. The file is written under a temporary name and renamed when
+    complete, so an existing `out_path` is always a whole mask. Returns the path.
+    """
+    import os
+
+    from affine import Affine
+    from rasterio.enums import Resampling
+    from rasterio.vrt import WarpedVRT
+    from rasterio.windows import Window
+
+    out = Path(out_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.stem + ".part.tif")
+    n = SAMPLES
+    with gdal_env(), rasterio.open(dem_path) as dem:
+        west, south, east, north = transform_bounds(dem.crs, "EPSG:4326", *dem.bounds, densify_pts=21)
+        pad = 0.01
+        bbox = (max(-180.0, west - pad), max(-90.0, south - pad), min(180.0, east + pad),
+                min(90.0, north + pad))
+        vrt = worldcover_vrt(bbox, out.with_name(out.stem + ".worldcover.vrt"), source=source,
+                             cache_dir=cache_dir)
+        fine = dem.transform @ Affine.scale(1 / n)
+        profile = {"driver": "GTiff", "height": dem.height, "width": dem.width, "count": 1,
+                   "dtype": "uint8", "crs": dem.crs, "transform": dem.transform, "tiled": True,
+                   "blockxsize": 512, "blockysize": 512, "compress": "deflate", "BIGTIFF": "IF_SAFER"}
+        with rasterio.open(vrt) as wc, \
+                WarpedVRT(wc, crs=dem.crs, transform=fine, width=dem.width * n,
+                          height=dem.height * n, resampling=Resampling.nearest, nodata=0) as samples, \
+                rasterio.open(tmp, "w", **profile) as dst:
+            rows = range(0, dem.height, block)
+            for i, r0 in enumerate(rows, 1):
+                h = min(block, dem.height - r0)
+                for c0 in range(0, dem.width, block):
+                    w = min(block, dem.width - c0)
+                    s = samples.read(1, window=Window(c0 * n, r0 * n, w * n, h * n))
+                    water = (s == WATER_CLASS).reshape(h, n, w, n).sum(axis=(1, 3))
+                    dst.write((water * 2 > n * n).astype("uint8"), 1, window=Window(c0, r0, w, h))
+                if verbose:
+                    print(f"water mask: row {i}/{len(rows)}", flush=True)
+    os.replace(tmp, out)
+    return out

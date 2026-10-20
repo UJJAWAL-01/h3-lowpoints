@@ -131,6 +131,29 @@ This is an input for the planned susceptibility layer (rain on impervious ground
 
 Its "permanent water bodies" class is a convenient water mask for `analyze(mask=...)`.
 
+### Water mask from ESA WorldCover
+
+`build_water_mask` (and `h3lowpoints build --water-mask`) turns WorldCover into a mask on the
+elevation raster's own pixel grid: each elevation pixel is sampled at 3 × 3 evenly spaced points,
+and it is water when at least 5 of the 9 fall on "permanent water bodies". A test compares this
+pixel for pixel with the same sampling done by hand.
+
+Why it matters: lakes are flat in elevation data, and a lake whose outlet (a dam, locks, a narrow
+river) stands higher than its surface fills as one huge depression. Measured on two boxes of 3DEP
+30 m data:
+
+| Box | Without the mask | With the mask |
+|---|---|---|
+| Western Lake Erie (−83.5, 41.4, −82.5, 42.1) | largest depression 465 km² (the lake); 662 km² depressed in all | largest 2.5 km²; 101 km² in all |
+| Great Salt Lake (−113.1, 40.6, −111.8, 41.7) | largest 3,835 km² (the lake); 4,366 km² in all | largest 172 km², in the desert west of the lake; 312 km² in all |
+
+Ninety-eight per cent of the depressions on land were unchanged; what disappeared were the lakes
+and the low shore land merged into them.
+
+Limits: only *permanent* water (2021) is masked, not seasonal flooding; water narrower than about
+half a pixel (15 m at 30 m) is not seen; WorldCover's own classification errors carry over.
+Elevation grids on NAD83 and WorldCover on WGS 84 differ by about a metre, far below a pixel.
+
 ## NOAA Atlas 14 design rainfall
 
 - **What:** how much rain falls in a storm of a given duration (5 minutes to 60 days) and rarity

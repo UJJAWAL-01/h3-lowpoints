@@ -75,6 +75,7 @@ writes the tables as they are produced, then verifies the result. See
 | `--tile N` | `4096` | Tile size in pixels (memory and speed, never the result). |
 | `--format csv\|parquet` | `csv` | Table format. Parquet is recommended for large regions. |
 | `--cache-dir DIR` | | Download each 3DEP tile here once (about 40 MB per 1° tile at 30 m) instead of reading it over the internet twice. Faster (about 1.65× in a measured test) but needs disk for every tile; without it nothing is stored. An interrupted run keeps the tiles already downloaded. See [Large regions](large-regions.md#streaming-or-caching-the-tiles). |
+| `--water-mask` | off | Treat permanent water (ESA WorldCover class 80, "permanent water bodies") as open water instead of terrain: lakes, reservoirs and the sea then act as places water leaves, instead of filling as giant depressions. The mask is built once, on the elevation data's own pixel grid, saved as `water.tif`, and reused by later parts of the run. See [Data sources](data-sources.md#water-mask-from-esa-worldcover). |
 | `--hours H` | | Stop after about H hours, at the end of a tile, and exit with code 3. Every tile is saved as it finishes, so running the same command again continues where it stopped. Use it to split a long run into parts; see [Large regions](large-regions.md#running-in-parts). |
 | `--spot-check N` | `0` | Also cut N random windows and require the whole and tiled analyses to agree exactly. |
 | `--map FILE.html` | | Also write the interactive map (for small regions; a state has millions of cells). |

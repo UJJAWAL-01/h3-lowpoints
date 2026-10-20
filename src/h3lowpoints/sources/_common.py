@@ -124,3 +124,20 @@ def write_raster(path, array, transform, crs, nodata, dtype):
                        blockxsize=256, blockysize=256) as dst:
         dst.write(array.astype(dtype), 1)
     return out
+
+
+def download_once(url, cache_dir):
+    """Local copy of `url` in `cache_dir` (downloaded once, resumable), or None if it does not exist."""
+    target = Path(cache_dir) / url.rsplit("/", 1)[-1]
+    if target.exists() and target.stat().st_size > 0:
+        return str(target)
+    if not url_exists(url):
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(target.suffix + ".part")
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as fh:
+        while chunk := response.read(1 << 20):
+            fh.write(chunk)
+    partial.replace(target)                 # only a complete file gets the real name
+    return str(target)

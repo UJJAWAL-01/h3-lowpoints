@@ -29,8 +29,9 @@ from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 
-from ._common import (USER_AGENT, bbox_area_km2, check_bbox, degree_tiles, gdal_env, mosaic,
-                      read_text, remote, snap_outwards, url_exists, write_raster)
+from ._common import (bbox_area_km2, check_bbox, degree_tiles, gdal_env, mosaic, read_text, remote,
+                      snap_outwards, url_exists, write_raster)
+from ._common import download_once as _download
 
 STAGED = "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation"
 PRODUCTS = {30: ("1", 1 / 3600), 10: ("13", 1 / 10800)}      # resolution: (product code, pixel)
@@ -115,23 +116,6 @@ def _own_cell_mosaic(found, bounds, pixel):
         rows, cols = min(block.shape[0], height - row0), min(block.shape[1], width - col0)
         out[row0:row0 + rows, col0:col0 + cols] = block[:rows, :cols]
     return out, rasterio.transform.from_origin(west, north, pixel, pixel), crs
-
-
-def _download(url, cache_dir):
-    """Local copy of `url` in `cache_dir` (downloaded once, resumable), or None if it does not exist."""
-    target = Path(cache_dir) / url.rsplit("/", 1)[-1]
-    if target.exists() and target.stat().st_size > 0:
-        return str(target)
-    if not url_exists(url):
-        return None
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_suffix(target.suffix + ".part")
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as fh:
-        while chunk := response.read(1 << 20):
-            fh.write(chunk)
-    partial.replace(target)                 # only a complete file gets the real name
-    return str(target)
 
 
 def build_3dep_vrt(bbox, path, *, resolution=30, source=None, cache_dir=None, workers=8):

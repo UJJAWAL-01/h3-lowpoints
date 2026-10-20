@@ -180,6 +180,18 @@ The 1 m lidar tiles in the USGS catalogue touching a box, newest survey first (d
 ESA WorldCover 2021 land-cover classes (global, 10 m) as a GeoTIFF (WGS 84, uint8, 0 = no data).
 Class codes and names are in `sources.landcover.WORLDCOVER_CLASSES`.
 
+### `sources.landcover.build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, block=2048, verbose=False)`
+
+A water mask on exactly the pixel grid of an elevation raster (any CRS), from ESA WorldCover: a
+pixel is 1 (water) when at least 5 of 9 evenly spaced points inside it fall on class 80,
+"permanent water bodies", else 0. Pass it as `mask_path` to `analyze_tiled`. `source` is a
+folder of local WorldCover tiles, `cache_dir` downloads each tile once; otherwise tiles are read
+over the internet. Written under a temporary name and renamed when complete. Returns the path.
+
+### `sources.landcover.worldcover_vrt(bbox, path, *, source=None, cache_dir=None, workers=8)`
+
+A virtual raster of the WorldCover tiles over a box of any size (missing ocean tiles read as 0).
+
 ### `sources.landcover.fetch_impervious(bbox, out_path, *, year=2021, max_area_km2=20000.0, data=None)`
 
 NLCD percent impervious surface (lower 48 US states, 30 m) as a GeoTIFF in EPSG:5070, values 0 to

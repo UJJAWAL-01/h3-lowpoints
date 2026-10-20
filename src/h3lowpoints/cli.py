@@ -72,6 +72,9 @@ def build_parser():
     b.add_argument("--cache-dir", help="download each 3DEP tile here once instead of streaming it")
     b.add_argument("--format", default="csv", choices=["csv", "parquet"],
                    help="table format: csv (default) or parquet (needs pyarrow; smaller and faster)")
+    b.add_argument("--water-mask", action="store_true",
+                   help="treat permanent water (ESA WorldCover) as open water, not terrain: lakes and "
+                        "reservoirs then drain the land around them instead of filling as depressions")
     b.add_argument("--hours", type=float, metavar="H",
                    help="stop after about H hours, at the end of a tile, and exit with code 3; run the "
                         "same command again to continue (every tile is saved as it finishes)")
@@ -194,17 +197,32 @@ def _build(args):
     vrt = build_3dep_vrt(tuple(args.bbox), out / "dem.vrt", resolution=30 if args.dataset == "3dep" else 10,
                          cache_dir=args.cache_dir)
     timings["tiles"] = time.perf_counter() - start
+    mask = None
+    if args.water_mask:
+        from .sources.landcover import build_water_mask
+
+        mask = out / "water.tif"
+        if not mask.exists():                 # built once; a run continued later reuses it
+            start = time.perf_counter()
+            print("building the water mask from ESA WorldCover", flush=True)
+            build_water_mask(vrt, mask, cache_dir=args.cache_dir, verbose=True)
+            timings["water_mask"] = time.perf_counter() - start
     start = time.perf_counter()
     # the tables go to disk as they are produced, so the region is not limited by memory
     try:
         result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth,
-                               verbose=True, out_dir=out, format=args.format, hours=args.hours)
+                               verbose=True, out_dir=out, format=args.format, hours=args.hours,
+                               mask_path=None if mask is None else str(mask))
     except Paused as stop:
         print(f"part finished ({100 * stop.done / stop.total:.0f}% of the work done): {stop}")
         return 3
     timings["analysis"] = time.perf_counter() - start
     result.meta["build"] = {"dataset": args.dataset, "bbox": list(args.bbox),
                             "seconds": {k: round(v, 1) for k, v in timings.items()}}
+    if mask is not None:
+        result.meta["build"]["water_mask"] = (
+            "ESA WorldCover 2021 v200, class 80 (permanent water bodies): a pixel is water when at "
+            "least 5 of 9 evenly spaced points in it are; file water.tif")
     write_meta(out, result.meta)
     problems = check_saved(out)
     if args.spot_check:
