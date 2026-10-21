@@ -91,6 +91,7 @@ class _Resp(io.BytesIO):
 
 
 def test_url_exists_only_treats_404_as_missing(monkeypatch):
+    monkeypatch.setattr(_common, "_sleep", lambda s: None)       # retries without waiting
     def answer(code):
         def fake(request, timeout=None):
             if code == 200:
@@ -110,6 +111,37 @@ def test_url_exists_only_treats_404_as_missing(monkeypatch):
     monkeypatch.setattr(_common.urllib.request, "urlopen", answer("down"))
     with pytest.raises(OSError):                     # a broken network is never "missing data"
         _common.url_exists("https://example.org/a.tif")
+
+
+def test_passing_failures_are_retried_and_404_is_not(monkeypatch):
+    waits, calls = [], {"n": 0}
+    monkeypatch.setattr(_common, "_sleep", waits.append)
+
+    def flaky(fails, error):
+        def fake(request, timeout=None):
+            calls["n"] += 1
+            if calls["n"] <= fails:
+                raise error(request) if callable(error) else error
+            return _Resp(b"tile list")
+        return fake
+
+    reset = ConnectionResetError(10054, "An existing connection was forcibly closed by the remote host")
+    monkeypatch.setattr(_common.urllib.request, "urlopen", flaky(2, reset))
+    assert _common.url_exists("https://example.org/a.tif") is True       # the case that stopped a build
+    assert waits == [1, 2] and calls["n"] == 3
+    waits.clear(), calls.update(n=0)
+    monkeypatch.setattr(_common.urllib.request, "urlopen",
+                        flaky(3, lambda r: urllib.error.HTTPError(r.full_url, 503, "busy", {}, None)))
+    assert _common.read_text("https://example.org/list.txt") == "tile list" and waits == [1, 2, 4]
+    waits.clear(), calls.update(n=0)
+    monkeypatch.setattr(_common.urllib.request, "urlopen",
+                        flaky(99, lambda r: urllib.error.HTTPError(r.full_url, 404, "no", {}, None)))
+    assert _common.url_exists("https://example.org/a.tif") is False and calls["n"] == 1 and not waits
+    calls.update(n=0)
+    monkeypatch.setattr(_common.urllib.request, "urlopen", flaky(99, reset))
+    with pytest.raises(ConnectionResetError):                            # a lasting outage still fails
+        _common.read_bytes("https://example.org/a.tif")
+    assert calls["n"] == len(_common.RETRY_DELAYS) + 1
 
 
 # ------------------------------------------------------------------ 3DEP 30 m and 10 m

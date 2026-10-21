@@ -61,6 +61,11 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
   `tests/test_docs.py` keeps it in step with the code (links, options, functions, columns, fields).
 
 ### Fixed
+- **A dropped connection while checking which tiles exist stopped a build.** The readers' own
+  requests (tile checks, catalogues, small downloads, cached tile downloads) now retry passing
+  failures (a reset or dropped connection, a timeout, HTTP 408, 429 and 5xx) after 1 to 128
+  seconds, about 4 minutes in all; a 404 still means "missing" at once, and a lasting outage
+  still raises. Found when the USGS server reset one of the 1,450 checks of a national build.
 - **H3 ids that look like numbers.** Reading a saved CSV turned resolution-14 ids such as
   `8e4516503458447` (about one in ten thousand) into infinity, corrupting `h3lowpoints map` and
   `verify` on 1 m lidar results. H3 columns are now always read as text, and CSV numbers read back

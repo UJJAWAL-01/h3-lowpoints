@@ -3,7 +3,9 @@
 The readers use only the standard library and rasterio, so a plain install can fetch data.
 """
 import contextlib
+import http.client
 import math
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -48,32 +50,63 @@ def bbox_area_km2(bbox):
     return (east - west) * 111.32 * math.cos(mid) * (north - south) * 110.57
 
 
+# Requests that fail for a passing reason (a dropped or reset connection, a timeout, a busy
+# server) are tried again after these waits, about 4 minutes in all: one dropped connection in
+# the thousands of requests a national build makes must not stop it. A 404 is never retried.
+RETRY_DELAYS = (1, 2, 4, 8, 16, 32, 64, 128)
+_sleep = time.sleep
+
+
+def _passing(exc):
+    """Is this failure worth trying again?"""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in (408, 429, 500, 502, 503, 504)
+    return isinstance(exc, (urllib.error.URLError, ConnectionError, TimeoutError,
+                            http.client.HTTPException))
+
+
+def with_retries(call):
+    """call(), tried again after each of RETRY_DELAYS when it fails for a passing reason."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            return call()
+        except Exception as exc:
+            if delay is None or not _passing(exc):
+                raise
+            _sleep(delay)
+
+
 def url_exists(url, timeout=30):
     """True if the server has the file, False if it answers 404. Any other failure raises.
 
     Only a 404 means "no such tile" (for example open ocean). A network error, a timeout or any
-    other status is raised, so a broken connection is never mistaken for missing data.
+    other status is raised (after the retries of `with_retries`), so a broken connection is never
+    mistaken for missing data.
     """
     request = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
-    try:
+
+    def head():
         with urllib.request.urlopen(request, timeout=timeout):
             return True
+    try:
+        return with_retries(head)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return False
         raise OSError(f"{url} answered HTTP {exc.code}") from exc
 
 
-def read_text(url, timeout=60):
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read().decode("utf-8", errors="replace")
-
-
 def read_bytes(url, timeout=120):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+
+    def get():
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read()
+    return with_retries(get)
+
+
+def read_text(url, timeout=60):
+    return read_bytes(url, timeout=timeout).decode("utf-8", errors="replace")
 
 
 def remote(url):
@@ -136,8 +169,11 @@ def download_once(url, cache_dir):
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_suffix(target.suffix + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as fh:
-        while chunk := response.read(1 << 20):
-            fh.write(chunk)
+
+    def fetch():                            # a retry starts the file again from the beginning
+        with urllib.request.urlopen(request, timeout=120) as response, open(partial, "wb") as fh:
+            while chunk := response.read(1 << 20):
+                fh.write(chunk)
+    with_retries(fetch)
     partial.replace(target)                 # only a complete file gets the real name
     return str(target)
