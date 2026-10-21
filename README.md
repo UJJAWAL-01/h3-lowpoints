@@ -87,8 +87,10 @@ The full list is in [docs/limitations.md](docs/limitations.md).
 
 ## Project
 
+Created and maintained by **Ujjawal Patel** ([@UJJAWAL-01](https://github.com/UJJAWAL-01)).
+
 [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Citation](CITATION.cff)
 
-Code is Apache-2.0. No data is included; data fetched through the library keeps its own licence
+Code is Apache-2.0, copyright 2026 Ujjawal Patel (see [NOTICE](NOTICE)). No data is included; data fetched through the library keeps its own licence
 (USGS 3DEP, NLCD and NOAA Atlas 14 are public domain; Copernicus GLO-30 and ESA WorldCover require
 attribution). See [docs/data-sources.md](docs/data-sources.md).

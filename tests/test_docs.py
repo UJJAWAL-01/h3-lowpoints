@@ -97,3 +97,15 @@ def test_every_metadata_field_is_documented(tmp_path):
     fields = (set(meta) - {"params"}) | {f"params.{k}" for k in meta["params"]} | {"tiling", "build"}
     for field in fields:
         assert f"`{field}`" in text, f"meta field {field} is not described in outputs.md"
+
+
+def test_the_author_is_named_everywhere_the_project_is_presented():
+    import h3lowpoints
+
+    author = "Ujjawal Patel"
+    assert h3lowpoints.__author__ == author
+    assert f'authors = [{{ name = "{author}" }}]' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    for name in ("README.md", "NOTICE", "docs/index.md"):
+        assert author in (ROOT / name).read_text(encoding="utf-8"), name
+    citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    assert 'family-names: "Patel"' in citation and 'given-names: "Ujjawal"' in citation

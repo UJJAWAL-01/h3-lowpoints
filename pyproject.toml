@@ -9,6 +9,8 @@ description = "Find closed depressions in elevation models and map them on H3 ce
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
+authors = [{ name = "Ujjawal Patel" }]
+maintainers = [{ name = "Ujjawal Patel" }]
 keywords = ["h3", "dem", "lidar", "depressions", "hydrology", "gis"]
 classifiers = [
     "Development Status :: 3 - Alpha",
