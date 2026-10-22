@@ -203,3 +203,18 @@ def test_the_page_runs_without_console_errors(result, tmp_path, hash_):
     problems = [ln for ln in console if re.search(r"Uncaught|TypeError|is not a function|ReferenceError", ln)]
     assert not problems, "\n".join(problems)
     assert shot.exists() and shot.stat().st_size > 20_000             # it drew something
+
+
+def test_a_map_of_a_roll_up_says_so(tmp_path):
+    import json as _json
+
+    from h3lowpoints.pipeline import rollup
+
+    from h3lowpoints import analyze
+    from test_verify import dem
+
+    res = analyze(dem(tmp_path / "d.tif"), res=12, min_depth=0.1)
+    for cells, note in ((res.cells, "analysis"), (rollup(res.cells, 10), "rolled up from resolution 12")):
+        page = build_map(cells, res.depressions, res.meta, tmp_path / "m.html", subtitle="my words").read_text(encoding="utf-8")
+        payload = _json.loads(page.split('<script id="payload" type="application/json">')[1].split("</script>")[0])
+        assert payload["first_note"] == note and payload["subtitle"] == "my words"

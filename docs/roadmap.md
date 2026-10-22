@@ -40,13 +40,11 @@ Each step is finished, tested and documented before the next starts. Nothing is 
 
 ## Next
 
-1. **National US layer.** Built and verified on 19 October 2026: 12.3 million depressions and
-   82 million resolution-10 cells from 3DEP 30 m, in 7.3 hours on a laptop
-   ([Large regions](large-regions.md)). Before it is published: mask permanent water (the Great
-   Lakes otherwise appear as the largest depressions) and clip to the US border; then publish the
-   tables (Parquet) as open data on Zenodo with a DOI, with coarse summary maps. Settings:
-   resolution 10 (the finest 30 m data supports) and `min_depth` 0.5 m (above the data's
-   vertical error), documented with the release.
+1. **National US layer.** Built, verified and clipped (October 2026): with open water masked
+   (ESA WorldCover) and clipped to the lower 48 states after the analysis, 10,573,090 depressions
+   and 34,046,636 resolution-10 cells from 3DEP 30 m ([Large regions](large-regions.md)), with a
+   dataset description, a national summary map and draft Zenodo metadata. Next: publish the
+   tables (Parquet) on Zenodo with a DOI, with the creator's confirmation of the licence.
 2. **General validation tools.** Score any set of observed locations (flood reports, high-water
    marks, insurance claims, anything with coordinates) against the depressions: how much more
    often observations fall in or near depressions than random locations do, with confidence

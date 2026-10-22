@@ -174,6 +174,16 @@ Durations are labelled as NOAA labels them: `5-min`, `10-min`, `15-min`, `30-min
 `30-day`, `45-day`, `60-day`. Values are partial-duration-series estimates at a point; over a city
 they change little, so one point near the centre is a fair design value.
 
+## US Census Bureau boundaries
+
+- **What:** the cartographic boundary files of the US states, generalized for mapping at
+  1:500,000.
+- **Licence:** public domain.
+- **Library:** `sources.boundaries.us_lower48` and `h3lowpoints clip --boundary us48`: the lower
+  48 states and DC as one outline, for clipping results to the US after the analysis.
+- **Accuracy:** along coasts and the national borders the generalized line can be a few hundred
+  metres from the legal one; it decides membership only for cells that close to it.
+
 ## Your own data
 
 Any single-band elevation raster with a coordinate reference system works: national lidar from

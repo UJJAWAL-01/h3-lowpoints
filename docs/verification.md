@@ -31,6 +31,12 @@ check_result(res)               # [] when every invariant holds
 check_saved("results_folder")   # the same for files on disk
 ```
 
+**Clipped results** (`h3lowpoints clip`, recorded in `meta["clip"]`) keep, for a depression that
+straddles the boundary, only its cells inside it, so the cell table's totals no longer equal the
+depression table's. For them the four checks that compare those totals (area, volume, deepest,
+no cell deeper than every depression) are skipped; every other invariant still holds and is
+checked, including the lowest-point counts, which clipping keeps exact.
+
 Saved results are checked **in pieces**: the depression table is read whole, the cell table
 500,000 rows at a time, keeping only each cell's 8-byte id until the end (to find duplicates). A
 national result with tens of millions of cells is checked in modest memory.

@@ -275,7 +275,7 @@ function init() {
   refresh();
 }
 D.levels.forEach((L, i) => { const o = document.createElement("option"); o.value = i;
-  o.textContent = `Resolution ${L.res} – ${fmt(L.rows.length)} cells` + (i === 0 ? " (analysis)" : ""); $("res").appendChild(o); });
+  o.textContent = `Resolution ${L.res} – ${fmt(L.rows.length)} cells` + (i === 0 && D.first_note ? ` (${D.first_note})` : ""); $("res").appendChild(o); });
 $("res").onchange = (e) => {
   state.level = +e.target.value;
   // a cell of 12,000 km2 or more can honestly report a share, not a single deepest point

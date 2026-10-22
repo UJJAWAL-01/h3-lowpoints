@@ -21,6 +21,14 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **Clipping a result to a boundary, after the analysis.** `clip.clip_result` and
+  `h3lowpoints clip --boundary FILE|us48` keep cells whose centre is inside and depressions whose
+  lowest point's cell is kept, in pieces for results of any size; `meta["clip"]` records it and
+  `verify` skips only the total comparisons clipping makes inexact. `sources.boundaries.us_lower48`
+  reads the Census Bureau's lower-48 outline. The national water-masked layer clipped to the
+  lower 48 keeps 10,573,090 depressions and 34,046,636 cells.
+- `pipeline.rollup_saved` rolls up a saved cell table in pieces; `build_map(subtitle=...)`, and maps
+  of a roll-up say so instead of calling it the analysis.
 - **A water mask from ESA WorldCover.** `build_water_mask` puts WorldCover's permanent water on an
   elevation raster's own pixel grid (water when at least 5 of 9 sample points are), and
   `h3lowpoints build --water-mask` uses it, so lakes and reservoirs act as open water instead of

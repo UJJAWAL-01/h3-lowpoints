@@ -128,14 +128,17 @@ def _check(d, cell_chunks, meta):
         add("cell ids are not unique")
     if "res" in flags:
         add(f"cells are not all at resolution {res}")
-    if not _close(area, d["area_m2"].sum()):
-        add(f"cell areas add to {area:.6g} m2, depressions to {d['area_m2'].sum():.6g}")
-    if not _close(volume, d["volume_m3"].sum()):
-        add(f"cell volumes add to {volume:.6g} m3, depressions to {d['volume_m3'].sum():.6g}")
-    if not _close(deepest, max_dep):
-        add("the deepest cell and the deepest depression differ")
-    if "too deep" in flags:
-        add("a cell is deeper than every depression")
+    # a clipped result keeps, for depressions across the boundary, only their cells inside it, so
+    # the two tables' totals no longer match; every other invariant still holds
+    if not meta.get("clip"):
+        if not _close(area, d["area_m2"].sum()):
+            add(f"cell areas add to {area:.6g} m2, depressions to {d['area_m2'].sum():.6g}")
+        if not _close(volume, d["volume_m3"].sum()):
+            add(f"cell volumes add to {volume:.6g} m3, depressions to {d['volume_m3'].sum():.6g}")
+        if not _close(deepest, max_dep):
+            add("the deepest cell and the deepest depression differ")
+        if "too deep" in flags:
+            add("a cell is deeper than every depression")
     if has_counts:
         if n_low != len(d):
             add(f"n_lowpoints adds to {n_low}, not {len(d)} depressions")

@@ -82,6 +82,14 @@ def build_parser():
                    help="also re-run N random windows tiled and whole and require identical answers")
     b.add_argument("--map", help="also write an interactive web map to this .html file")
 
+    c = sub.add_parser("clip", help="keep the part of a saved result inside a boundary (for example the US)")
+    c.add_argument("results", help="folder written by 'analyze' or 'build'")
+    c.add_argument("--boundary", required=True,
+                   help="a vector file (GeoPackage, GeoJSON, Shapefile), or 'us48' for the lower 48 US "
+                        "states and DC from the US Census Bureau")
+    c.add_argument("--out", required=True, help="output folder for the clipped result")
+    c.add_argument("--format", choices=["csv", "parquet"], help="table format (default: as the input)")
+
     v = sub.add_parser("verify", help="check a saved result against invariants that always hold")
     v.add_argument("results", help="folder written by 'analyze' or 'build'")
     v.add_argument("--dem", help="also spot-check this DEM: tiled and whole runs on random windows")
@@ -245,6 +253,31 @@ def _build(args):
     return 0 if not problems else 1
 
 
+def _clip(args):
+    import json
+
+    from .clip import clip_result
+    from .verify import check_saved
+
+    boundary, name = args.boundary, None
+    if args.boundary == "us48":
+        from .sources.boundaries import us_lower48
+
+        out = Path(args.out)
+        out.mkdir(parents=True, exist_ok=True)
+        boundary = out / "boundary_us48.gpkg"
+        if not boundary.exists():
+            us_lower48(boundary)
+        name = "Lower 48 US states and DC (US Census Bureau cartographic boundaries, 1:500,000)"
+    out = clip_result(args.results, boundary, args.out, format=args.format, name=name)
+    meta = json.loads((out / "meta.json").read_text())
+    print(f"{meta['n_depressions']:,} of {meta['clip']['depressions_before']:,} depressions and "
+          f"{meta['output']['n_cells']:,} of {meta['clip']['cells_before']:,} cells kept, written to {out}")
+    problems = check_saved(out)
+    print("verification: " + ("all invariants hold" if not problems else f"{len(problems)} problem(s): {problems}"))
+    return 0 if not problems else 1
+
+
 def _verify(args):
     from .verify import check_saved, spot_check
 
@@ -276,7 +309,7 @@ def main(argv=None):
     try:
         commands = {"analyze": _analyze, "fetch-dem": _fetch, "map": _map,
                     "fetch-landcover": _landcover, "rainfall": _rainfall, "build": _build,
-                    "verify": _verify}
+                    "verify": _verify, "clip": _clip}
         return commands[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

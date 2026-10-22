@@ -196,3 +196,14 @@ def test_cli_analyze_in_either_format_then_map_and_verify(tmp_path, fmt, capsys)
     assert main(["verify", str(out)]) == 0
     assert main(["map", str(out), "--out", str(tmp_path / "m.html")]) == 0
     assert (tmp_path / "m.html").stat().st_size > 1000
+
+
+@pytest.mark.parametrize("rows", [3, 50, 10**6])
+def test_rolling_up_a_saved_result_in_pieces_equals_rolling_up_the_whole(tmp_path, good, rows):
+    from h3lowpoints.pipeline import rollup, rollup_saved
+
+    folder = good.save(tmp_path / "out")
+    for res in (11, 9, 6):
+        want = rollup(good.cells, res).sort_values("h3").reset_index(drop=True)
+        got = rollup_saved(folder, res, rows=rows).sort_values("h3").reset_index(drop=True)
+        pd.testing.assert_frame_equal(got, want, check_dtype=False, rtol=1e-12)

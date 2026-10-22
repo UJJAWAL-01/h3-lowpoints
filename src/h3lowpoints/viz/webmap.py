@@ -91,7 +91,7 @@ def _bounds(table):
     return [float(west), float(south), float(east), float(north)]
 
 
-def build_map(cells, depressions, meta, path, *, footprint=None, title=None, max_cells=120_000,
+def build_map(cells, depressions, meta, path, *, footprint=None, title=None, subtitle=None, max_cells=120_000,
               max_points=20_000, n_levels=6):
     """Write the interactive map for an analysis to `path` and return the path.
 
@@ -100,10 +100,12 @@ def build_map(cells, depressions, meta, path, *, footprint=None, title=None, max
     max_cells: the finest resolutions with more cells than this are left out of the page (it
         would be slow to draw them); the coarser roll-ups are used instead.
     max_points: the deepest this many depressions can be marked individually.
+    subtitle: replaces the line describing the data under the title.
     """
     if len(cells) == 0:
         raise ValueError("There are no depressions to draw")
     res = h3.get_resolution(cells["h3"].iloc[0])
+    analysed = (meta.get("params") or {}).get("res")
     levels, skipped = _levels(cells, res, max_cells, n_levels, footprint)
     if not levels:
         raise ValueError(f"No resolution has at most {max_cells} cells; raise max_cells")
@@ -125,11 +127,13 @@ def build_map(cells, depressions, meta, path, *, footprint=None, title=None, max
     if skipped:
         sub.append(f"finest {skipped} resolution(s) not drawn: too many cells")
     payload = {
-        "title": title or "Closed depressions on H3 cells", "subtitle": " · ".join(sub),
+        "title": title or "Closed depressions on H3 cells", "subtitle": subtitle or " · ".join(sub),
         "stats": stats, "caveat": CAVEATS.get(meta.get("resolution_tier"), ""),
         "bounds": _bounds(cells),
         "levels": [_level_json(r, t) for r, t in levels],
         "points": _points_json(depressions, max_points),
+        # the finest level offered is the analysis itself, or a roll-up of a finer analysis
+        "first_note": ("analysis" if analysed in (None, res) else f"rolled up from resolution {analysed}"),
     }
     # every "<" becomes < (valid JSON), so no text in the data can open or close an HTML tag
     data = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")

@@ -5,7 +5,7 @@ and may change without notice.
 
 ```python
 from h3lowpoints import (analyze, analyze_array, analyze_tiled, read_result, Result,
-                         resolution_guide, rollup, reproject_to_utm)
+                         resolution_guide, rollup, rollup_saved, reproject_to_utm)
 ```
 
 Conventions used throughout:
@@ -68,6 +68,20 @@ written.
 Differences from `analyze`: `Result.labels` and `Result.depth` are `None`, and `id` numbers the
 depressions 1 to n. Raises `ValueError` for `tile <= 0` or a mask of another shape, and
 `ImportError` for `format="parquet"` without pyarrow (before any work is done).
+
+### `clip.clip_result(folder, boundary, out_dir, *, format=None, name=None, rows=500000)`
+
+Write the part of a saved result inside `boundary` (a shapely geometry in longitude/latitude, or
+a vector file in any CRS) to `out_dir`: cells whose centre is inside, depressions whose
+`h3_lowpoint` cell is kept. Reads and writes the cell table in pieces, so any size can be
+clipped. `name` labels the boundary in `meta["clip"]`. Returns `out_dir`. See
+[Command line](cli.md#clip) for the rule's consequences.
+
+### `rollup_saved(folder, res, rows=None)`
+
+The cell table of a saved result rolled up to a coarser resolution,
+read in pieces (exactly `rollup` of the whole table), for tables too large to load. Coverage is
+not measured.
 
 ### `read_result(folder)`
 
@@ -210,6 +224,13 @@ NLCD percent impervious surface (lower 48 US states, 30 m) as a GeoTIFF in EPSG:
 100 and 255 for no data. `year` is one of `sources.landcover.NLCD_YEARS`. `data` supplies the
 service's GeoTIFF bytes yourself (for tests or a cache).
 
+### `sources.boundaries.us_lower48(out_path=None, *, year=2025, data=None)`
+
+The lower 48 US states and DC as one shapely geometry (longitude/latitude), from the US Census
+Bureau's cartographic boundary file (1:500,000, public domain); Alaska, Hawaii and the
+territories are left out. `out_path` also saves it (GeoPackage or GeoJSON). Needs the `sources`
+extra.
+
 ### `sources.rainfall.design_rainfall(lat, lon)`
 
 NOAA Atlas 14 precipitation-frequency estimates for a point in the US, in millimetres, as a
@@ -237,10 +258,12 @@ ready for `buildings`.
 
 ## Maps: `h3lowpoints.viz`
 
-### `viz.webmap.build_map(cells, depressions, meta, path, *, footprint=None, title=None, max_cells=120000, max_points=20000, n_levels=6)`
+### `viz.webmap.build_map(cells, depressions, meta, path, *, footprint=None, title=None, subtitle=None, max_cells=120000, max_points=20000, n_levels=6)`
 
 The engine behind `Result.to_html`, for tables you hold separately. With `footprint`, coarser
-levels get coverage too.
+levels get coverage too. `subtitle` replaces the line describing the data. When `cells` is a
+roll-up of the analysis, the map labels its finest level as rolled up from the analysis
+resolution.
 
 ### `viz.webmap.map_from_dir(folder, path, **kwargs)`
 

@@ -114,6 +114,27 @@ class Result:
                       crs=self.crs, footprint=self.footprint, path=self.path)
 
 
+def rollup_saved(folder, res, rows=None):
+    """The cell table of a saved result rolled up to a coarser resolution, read in pieces.
+
+    Exactly `rollup` of the whole table (deepest depth; summed area, volume and lowest-point
+    counts), without holding the fine table in memory: a national table of tens of millions of
+    cells becomes a summary of thousands. Coverage is not measured (there is no footprint).
+    """
+    from .store import CHUNK_ROWS, iter_table
+
+    pieces = [rollup(chunk, res) for chunk in iter_table(folder, "cells", rows=rows or CHUNK_ROWS)
+              if len(chunk)]
+    if not pieces:
+        return rollup(read_table(folder, "cells"), res)
+    whole = pd.concat(pieces, ignore_index=True)
+    spec = {"max_depth_m": ("max_depth_m", "max"), "depress_area_m2": ("depress_area_m2", "sum"),
+            "depress_volume_m3": ("depress_volume_m3", "sum")}
+    if "n_lowpoints" in whole:
+        spec["n_lowpoints"] = ("n_lowpoints", "sum")
+    return whole.groupby("h3", as_index=False).agg(**spec)
+
+
 def read_result(folder):
     """A result saved in a folder (by `Result.save`, `analyze_tiled(out_dir=...)` or the CLI).
 

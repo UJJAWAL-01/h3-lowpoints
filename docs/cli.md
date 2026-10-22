@@ -8,6 +8,7 @@ listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 | [`analyze`](#analyze) | Analyze an elevation file. |
 | [`build`](#build) | Analyze a US region of any size straight from USGS 3DEP, then verify it. |
 | [`verify`](#verify) | Check a saved result. |
+| [`clip`](#clip) | Keep the part of a saved result inside a boundary (for example the US). |
 | [`map`](#map) | Make the interactive web map from a saved result. |
 | [`fetch-dem`](#fetch-dem) | Download elevation data for a box. |
 | [`fetch-landcover`](#fetch-landcover) | Download land cover for a box. |
@@ -101,6 +102,27 @@ Checks a saved result against the invariants every correct result satisfies (see
 checked. With `--dem`, also cuts N (default 3) random windows from that raster and requires the
 whole and tiled analyses to agree, using the settings in `meta.json`. Prints
 `all invariants hold` (exit 0) or the list of problems (exit 1).
+
+## clip
+
+```
+h3lowpoints clip FOLDER --boundary FILE|us48 --out FOLDER [--format csv|parquet]
+```
+
+Keeps the part of a saved result inside a boundary, after the analysis, so the hydrology stays
+exact (no artificial outlet along the boundary). A cell is kept when its centre is inside, and a
+depression when the cell of its lowest point is kept. The clipped result records `meta["clip"]`
+and is verified on writing.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--boundary` | | A vector file (GeoPackage, GeoJSON, Shapefile; any CRS), or `us48` for the lower 48 US states and DC from the US Census Bureau (downloaded once and saved in the output folder as `boundary_us48.gpkg`; needs the `sources` extra). |
+| `--out FOLDER` | | Where to write the clipped result (not the input folder). |
+| `--format csv\|parquet` | as the input | Table format. |
+
+```
+h3lowpoints clip conus_30m --boundary us48 --out us48_30m
+```
 
 ## map
 
