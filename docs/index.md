@@ -70,6 +70,7 @@ same result can be viewed from a street to a continent.
 
 ## Citing and licence
 
-Code is Apache-2.0. If you use the library in published work, cite it using `CITATION.cff` in
-the repository. Data you download through it keeps its own licence (see
+Code is Apache-2.0. If you use the library in published work, cite it with its DOI,
+[doi.org/10.5281/zenodo.23552522](https://doi.org/10.5281/zenodo.23552522) (all versions), or `CITATION.cff` in the
+repository. Data you download through it keeps its own licence (see
 [Data sources](data-sources.md)).

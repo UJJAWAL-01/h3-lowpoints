@@ -6,6 +6,14 @@ authors:
   - family-names: "Patel"
     given-names: "Ujjawal"
 repository-code: "https://github.com/UJJAWAL-01/h3-lowpoints"
+doi: "10.5281/zenodo.23552522"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.23552522"
+    description: "All versions"
+  - type: doi
+    value: "10.5281/zenodo.23552973"
+    description: "Version 0.1.1"
 license: Apache-2.0
 version: "0.1.1"
 references:

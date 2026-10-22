@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/h3-lowpoints)](https://pypi.org/project/h3-lowpoints/)
 [![Tests](https://github.com/UJJAWAL-01/h3-lowpoints/actions/workflows/ci.yml/badge.svg)](https://github.com/UJJAWAL-01/h3-lowpoints/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-online-blue)](https://ujjawal-01.github.io/h3-lowpoints/)
+[![Software DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23552522-blue)](https://doi.org/10.5281/zenodo.23552522)
 [![Dataset DOI](https://img.shields.io/badge/dataset-10.5281%2Fzenodo.23552773-blue)](https://doi.org/10.5281/zenodo.23552773)
 
 Find closed depressions ("low points") in an elevation model and describe them on
@@ -99,6 +100,9 @@ precise rules are in [docs/definition.md](https://ujjawal-01.github.io/h3-lowpoi
 The full list is in [docs/limitations.md](https://ujjawal-01.github.io/h3-lowpoints/limitations).
 
 ## Project
+
+To cite the library, use [doi.org/10.5281/zenodo.23552522](https://doi.org/10.5281/zenodo.23552522) (all versions) or the
+entry in [CITATION.cff](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CITATION.cff).
 
 [Contributing](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CONTRIBUTING.md) · [Changelog](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CHANGELOG.md) · [Citation](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CITATION.cff)
 
