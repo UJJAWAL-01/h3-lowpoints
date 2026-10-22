@@ -159,6 +159,9 @@ minimum for the lower 48 at resolution 10. A hierarchical version of the method 
 
 ### With open water masked
 
+This run, clipped to the lower 48 states, is published as an open dataset:
+[doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773).
+
 Measured on 20 and 21 October 2026: the same box and settings with `--water-mask`, after the
 improvements that came out of the first run (one outlet node per tile, validity records for
 coverage, a tile-by-tile mask, retried requests). Run in four parts.

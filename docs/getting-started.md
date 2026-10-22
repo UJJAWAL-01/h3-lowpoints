@@ -5,25 +5,25 @@ Python way and the command-line way; use whichever you prefer.
 
 ## 1. Install
 
-You need Python 3.10 or newer. The library is not on PyPI yet, so install it from a clone of the
-repository:
+You need Python 3.10 or newer:
 
 ```
-git clone https://github.com/UJJAWAL-01/h3-lowpoints
-cd h3-lowpoints
-pip install -e .
+pip install h3-lowpoints
 ```
+
+To work on the library itself, install it from a clone instead:
+`git clone https://github.com/UJJAWAL-01/h3-lowpoints`, then `pip install -e ".[dev]"` inside it.
 
 Optional extras add features that need more packages:
 
 | Extra | Adds | Install |
 |---|---|---|
-| `viz` | 3D maps inside Jupyter notebooks (pydeck) | `pip install -e ".[viz]"` |
-| `sources` | reading drain and building files (GeoPackage, Shapefile, GeoJSON) | `pip install -e ".[sources]"` |
-| `parquet` | saving and reading results as Parquet, smaller and faster than CSV | `pip install -e ".[parquet]"` |
-| `dev` | running the test suite | `pip install -e ".[dev]"` |
+| `viz` | 3D maps inside Jupyter notebooks (pydeck) | `pip install "h3-lowpoints[viz]"` |
+| `sources` | reading drain and building files (GeoPackage, Shapefile, GeoJSON), boundaries | `pip install "h3-lowpoints[sources]"` |
+| `parquet` | saving and reading results as Parquet, smaller and faster than CSV | `pip install "h3-lowpoints[parquet]"` |
+| `dev` | running the test suite (from a clone) | `pip install -e ".[dev]"` |
 
-Combine them as `pip install -e ".[viz,sources,parquet]"`. The interactive web map
+Combine them as `pip install "h3-lowpoints[viz,sources,parquet]"`. The interactive web map
 (`to_html`) needs no extra.
 
 The first analysis after installing takes a few extra seconds: the core fill is compiled to
@@ -32,7 +32,7 @@ machine code by numba once, then cached.
 ## 2. Run the built-in example (no download)
 
 ```
-python examples/quickstart.py my_first_run
+python examples/quickstart.py my_first_run      # from a clone of the repository
 ```
 
 This builds a small synthetic 1 m terrain with three depressions (a deep pit, a broad sag and a

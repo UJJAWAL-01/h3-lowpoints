@@ -1,8 +1,14 @@
 # Changelog
 
-## 0.1.0 (first release; date set when published)
+## 0.1.1 (documentation)
 
-The first public release. The API may still change before 1.0.
+- Install from PyPI (`pip install h3-lowpoints`) in the README and the docs; badges; links to the
+  documentation site and to the published national dataset ([doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773)). No change
+  to the code.
+
+## 0.1.0 (21 October 2026)
+
+The first public release, on PyPI. The API may still change before 1.0.
 
 ### Direction
 - The library is now a general depression layer on H3 (see [docs/roadmap.md](docs/roadmap.md)).

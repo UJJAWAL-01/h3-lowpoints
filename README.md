@@ -1,5 +1,10 @@
 # h3-lowpoints
 
+[![PyPI](https://img.shields.io/pypi/v/h3-lowpoints)](https://pypi.org/project/h3-lowpoints/)
+[![Tests](https://github.com/UJJAWAL-01/h3-lowpoints/actions/workflows/ci.yml/badge.svg)](https://github.com/UJJAWAL-01/h3-lowpoints/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-online-blue)](https://ujjawal-01.github.io/h3-lowpoints/)
+[![Dataset DOI](https://img.shields.io/badge/dataset-10.5281%2Fzenodo.23552773-blue)](https://doi.org/10.5281/zenodo.23552773)
+
 Find closed depressions ("low points") in an elevation model and describe them on
 [H3](https://h3geo.org) hexagon cells at any resolution, ready for maps, 3D views and analysis.
 
@@ -7,13 +12,14 @@ Find closed depressions ("low points") in an elevation model and describe them o
 > A depression is a feature of the terrain model: this library does not say whether water
 > collects there, and its output is **not a flood map**.
 
-**Documentation: [docs/index.md](docs/index.md)**, with
-[getting started](docs/getting-started.md), [concepts](docs/concepts.md),
-[outputs](docs/outputs.md), the [Python API](docs/python-api.md), the
-[command line](docs/cli.md), [data sources](docs/data-sources.md),
-[large regions](docs/large-regions.md), [the map](docs/map.md),
-[verification](docs/verification.md), [accuracy and limits](docs/limitations.md), a
-[glossary](docs/glossary.md) and the [roadmap](docs/roadmap.md).
+**Documentation: [ujjawal-01.github.io/h3-lowpoints](https://ujjawal-01.github.io/h3-lowpoints/)**
+(also in [docs/](https://ujjawal-01.github.io/h3-lowpoints/)), with
+[getting started](https://ujjawal-01.github.io/h3-lowpoints/getting-started), [concepts](https://ujjawal-01.github.io/h3-lowpoints/concepts),
+[outputs](https://ujjawal-01.github.io/h3-lowpoints/outputs), the [Python API](https://ujjawal-01.github.io/h3-lowpoints/python-api), the
+[command line](https://ujjawal-01.github.io/h3-lowpoints/cli), [data sources](https://ujjawal-01.github.io/h3-lowpoints/data-sources),
+[large regions](https://ujjawal-01.github.io/h3-lowpoints/large-regions), [the map](https://ujjawal-01.github.io/h3-lowpoints/map),
+[verification](https://ujjawal-01.github.io/h3-lowpoints/verification), [accuracy and limits](https://ujjawal-01.github.io/h3-lowpoints/limitations), a
+[glossary](https://ujjawal-01.github.io/h3-lowpoints/glossary) and the [roadmap](https://ujjawal-01.github.io/h3-lowpoints/roadmap).
 
 ## What it does
 
@@ -31,12 +37,19 @@ Find closed depressions ("low points") in an elevation model and describe them o
 
 ## Install
 
-Not on PyPI yet. From a clone (Python 3.10 or newer):
+Python 3.10 or newer:
 
 ```
-pip install -e .                          # core
-pip install -e ".[viz,sources,parquet]"   # + notebook maps, drain/building files, Parquet output
+pip install h3-lowpoints                          # core
+pip install "h3-lowpoints[viz,sources,parquet]"   # + notebook maps, drain/building files, Parquet output
 ```
+
+## National dataset
+
+Every closed depression on land in the lower 48 US states, from USGS 3DEP 30 m with open water
+masked: 10.6 million depressions and 34 million H3 resolution-10 cells, as Parquet, with a
+description of methods, columns and limits. Open data (CC BY 4.0) on Zenodo:
+[doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773).
 
 ## Quick start
 
@@ -73,7 +86,7 @@ h3lowpoints build --bbox -98 30 -96 32 --out region --min-depth 0.5 --cache-dir 
 The terrain is filled with the priority-flood algorithm; water leaves over the raster's edge and
 into nodata or masked areas. Fill level minus ground is the depth, and an 8-connected area of
 positive depth whose deepest point reaches `min_depth` (default 0.15 m) is one depression. The
-precise rules are in [docs/definition.md](docs/definition.md).
+precise rules are in [docs/definition.md](https://ujjawal-01.github.io/h3-lowpoints/definition).
 
 ## Limits
 
@@ -83,12 +96,12 @@ precise rules are in [docs/definition.md](docs/definition.md).
   prefer bare-earth data. Road embankments over culverts appear as dams.
 - Heights must be in metres.
 
-The full list is in [docs/limitations.md](docs/limitations.md).
+The full list is in [docs/limitations.md](https://ujjawal-01.github.io/h3-lowpoints/limitations).
 
 ## Project
 
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Citation](CITATION.cff)
+[Contributing](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CONTRIBUTING.md) · [Changelog](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CHANGELOG.md) · [Citation](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CITATION.cff)
 
-Code is Apache-2.0 (see [LICENSE](LICENSE) and [NOTICE](NOTICE)). No data is included; data fetched through the library keeps its own licence
+Code is Apache-2.0 (see [LICENSE](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/LICENSE) and [NOTICE](https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/NOTICE)). No data is included; data fetched through the library keeps its own licence
 (USGS 3DEP, NLCD and NOAA Atlas 14 are public domain; Copernicus GLO-30 and ESA WorldCover require
-attribution). See [docs/data-sources.md](docs/data-sources.md).
+attribution). See [docs/data-sources.md](https://ujjawal-01.github.io/h3-lowpoints/data-sources).

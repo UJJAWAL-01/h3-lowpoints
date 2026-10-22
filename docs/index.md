@@ -13,6 +13,9 @@ running a GIS desktop application.
 > library does not say whether water actually collects there, and its output is **not a flood
 > map**. See [Accuracy and limits](limitations.md).
 
+**National dataset:** every closed depression on land in the lower 48 US states (USGS 3DEP
+30 m, open water masked), on H3, is published as open data: [doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773).
+
 ## Where to start
 
 | If you want to... | Read |

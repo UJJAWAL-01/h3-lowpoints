@@ -40,11 +40,10 @@ Each step is finished, tested and documented before the next starts. Nothing is 
 
 ## Next
 
-1. **National US layer.** Built, verified and clipped (October 2026): with open water masked
-   (ESA WorldCover) and clipped to the lower 48 states after the analysis, 10,573,090 depressions
-   and 34,046,636 resolution-10 cells from 3DEP 30 m ([Large regions](large-regions.md)), with a
-   dataset description, a national summary map and draft Zenodo metadata. Next: publish the
-   tables (Parquet) on Zenodo with a DOI, with the creator's confirmation of the licence.
+1. **National US layer.** Published 21 October 2026 as open data (CC BY 4.0):
+   [doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773). 10,573,090 depressions and 34,046,636 resolution-10 cells from
+   3DEP 30 m with open water masked, clipped to the lower 48 states
+   ([Large regions](large-regions.md)).
 2. **General validation tools.** Score any set of observed locations (flood reports, high-water
    marks, insurance claims, anything with coordinates) against the depressions: how much more
    often observations fall in or near depressions than random locations do, with confidence
@@ -68,8 +67,8 @@ Each step is finished, tested and documented before the next starts. Nothing is 
    that runs entirely in the visitor's browser (no server, no cost): try the analysis on a small
    box, browse the national layer at every resolution, view depressions flat, as wells below the
    ground or as columns, and read this documentation.
-6. **Release 0.1.** Publish on PyPI, the documentation and app on GitHub Pages, and the data on
-   Zenodo.
+6. **Release 0.1.** Done 21 October 2026: the library on PyPI (`pip install h3-lowpoints`), the
+   documentation on GitHub Pages, the national dataset on Zenodo. The explorer app follows.
 
 ## Also planned
 
