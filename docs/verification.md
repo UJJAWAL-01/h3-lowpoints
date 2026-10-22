@@ -20,6 +20,7 @@ result is wrong (or was damaged after it was written).
 | Depths are at least `min_depth`, areas positive, volumes between 0 and maximum depth × area, and no value is NaN or infinite; latitudes and longitudes are in range. | Arithmetic or filtering errors. |
 | Coverage lies in (0, 1]; `covered_area_m2` is coverage × the cell's exact area and never exceeds it; `depressed_share` lies in [0, 1]. | Coverage errors. |
 | `meta.json`'s depression count matches the table. | Tables and metadata from different runs. |
+| With catchments: every catchment is at least as large as its depression; the catchment table adds up to `catchment_area_m2` and names only listed depressions; `spill_to` names a listed depression or 0, never the depression itself; following `spill_to` always ends; spill points are finite and in range. | Water counted twice or lost, overflow running in a loop, tables out of step. |
 
 ```
 h3lowpoints verify results_folder     # "all invariants hold" (exit 0), or the problems (exit 1)
@@ -40,6 +41,10 @@ checked, including the lowest-point counts, which clipping keeps exact.
 Saved results are checked **in pieces**: the depression table is read whole, the cell table
 500,000 rows at a time, keeping only each cell's 8-byte id until the end (to find duplicates). A
 national result with tens of millions of cells is checked in modest memory.
+
+Catchments get six more damages (a catchment table that no longer adds up, a catchment smaller
+than its depression, a depression spilling into itself, spills forming a loop, a spill to an
+unknown depression, catchment rows for an unknown depression), each of which must be caught.
 
 The test suite damages a good result in 15 different ways (dropping a cell, doubling an area,
 repeating an id, a NaN depth, a depression below `min_depth`, an impossible volume, ids at the

@@ -11,12 +11,12 @@ three files in a folder. This page describes every file, column and field.
 |---|---|---|
 | `depressions.csv` or `depressions.parquet` | every saved result | the depression table |
 | `cells.csv` or `cells.parquet` | every saved result | the cell table |
-| `catchments.csv` or `catchments.parquet` | results computed with `catchments=True` | the catchment table |
+| `catchments.csv` or `catchments.parquet` | results computed with `catchments=True` (`--catchments`) | the catchment table |
 | `meta.json` | every saved result | settings, versions, counts |
 | `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
 | `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
 | `_work/` | a disk-backed run, until it finishes | every finished tile's result (including a compressed record of its invalid pixels, for coverage) and the run's settings (`manifest.json`), so an interrupted run can continue; removed once the tables are written |
-| `_spill/` | a disk-backed run, while it writes the tables | temporary per-cell sums; removed when the run ends, even if it fails |
+| `_spill/`, `_spill_catchments/` | a disk-backed run, while it writes the tables | temporary per-cell sums; removed when the run ends, even if it fails |
 
 **Format.** CSV is the default and opens anywhere. Parquet (`format="parquet"`, needs
 `pip install h3-lowpoints[parquet]`) is typically several times smaller, keeps exact column types
@@ -157,7 +157,13 @@ depressions in the depression table (land draining off the map is not listed).
 | `area_m2` | float | m² | Ground area of the cell's pixels whose rain ends up in this depression. |
 
 A pixel belongs to the cell containing its centre. The rows of one depression add up to its
-`catchment_area_m2`. A cell on a divide appears once for each depression it drains to. Land
+`catchment_area_m2`. A cell on a divide appears once for each depression it drains to. Rows are
+ordered by H3 cell (as a 64-bit integer) and then by `id`.
+
+**Clipped results.** `h3lowpoints clip` keeps, for every depression it keeps, its whole
+catchment, including cells beyond the boundary: rain falling across a border still ends up in the
+depression. A kept depression's `spill_to` may name a depression outside the boundary, which is
+not in the clipped table. Land
 cover, imperviousness, soils or rainfall can be attached to a catchment through these cells
 without analysing the terrain again.
 

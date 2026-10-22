@@ -251,7 +251,7 @@ def base_meta(source, crs, shape, size, tier, geographic, res, min_depth, drain_
 
 def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings=None, res="auto",
                   min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8, mask=None,
-                  catchments=False, source="array", _plan=None):
+                  catchments=False, workers=1, source="array", _plan=None):
     """Analyze an in-memory DEM.
 
     drains_xy: optional (n, 2) drain locations in the DEM's CRS. Adds `dist_to_drain_m` and
@@ -262,6 +262,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     res: H3 resolution of the cell table, or "auto" (the default) for the finest the DEM supports.
     catchments: also route the water (see `hydro.routing`): adds the catchment area and spill
         columns and the `catchments` table.
+    workers: label pixels with H3 cells in this many processes (same answer, less time).
     """
     has_drains = drains_xy is not None and len(drains_xy) > 0
     requested = res
@@ -286,7 +287,8 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     if len(ids) == 0:
         meta.update({"n_depressions": 0, "n_edge": 0})
         footprint = Footprint.from_array(invalid, transform, crs)
-        cells = finish_cells(depression_cells(depth, labels, transform, crs, res), [], footprint)
+        cells = finish_cells(depression_cells(depth, labels, transform, crs, res, workers), [],
+                             footprint)
         return Result(empty_depressions(columns), cells, meta, labels, depth, transform, crs,
                       footprint, catchments=empty_catchments() if catchments else None)
 
@@ -313,17 +315,17 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     catchment_table = None
     if catchments:
         deps, catchment_table = add_catchments(deps, work, ~invalid, filled, depth, row_areas,
-                                               transform, crs, res)
+                                               transform, crs, res, workers)
 
     footprint = Footprint.from_array(invalid, transform, crs)
-    cells = finish_cells(depression_cells(depth, labels, transform, crs, res), deps["h3_lowpoint"],
-                         footprint)
+    cells = finish_cells(depression_cells(depth, labels, transform, crs, res, workers),
+                         deps["h3_lowpoint"], footprint)
     meta.update({"n_depressions": len(deps), "n_edge": int(deps["edge"].sum())})
     return Result(deps[columns], cells, meta, labels, depth, transform, crs, footprint,
                   catchments=catchment_table)
 
 
-def add_catchments(deps, ground, valid, filled, depth, row_areas, transform, crs, res):
+def add_catchments(deps, ground, valid, filled, depth, row_areas, transform, crs, res, workers=1):
     """The depression table with its catchment and spill columns, and the catchment table.
 
     The sinks are all 8-connected regions of positive depth, labelled as `label_depressions`
@@ -343,8 +345,8 @@ def add_catchments(deps, ground, valid, filled, depth, row_areas, transform, crs
     owner = out["final"][rows, cols]
     area = pixel_weights(row_areas, rows)
     lon, lat = lonlat(crs, *pixel_centers(transform, rows, cols))
-    table = (pd.DataFrame({"id": owner, "cell": h3_ids(lat, lon, res), "area_m2": area})
-             .groupby(["id", "cell"], as_index=False)["area_m2"].sum())
+    table = (pd.DataFrame({"id": owner, "cell": h3_ids(lat, lon, res, workers), "area_m2": area})
+             .groupby(["cell", "id"], as_index=False)["area_m2"].sum())   # by cell, then id
     table.insert(1, "h3", [h3.int_to_str(int(c)) for c in table.pop("cell")])
     width = depth.shape[1]
     pix = out["spill_pixel"][ids]
@@ -356,7 +358,7 @@ def add_catchments(deps, ground, valid, filled, depth, row_areas, transform, crs
 
 
 def analyze(dem_path, *, drains_xy=None, buildings=None, res="auto", min_depth=0.15,
-            drain_radius_m=5.0, drain_core_frac=0.8, mask=None, catchments=False):
+            drain_radius_m=5.0, drain_core_frac=0.8, mask=None, catchments=False, workers=1):
     """Find closed depressions in a DEM file and describe them on H3 cells.
 
     drains_xy: optional (n, 2) array of drain locations in the DEM's CRS.
@@ -364,10 +366,11 @@ def analyze(dem_path, *, drains_xy=None, buildings=None, res="auto", min_depth=0
     mask: optional boolean array (same shape as the DEM), True where the DEM is to be ignored.
     res: H3 resolution of the cell table, or "auto" (the default) for the finest the DEM supports.
     catchments: also route the water: catchment areas, spill links and the `catchments` table.
+    workers: label pixels with H3 cells in this many processes (same answer, less time).
     """
     with rasterio.open(dem_path) as src:
         arr, nodata, transform, crs = src.read(1), src.nodata, src.transform, src.crs
     return analyze_array(arr, transform, crs, nodata, drains_xy=drains_xy, buildings=buildings,
                          res=res, min_depth=min_depth, drain_radius_m=drain_radius_m,
                          drain_core_frac=drain_core_frac, mask=mask, catchments=catchments,
-                         source=str(dem_path))
+                         workers=workers, source=str(dem_path))

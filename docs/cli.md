@@ -40,6 +40,8 @@ h3lowpoints analyze DEM [options]
 | `--drains FILE` | | Drain points: GeoPackage, GeoJSON, Shapefile, or CSV with `lon,lat` or `x,y` columns. Adds the drain columns. Needs the `sources` extra. |
 | `--buildings FILE` | | Building footprint polygons. Adds the building columns. Needs the `sources` extra. |
 | `--map FILE.html` | | Also write the interactive map. |
+| `--catchments` | off | Also follow the water: each depression's catchment area, the depression it overflows into and where (`catchment_area_m2`, `spill_to`, `spill_lat`, `spill_lon`), and the catchment table. See [Definition](definition.md#catchments-and-spill). |
+| `--workers N` | `1` | Label pixels with their H3 cells in N processes: the same result in less time (4 is a good choice on most laptops). |
 | `--reproject` | off | First reproject the raster to its UTM zone. Not needed (degree grids are analyzed natively) and it smooths sharp edges. |
 
 Example:
@@ -81,6 +83,8 @@ writes the tables as they are produced, then verifies the result. See
 | `--hours H` | | Stop after about H hours (building the water mask included), at the end of a tile, and exit with code 3. Every tile is saved as it finishes, so running the same command again continues where it stopped. Use it to split a long run into parts; see [Large regions](large-regions.md#running-in-parts). |
 | `--spot-check N` | `0` | Also cut N random windows and require the whole and tiled analyses to agree exactly. |
 | `--map FILE.html` | | Also write the interactive map (for small regions; a state has millions of cells). |
+| `--catchments` | off | Also follow the water: catchment areas, spill links and the catchment table, exactly as `analyze --catchments`. |
+| `--workers N` | `1` | Label pixels with their H3 cells in N processes: the same result in less time. |
 
 The run prints one line per tile per pass, then a summary and the verification outcome. Exit
 code 1 means the verification found a problem (listed in `verify.json`). Every tile is saved as

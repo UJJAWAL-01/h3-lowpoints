@@ -40,13 +40,46 @@ def lonlat(crs, x, y):
     return transformer.transform(x, y)
 
 
-def h3_ids(lat, lon, res):
-    """H3 cell ids (as integers) for arrays of latitude and longitude."""
+PARALLEL_MIN = 200_000      # fewer points than this are always labelled in this process
+_POOL = {"pool": None, "workers": 0}
+
+
+def _h3_chunk(lat, lon, res):
     return np.fromiter((numpy_int.latlng_to_cell(a, b, res) for a, b in zip(lat, lon)),
                        dtype=np.uint64, count=len(lat))
 
 
-def depression_cells(depth, labels, transform, crs, res):
+def _pool(workers):
+    """A pool of `workers` processes, started once and reused (H3 labels one point per call and
+    holds Python's lock meanwhile, so threads would not help)."""
+    import atexit
+    from concurrent.futures import ProcessPoolExecutor
+
+    if _POOL["pool"] is None or _POOL["workers"] != workers:
+        if _POOL["pool"] is not None:
+            _POOL["pool"].shutdown()
+        _POOL["pool"], _POOL["workers"] = ProcessPoolExecutor(workers), workers
+        atexit.register(_POOL["pool"].shutdown)
+    return _POOL["pool"]
+
+
+def h3_ids(lat, lon, res, workers=1):
+    """H3 cell ids (as integers) for arrays of latitude and longitude.
+
+    workers: share large batches among this many processes. The answer is identical; only the
+    time changes. Processes are started on first use, so on Windows and macOS the calling program
+    must protect its entry point (`if __name__ == "__main__":`), as the command line does.
+    """
+    lat, lon = np.asarray(lat, dtype="float64"), np.asarray(lon, dtype="float64")
+    if workers <= 1 or len(lat) < PARALLEL_MIN:
+        return _h3_chunk(lat, lon, res)
+    n = min(len(lat) // (PARALLEL_MIN // 4), 4 * workers)
+    parts = _pool(workers).map(_h3_chunk, np.array_split(lat, n), np.array_split(lon, n),
+                               [res] * n)
+    return np.concatenate(list(parts))
+
+
+def depression_cells(depth, labels, transform, crs, res, workers=1):
     """One row per H3 cell that contains depression pixels.
 
     Each pixel belongs to the cell containing its centre. Area and volume are sums over those
@@ -60,7 +93,8 @@ def depression_cells(depth, labels, transform, crs, res):
     lon, lat = lonlat(crs, *pixel_centers(transform, rr, cc))
     area = pixel_weights(pixel_areas_m2(transform, crs, depth.shape[0]), rr)
     d = depth[rr, cc]
-    df = pd.DataFrame({"cell": h3_ids(lat, lon, res), "depth": d, "area": area, "volume": d * area})
+    df = pd.DataFrame({"cell": h3_ids(lat, lon, res, workers), "depth": d, "area": area,
+                       "volume": d * area})
     out = df.groupby("cell").agg(max_depth_m=("depth", "max"), depress_area_m2=("area", "sum"),
                                  depress_volume_m3=("volume", "sum")).reset_index()
     out["h3"] = [numpy_int.int_to_str(int(c)) for c in out["cell"]]

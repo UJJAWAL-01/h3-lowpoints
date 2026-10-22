@@ -3,13 +3,18 @@
 ## Unreleased
 
 ### Added
-- **Catchments and spill links** (`analyze(..., catchments=True)`, whole raster for now): where
-  rain on every pixel ends up, by exact rules that do not depend on processing order (steepest
-  descent on the ground, flats drained to their nearest way off, shallow sinks passing their
-  water on). Adds `catchment_area_m2`, `spill_to`, `spill_lat` and `spill_lon` to the depression
-  table and a catchment table (`id`, `h3`, `area_m2`), saved as `catchments.csv` or
-  `.parquet`. Checked against an independent pixel-by-pixel implementation. See
-  [docs/definition.md](docs/definition.md#catchments-and-spill).
+- **Catchments and spill links** (`catchments=True` in `analyze`, `analyze_array` and
+  `analyze_tiled`; `--catchments` for `analyze` and `build`): where rain on every pixel ends up,
+  by exact rules that do not depend on processing order (steepest descent on the ground, flats
+  drained to their nearest way off, shallow sinks passing their water on). Adds
+  `catchment_area_m2`, `spill_to`, `spill_lat` and `spill_lon` to the depression table and a
+  catchment table (`id`, `h3`, `area_m2`), saved as `catchments.csv` or `.parquet`. The whole
+  raster version is checked against an independent pixel-by-pixel implementation; the tiled
+  version gives exactly the whole-raster answer for any tile size, also on real terrain
+  (Houston, 30 m). `verify` checks the new invariants and `clip` keeps the whole catchments of
+  the depressions it keeps. See [docs/definition.md](docs/definition.md#catchments-and-spill).
+- `workers=` (`--workers`): label pixels with H3 cells in several processes; identical results,
+  labelling about 3× faster with 4 processes.
 - `hydro.depressions.fill_from_array`: the ground, the filled surface and the invalid pixels.
 
 ## 0.2.0 (22 October 2026)

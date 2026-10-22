@@ -21,7 +21,8 @@ import rasterio
 from rasterio.windows import Window
 
 from .resolution import FINEST_H3
-from .store import CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta, read_table
+from .store import (CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta, read_table,
+                    table_path)
 
 REL = 1e-6        # relative tolerance for sums compared across tables (float summation order)
 
@@ -30,12 +31,59 @@ def _close(a, b, rel=REL):
     return abs(a - b) <= rel * max(abs(a), abs(b), 1e-12)
 
 
-def check_tables(depressions, cells, meta):
-    """Problems found in a result given as its three tables (empty list = all invariants hold)."""
-    return _check(depressions, [cells], meta)
+def check_tables(depressions, cells, meta, catchments=None):
+    """Problems found in a result given as its tables (empty list = all invariants hold)."""
+    return _check(depressions, [cells], meta, None if catchments is None else [catchments])
 
 
-def _check(d, cell_chunks, meta):
+def _check_routing(d, catchment_chunks, meta):
+    """Catchment and spill invariants (results computed with catchments=True)."""
+    problems = []
+    add = problems.append
+    clipped = bool(meta.get("clip"))
+    ids = d["id"].to_numpy()
+    catch = d["catchment_area_m2"].to_numpy(dtype=float)
+    if not np.isfinite(d[["catchment_area_m2", "spill_lat", "spill_lon"]].to_numpy(dtype=float)).all():
+        add("catchment or spill columns hold NaN or infinite values")
+    if (catch < d["area_m2"].to_numpy(dtype=float) * (1 - REL)).any():
+        add("a catchment is smaller than its own depression")
+    if not d["spill_lat"].between(-90, 90).all() or not d["spill_lon"].between(-180, 180).all():
+        add("a spill point lies outside valid latitude/longitude")
+    to = d["spill_to"].to_numpy()
+    if (to == ids).any():
+        add("a depression spills into itself")
+    order = np.argsort(ids)
+    pos = np.minimum(np.searchsorted(ids[order], to), len(ids) - 1)
+    known = (ids[order][pos] == to) & (to != 0)
+    if not clipped and ((to != 0) & ~known).any():
+        add("spill_to names depressions that are not in the table")
+    # following spill_to must end (at 0, or outside a clipped table) without going round in a loop
+    nxt = np.where(known, order[pos], -1)
+    for _ in range(64):                          # pointer doubling: chains of 2**64 steps end
+        nxt = np.where(nxt >= 0, nxt[np.maximum(nxt, 0)], -1)
+    if (nxt >= 0).any():
+        add("following spill_to goes round in a loop")
+    if catchment_chunks is None:
+        return problems
+    sums = np.zeros(len(ids))
+    stray = False
+    for c in catchment_chunks:
+        if len(c) == 0:
+            continue
+        if not all(_valid(x) for x in c["h3"]):
+            add("the catchment table holds ids that are not valid H3 cells")
+        at = np.minimum(np.searchsorted(ids[order], c["id"].to_numpy()), len(ids) - 1)
+        hit = ids[order][at] == c["id"].to_numpy()
+        stray |= not hit.all()
+        np.add.at(sums, order[at[hit]], c["area_m2"].to_numpy(dtype=float)[hit])
+    if stray:
+        add("the catchment table names depressions that are not in the depression table")
+    if not np.allclose(sums, catch, rtol=REL, atol=1e-6):
+        add("the catchment table does not add up to catchment_area_m2")
+    return problems
+
+
+def _check(d, cell_chunks, meta, catchment_chunks=None):
     """The checks, with the cell table given as any number of pieces (read one at a time)."""
     problems = []
     res = (meta.get("params") or {}).get("res")
@@ -53,6 +101,8 @@ def _check(d, cell_chunks, meta):
     # --- depressions
     if d["id"].duplicated().any():
         add("depression ids are not unique")
+    if "catchment_area_m2" in d:
+        problems += _check_routing(d, catchment_chunks, meta)
     numbers = d[["max_depth_m", "area_m2", "volume_m3", "lat", "lon"]].to_numpy(dtype=float)
     if not np.isfinite(numbers).all():
         add("depressions hold NaN or infinite values")
@@ -172,7 +222,7 @@ def check_result(result):
     """
     if result.depressions is None and result.path is not None:
         return check_saved(result.path)
-    return check_tables(result.depressions, result.cells, result.meta)
+    return check_tables(result.depressions, result.cells, result.meta, result.catchments)
 
 
 def check_saved(folder, rows=CHUNK_ROWS):
@@ -180,8 +230,10 @@ def check_saved(folder, rows=CHUNK_ROWS):
     missing = missing_files(folder)
     if missing:
         return [f"{folder} is missing {', '.join(missing)}"]
+    catchments = (iter_table(folder, "catchments", rows=rows)
+                  if table_path(folder, "catchments") else None)
     return _check(read_table(folder, "depressions"), iter_table(folder, "cells", rows=rows),
-                  read_meta(folder))
+                  read_meta(folder), catchments)
 
 
 def compare_results(a, b, rel=1e-9):

@@ -30,8 +30,13 @@ from .h3agg.aggregate import h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
-from .pipeline import (CELL_TABLE, Result, add_coverage, base_meta, deeper_than_wide, dep_columns,
-                       empty_cells, empty_depressions, plan_analysis)
+from .hydro.routing import _distances, pixel_spacing_m
+from .hydro.tiled_routing import (E_FLAT, E_FP, E_HALO, E_KEPT, E_NONE, E_OUT, E_SINK, OUT_CODE,
+                                  Ends, collapse, decode, encode, join_surfaces,
+                                  settle_flats, tile_route)
+from .pipeline import (CATCHMENT_TABLE, CELL_TABLE, Result, add_coverage, base_meta,
+                       deeper_than_wide, dep_columns, empty_catchments, empty_cells,
+                       empty_depressions, plan_analysis)
 from .resolution import FINEST_H3, metres_to_cells
 from .sources._common import gdal_env
 from .store import (CHUNK_ROWS, CellParts, Checkpoints, Paused, TableWriter, check_format,
@@ -163,11 +168,12 @@ def _solve_borders(tiles, width, height):
     return [levels[off:off + len(t["z"])] for t, off in zip(tiles, offsets)], stats
 
 
-def _tile_records(depth, box, width, areas, bmask, near, min_depth):
+def _tile_records(depth, box, width, areas, bmask, near, min_depth, labels=None, n=None):
     """Per-tile summary of its depression pieces, before they are joined across tile borders."""
     r0, r1, c0, c1 = box
     h, w = depth.shape
-    labels, n = ndimage.label(depth > 0, structure=EIGHT)
+    if labels is None:
+        labels, n = ndimage.label(depth > 0, structure=EIGHT)
     if n == 0:
         return None
     rows, cols = np.nonzero(labels)                 # row-major, as scipy numbers labels
@@ -205,7 +211,8 @@ def _tile_records(depth, box, width, areas, bmask, near, min_depth):
 
 def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, tile=4096,
                   res="auto", min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8,
-                  verbose=False, out_dir=None, format="csv", hours=None):
+                  verbose=False, out_dir=None, format="csv", hours=None, catchments=False,
+                  workers=1):
     """Analyze a large DEM in tiles. The result equals `analyze` on the same DEM.
 
     tile: tile edge in cells. It only trades memory for speed; it never changes the result.
@@ -219,6 +226,9 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
         arguments; the checkpoints are removed once the tables are written.
     hours: with `out_dir`, stop after about this many hours, at the end of a tile, raising
         `Paused`; calling again with the same arguments continues. Splits a long run into parts.
+    catchments: also route the water, exactly as `analyze(..., catchments=True)` does (see
+        `hydro.tiled_routing`); with `out_dir` the catchment table is written as `catchments.<fmt>`.
+    workers: label pixels with H3 cells in this many processes (same answer, less time).
     Other arguments are as in `analyze`. `Result.labels` and `Result.depth` are not returned,
     and `id` numbers the depressions 1..n in raster-scan order of their first cell.
     """
@@ -242,14 +252,15 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
                 raise ValueError(f"mask {mask_src.shape} and DEM {src.shape} differ in shape")
             return _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
                         tier, geographic, areas, drains, buildings, tile, res, min_depth,
-                        drain_radius_m, drain_core_frac, verbose, requested, out_dir, format, hours)
+                        drain_radius_m, drain_core_frac, verbose, requested, out_dir, format, hours,
+                        catchments, workers)
         finally:
             if mask_src is not None:
                 mask_src.close()
 
 
 def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radius_m,
-              drain_core_frac, drains, buildings, mask_path):
+              drain_core_frac, drains, buildings, mask_path, catchments=False):
     """What a resumed run must share with the run it continues."""
     import hashlib
 
@@ -262,26 +273,27 @@ def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radiu
         "drains": None if drains is None else hashlib.sha256(drains.tobytes()).hexdigest(),
         "buildings": None if buildings is None else len(buildings),
         "mask": None if mask_path is None else str(mask_path),
-        "package_version": _package_version(),
+        "package_version": _package_version(), "catchments": bool(catchments),
         "checkpoint_format": 2}                     # 2: one outlet node per tile
 
 
 def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
          geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
-         drain_core_frac, verbose, requested, out_dir, fmt, hours):
+         drain_core_frac, verbose, requested, out_dir, fmt, hours, catchments=False, workers=1):
     work = None
     if out_dir is not None:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         work = Checkpoints(out_dir / "_work", _settings(
             dem_path, (height, width), transform, crs, tile, res, min_depth, drain_radius_m,
-            drain_core_frac, drains, buildings, mask_path))
+            drain_core_frac, drains, buildings, mask_path, catchments))
     ctx = {"src": src, "mask_src": mask_src, "height": height, "width": width, "crs": crs,
            "transform": transform, "areas": areas, "buildings": buildings, "geographic": geographic,
            "res": res, "min_depth": min_depth, "radius": metres_to_cells(drain_radius_m, size),
            "drain_rc": drain_pixels(drains, transform, (height, width)) if drains is not None else None,
            "deadline": None if hours is None else time.monotonic() + hours * 3600,
-           "verbose": verbose, "invalid": {}}
+           "verbose": verbose, "invalid": {}, "catchments": catchments, "workers": workers,
+           "spacing": pixel_spacing_m(transform, crs, height) if catchments else None}
     boxes = list(_tile_boxes(height, width, tile))
     blocks = np.zeros((-(-height // 16), -(-width // 16)), dtype=bool)   # blocks holding invalid pixels
     pieces, graph = _two_passes(boxes, blocks, ctx, work)
@@ -290,39 +302,56 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
                      drain_radius_m, drain_core_frac, drains, buildings, res_requested=requested)
     meta["tiling"] = {"tile": tile, "n_tiles": len(boxes), **graph}
     has_buildings = buildings is not None
-    columns = dep_columns(drains is not None, has_buildings)
+    columns = dep_columns(drains is not None, has_buildings, catchments)
     # coverage reads which pixels are valid from the records pass 1 kept, not from the DEM again
     # (a streamed DEM would be read over the internet once per partly covered cell)
     footprint = Footprint((height, width), transform, crs, blocks,
                           tile_opener(tile, (height, width), _invalid_reader(boxes, ctx, work)))
     parts = CellParts(res, None if out_dir is None else out_dir / "_spill")
+    cparts = (CellParts(res, None if out_dir is None else out_dir / "_spill_catchments")
+              if catchments else None)
     try:
         records, rings = [], []
+        routing = _RoutingParts() if catchments else None
         for piece in pieces:                     # tile by tile, in order: identical ids every time
-            _add_piece(piece, records, rings, parts)
+            _add_piece(piece, records, rings, parts, routing, cparts)
         if not records:
             out, lowpoints = None, np.zeros(0, dtype=np.uint64)
             comp, kept = np.zeros(0, dtype=np.int64), np.zeros(0, dtype=bool)
+            dep_comp = np.zeros(0, dtype=np.int64)
         else:
-            out, lowpoints, comp, kept = _join_pieces(records, rings, width, height, transform, crs,
-                                                      res, min_depth, drains, has_buildings,
-                                                      drain_core_frac)
+            out, lowpoints, comp, kept, dep_comp = _join_pieces(
+                records, rings, width, height, transform, crs, res, min_depth, drains,
+                has_buildings, drain_core_frac)
         del records, rings
+        catchment_chunks = None
+        if catchments:
+            out, ends, id_of_comp = _settle_routing(routing, out, comp, kept, dep_comp, width,
+                                                    height, transform, crs)
+            del routing
+            catchment_chunks = _catchment_chunks(cparts, ends, id_of_comp)
         meta.update({"n_depressions": 0 if out is None else len(out),
                      "n_edge": 0 if out is None else int(out["edge"].sum())})
         cells = _cell_chunks(parts, comp, kept, lowpoints, footprint)
         if out_dir is not None:
             result = _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs,
-                            footprint)
+                            footprint, catchment_chunks)
             work.remove()                        # finished: the checkpoints are no longer needed
             footprint._opener = file_opener(dem_path, mask_path)   # their records went with them
             return result
         deps = empty_depressions(columns) if out is None else _with_ids(out, lowpoints)[columns]
         chunks = list(cells)
         table = pd.concat(chunks, ignore_index=True) if chunks else empty_cells()
-        return Result(deps, table, meta, transform=transform, crs=crs, footprint=footprint)
+        catch = None
+        if catchments:
+            pieces_c = list(catchment_chunks)
+            catch = pd.concat(pieces_c, ignore_index=True) if pieces_c else empty_catchments()
+        return Result(deps, table, meta, transform=transform, crs=crs, footprint=footprint,
+                      catchments=catch)
     finally:
         parts.close()
+        if cparts is not None:
+            cparts.close()
 
 
 def _two_passes(boxes, blocks, ctx, work):
@@ -348,6 +377,10 @@ def _two_passes(boxes, blocks, ctx, work):
             f"{work.count('p2')} of {n} tiles done", flush=True)
         for k, box in enumerate(boxes, 1):
             _mark_blocks(blocks, work.load("p1", k, keys=["blk_r", "blk_c", "blk"]))
+        if ctx["catchments"]:
+            ctx["borders"] = _border_lookup(
+                [work.load("p1", k, keys=["keys"])["keys"] for k in range(1, n + 1)],
+                [work.load("lv", k)["lv"] for k in range(1, n + 1)])
         return _pass2(boxes, None, None, ctx, work, say), graph
 
     # ---- pass 1: flood every tile from its border and keep only the crossings
@@ -371,6 +404,8 @@ def _two_passes(boxes, blocks, ctx, work):
 
     # ---- the exact level of every border cell
     levels, graph = _solve_borders(tiles, ctx["width"], ctx["height"])
+    if ctx["catchments"]:
+        ctx["borders"] = _border_lookup([t["keys"] for t in tiles], levels)
     if work is not None:
         for k, lv in enumerate(levels, 1):
             work.save("lv", k, {"lv": lv})
@@ -403,7 +438,8 @@ def _pass2(boxes, tiles, levels, ctx, work, say):
             _check_time(ctx, work, n)
         elif piece is not None:
             pieces.append(piece)
-        say(f"pass 2, tile {k}/{n}: {0 if piece is None else len(piece['agg'])} pieces", flush=True)
+        n_pieces = 0 if piece is None or piece["agg"] is None else len(piece["agg"])
+        say(f"pass 2, tile {k}/{n}: {n_pieces} pieces", flush=True)
     if work is not None:
         return (_unpack_piece(work.load("p2", k)) for k in range(1, n + 1))
     return pieces
@@ -485,7 +521,14 @@ def _pass2_tile(box, lv, ctx):
     r0, r1, c0, c1 = box
     h, w = r1 - r0, c1 - c0
     src, width = ctx["src"], ctx["width"]
-    work, valid = _read_tile(src, ctx["mask_src"], box)
+    if ctx["catchments"]:                         # the tile and a one-pixel rim of its neighbours
+        win = (max(r0 - 1, 0), min(r1 + 1, ctx["height"]), max(c0 - 1, 0), min(c1 + 1, width))
+        ework, evalid = _read_tile(src, ctx["mask_src"], win)
+        oy, ox = r0 - win[0], c0 - win[2]
+        work = np.ascontiguousarray(ework[oy:oy + h, ox:ox + w])
+        valid = np.ascontiguousarray(evalid[oy:oy + h, ox:ox + w])
+    else:
+        work, valid = _read_tile(src, ctx["mask_src"], box)
     rows, cols, _, border = tile_seeds(valid, (r0 == 0, r1 == ctx["height"], c0 == 0,
                                                c1 == width))
     levels = work[rows, cols]
@@ -503,12 +546,17 @@ def _pass2_tile(box, lv, ctx):
     drain_rc = ctx["drain_rc"]
     near = (near_drain_mask(drain_rc[0], drain_rc[1], (h, w), (r0, c0), ctx["radius"])
             if drain_rc is not None else None)
-    out = _tile_records(depth, box, width, ctx["areas"][r0:r1], bmask, near, ctx["min_depth"])
+    labels, n_lab = ndimage.label(depth > 0, structure=EIGHT)
+    out = _tile_records(depth, box, width, ctx["areas"][r0:r1], bmask, near, ctx["min_depth"],
+                        labels, n_lab)
+    lab2rec = np.full(n_lab + 1, -1, dtype=np.int64)
+    if out is not None:
+        lab2rec[out[0]["lab"].to_numpy()] = np.arange(len(out[0]))
+    route = (_route_tile(ework, evalid, filled, labels, n_lab, lab2rec, box, win, ctx)
+             if ctx["catchments"] else None)
     if out is None:
-        return None
+        return None if route is None else {"agg": None, "route": route}
     agg, pixels, labels = out
-    lab2rec = np.full(int(labels.max()) + 1, -1, dtype=np.int64)
-    lab2rec[agg["lab"].to_numpy()] = np.arange(len(agg))
     # border pixels, to join pieces of one depression across tile borders
     ring = np.zeros((h, w), dtype=bool)
     ring[0, :] = ring[-1, :] = ring[:, 0] = ring[:, -1] = True
@@ -516,10 +564,14 @@ def _pass2_tile(box, lv, ctx):
     # pixels of kept pieces, as H3 cells
     lon, lat = lonlat(ctx["crs"], *pixel_centers(ctx["transform"], pixels["r"].to_numpy(),
                                                  pixels["c"].to_numpy()))
-    cells = _cell_summary(lab2rec[pixels["lab"].to_numpy()], h3_ids(lat, lon, ctx["res"]),
+    cells = _cell_summary(lab2rec[pixels["lab"].to_numpy()],
+                          h3_ids(lat, lon, ctx["res"], ctx["workers"]),
                           pixels["d"].to_numpy(), pixels["a"].to_numpy(), pixels["v"].to_numpy())
-    return {"agg": agg, "ring_keys": (pr + r0).astype(np.int64) * width + (pc + c0),
-            "ring_rec": lab2rec[labels[pr, pc]], "cells": cells}
+    piece = {"agg": agg, "ring_keys": (pr + r0).astype(np.int64) * width + (pc + c0),
+             "ring_rec": lab2rec[labels[pr, pc]], "cells": cells}
+    if route is not None:
+        piece["route"] = route
+    return piece
 
 
 _CELL_PARTS = ("c_rec", "c_cell", "c_depth", "c_area", "c_volume")
@@ -529,32 +581,45 @@ def _pack_piece(piece):
     """A tile's pieces as named arrays for a checkpoint file (`empty` when it has none)."""
     if piece is None:
         return {"empty": np.bool_(True)}
+    arrays = {"empty": np.bool_(False), "has_agg": np.bool_(piece["agg"] is not None)}
+    if "route" in piece:
+        arrays.update({f"rt__{k}": v for k, v in piece["route"].items()})
+    if piece["agg"] is None:
+        return arrays
     agg = piece["agg"]
-    arrays = {f"agg__{c}": agg[c].to_numpy() for c in agg.columns}
+    arrays.update({f"agg__{c}": agg[c].to_numpy() for c in agg.columns})
     arrays["agg_columns"] = np.array(list(agg.columns))
     arrays.update(dict(zip(_CELL_PARTS, piece["cells"])))
-    return {**arrays, "ring_keys": piece["ring_keys"], "ring_rec": piece["ring_rec"],
-            "empty": np.bool_(False)}
+    return {**arrays, "ring_keys": piece["ring_keys"], "ring_rec": piece["ring_rec"]}
 
 
 def _unpack_piece(arrays):
     if bool(arrays["empty"]):
         return None
-    agg = pd.DataFrame({c: arrays[f"agg__{c}"] for c in arrays["agg_columns"]})
-    return {"agg": agg, "ring_keys": arrays["ring_keys"], "ring_rec": arrays["ring_rec"],
-            "cells": tuple(arrays[k] for k in _CELL_PARTS)}
+    route = {k[4:]: v for k, v in arrays.items() if k.startswith("rt__")}
+    piece = {"agg": None}
+    if bool(arrays.get("has_agg", True)):
+        agg = pd.DataFrame({c: arrays[f"agg__{c}"] for c in arrays["agg_columns"]})
+        piece = {"agg": agg, "ring_keys": arrays["ring_keys"], "ring_rec": arrays["ring_rec"],
+                 "cells": tuple(arrays[k] for k in _CELL_PARTS)}
+    if route:
+        piece["route"] = route
+    return piece
 
 
-def _add_piece(piece, records, rings, parts):
+def _add_piece(piece, records, rings, parts, routing=None, cparts=None):
     """Number a tile's pieces after those of the tiles before it and collect them."""
     if piece is None:
         return
     offset = sum(len(r) for r in records) if records else 0
     agg = piece["agg"]
-    records.append(agg.assign(rec=np.arange(offset, offset + len(agg))))
-    rings.append((piece["ring_keys"], piece["ring_rec"] + offset))
-    rec, cell, depth, area, volume = piece["cells"]
-    parts.add(rec + offset, cell, depth, area, volume)
+    if agg is not None:
+        records.append(agg.assign(rec=np.arange(offset, offset + len(agg))))
+        rings.append((piece["ring_keys"], piece["ring_rec"] + offset))
+        rec, cell, depth, area, volume = piece["cells"]
+        parts.add(rec + offset, cell, depth, area, volume)
+    if routing is not None and "route" in piece:
+        routing.add(piece["route"], offset, cparts)
 
 
 def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, drains,
@@ -609,7 +674,7 @@ def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, 
 
     kept = np.zeros(int(comp.max()) + 1, dtype=bool)
     kept[dep.index.to_numpy()] = True
-    return out, h3_ids(lat, lon, res), comp, kept
+    return out, h3_ids(lat, lon, res), comp, kept, dep.index.to_numpy()
 
 
 def _with_ids(out, lowpoints):
@@ -620,7 +685,8 @@ def _with_ids(out, lowpoints):
                         for la, lo in zip(out["lat"].to_numpy(), out["lon"].to_numpy())])
 
 
-def _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs, footprint):
+def _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs, footprint,
+           catchment_chunks=None):
     """Write the tables piece by piece; return a `Result` that points at them."""
     remove_other_formats(out_dir, fmt)
     with TableWriter(out_dir / f"depressions.{fmt}", fmt) as w:
@@ -631,6 +697,263 @@ def _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, c
         for chunk in cells:
             w.write(chunk)
         w.close(empty=empty_cells())
-    meta["output"] = {"format": fmt, "n_cells": w.rows}
+    n_cells = w.rows
+    if catchment_chunks is not None:
+        with TableWriter(out_dir / f"catchments.{fmt}", fmt) as w:
+            for chunk in catchment_chunks:
+                w.write(chunk)
+            w.close(empty=empty_catchments())
+    meta["output"] = {"format": fmt, "n_cells": n_cells}
     write_meta(out_dir, meta)
     return Result(None, None, meta, transform=transform, crs=crs, footprint=footprint, path=out_dir)
+
+
+# ------------------------------------------------------------------ catchments (tiled)
+
+def _border_lookup(keys, levels):
+    """Sorted (key, exact level) of every tile-border cell, from each tile's pass-1 node keys
+    (the last node of each tile is its outlet node, key -1) and solved levels."""
+    k = np.concatenate([np.asarray(a)[:-1] for a in keys]) if keys else np.zeros(0, np.int64)
+    v = np.concatenate([np.asarray(a)[:-1] for a in levels]) if levels else np.zeros(0)
+    order = np.argsort(k)
+    return k[order], v[order]
+
+
+def _border_levels(borders, keys):
+    sorted_keys, levels = borders
+    pos = np.minimum(np.searchsorted(sorted_keys, keys), max(len(sorted_keys) - 1, 0))
+    if len(keys) and not (sorted_keys[pos] == keys).all():
+        raise RuntimeError("a valid pixel on a tile border has no solved level")
+    return levels[pos]
+
+
+def _route_tile(ework, evalid, filled, labels, n_lab, lab2rec, box, win, ctx):
+    """Routing of one tile (see `hydro.tiled_routing`): the ends of its water paths and the
+    pieces needed to join them with the other tiles'. Codes are local: sink ids are the tile's
+    piece numbers and surface ids its own numbers, offset when the tiles are put together."""
+    r0, r1, c0, c1 = box
+    er0, er1, ec0, ec1 = win
+    h, w = r1 - r0, c1 - c0
+    oy, ox = r0 - er0, c0 - ec0
+    width = ctx["width"]
+    efilled = ework.copy()
+    efilled[oy:oy + h, ox:ox + w] = filled
+    rim = np.ones(ework.shape, dtype=bool)
+    rim[oy:oy + h, ox:ox + w] = False
+    rr, cc = np.nonzero(rim & evalid)
+    efilled[rr, cc] = _border_levels(ctx["borders"],
+                                     (rr + er0).astype(np.int64) * width + (cc + ec0))
+    esink = evalid & (efilled > ework)
+    elab = np.zeros(ework.shape, dtype=np.int64)
+    elab[oy:oy + h, ox:ox + w] = labels
+    dist = _distances(*(a[er0:er1] for a in ctx["spacing"]))
+    (end_t, end_i, pcomp, has_down, outlet, unresolved, sink_fp, fp, fp_border, fp_touch,
+     fp_exit, fp_dt, fp_di) = tile_route(ework, evalid, efilled, esink, elab, oy, ox, h, w, dist,
+                                         width, er0, ec0, n_lab)
+    if unresolved:
+        raise RuntimeError(f"{unresolved} flat pixels have no way off: the fill is inconsistent")
+
+    # where each sink overflows to, with the sinks that cannot be depressions passed over
+    cand = lab2rec >= 0
+    s = np.arange(1, n_lab + 1)
+    f = sink_fp[s]
+    touch = fp_touch[f]
+    spill_t = np.full(n_lab + 1, E_OUT, dtype=np.int64)
+    spill_i = np.zeros(n_lab + 1, dtype=np.int64)
+    spill_t[s] = np.where(touch, E_FP, fp_dt[f])
+    spill_i[s] = np.where(touch, f, fp_di[f])
+    exit_key = np.full(n_lab + 1, -1, dtype=np.int64)
+    exit_key[s] = np.where(touch, -1, fp_exit[f])
+    if (~touch & (fp_dt[f] == E_NONE)).any():
+        raise RuntimeError("a sink inside a tile has no way to overflow: the fill is inconsistent")
+    level = np.zeros(n_lab + 1)
+    lr, lc = np.nonzero(labels)
+    level[labels[lr, lc]] = filled[lr, lc]
+    order = s[np.argsort(level[1:], kind="stable")]
+    spill_t, spill_i = collapse(order, cand, spill_t, spill_i)
+
+    def code(t, i):
+        t, i = np.array(t, dtype=np.int64), np.array(i, dtype=np.int64)
+        t = np.where(t == E_NONE, E_OUT, t)
+        sk = t == E_SINK
+        nc = sk & ~cand[np.where(sk, i, 0)]
+        j = i[nc]
+        t[nc], i[nc] = spill_t[j], spill_i[j]
+        sk = t == E_SINK
+        i[sk] = lab2rec[i[sk]]
+        return encode(t, i)
+
+    own_valid = evalid[oy:oy + h, ox:ox + w].ravel()
+    codes = np.full(h * w, OUT_CODE, dtype=np.int64)
+    codes[own_valid] = code(end_t[own_valid], end_i[own_valid])
+    o_rows, o_cols = np.divmod(np.arange(h * w), w)
+    keys = (o_rows + r0).astype(np.int64) * width + (o_cols + c0)
+
+    ring = np.zeros((h, w), dtype=bool)
+    ring[0, :] = ring[-1, :] = ring[:, 0] = ring[:, -1] = True
+    rb = np.flatnonzero(ring.ravel() & own_valid)
+    pm = np.flatnonzero(pcomp >= 0)
+    tf = np.flatnonzero(fp_touch)
+    fb = np.flatnonzero(fp_border)
+    cand_labels = np.flatnonzero(cand)
+    lab_of_rec = np.empty(len(cand_labels), dtype=np.int64)
+    lab_of_rec[lab2rec[cand_labels]] = cand_labels
+
+    # the catchment parts: ground area per (end, H3 cell); water leaving the map is not kept
+    sel = np.flatnonzero(own_valid & (codes != OUT_CODE))
+    lon, lat = lonlat(ctx["crs"], *pixel_centers(ctx["transform"], o_rows[sel] + r0,
+                                                  o_cols[sel] + c0))
+    cell = h3_ids(lat, lon, ctx["res"], ctx["workers"])
+    area = ctx["areas"][o_rows[sel] + r0]
+    acc_code, acc_cell, acc_area = codes[sel], cell, area
+    if len(sel):
+        srt = np.lexsort((acc_cell, acc_code))
+        start = _runs(acc_code[srt], acc_cell[srt])
+        acc_code, acc_cell = acc_code[srt][start], acc_cell[srt][start]
+        acc_area = np.add.reduceat(area[srt], start)
+    return {"border_keys": keys[rb], "border_codes": codes[rb],
+            "plat_keys": keys[pm], "plat_z": ework[oy:oy + h, ox:ox + w].ravel()[pm],
+            "plat_exit": outlet[pm] | has_down[pm], "plat_codes": codes[pm],
+            "fp_ids": tf.astype(np.int64), "fp_exit": fp_exit[tf],
+            "fp_dest": code(fp_dt[tf], fp_di[tf]),
+            "fpb_keys": keys[fb], "fpb_ids": fp[fb], "fpb_level": filled.ravel()[fb],
+            "rec_spill": code(spill_t[lab_of_rec], spill_i[lab_of_rec]),
+            "rec_exit": exit_key[lab_of_rec],
+            "acc_code": acc_code, "acc_cell": acc_cell, "acc_area": acc_area,
+            "n_fp": np.int64(len(fp_touch))}
+
+
+def _offset_codes(codes, rec_offset, fp_offset):
+    kind, ident = decode(codes)
+    ident = ident + np.where(kind == E_SINK, rec_offset, 0) + np.where(kind == E_FP, fp_offset, 0)
+    return encode(kind, ident)
+
+
+class _RoutingParts:
+    """The routing pieces of every tile, numbered like the depression pieces."""
+
+    _LISTS = ("border_keys", "border_codes", "plat_keys", "plat_z", "plat_exit", "plat_codes",
+              "fp_gid", "fp_exit", "fp_dest", "fpb_keys", "fpb_gid", "fpb_level", "rec_spill",
+              "rec_exit", "code_codes", "code_area")
+
+    def __init__(self):
+        self.parts = {k: [] for k in self._LISTS}
+        self.n_fp = 0
+
+    def add(self, rt, rec_offset, cparts):
+        fp_offset = self.n_fp
+
+        def conv(c):
+            return _offset_codes(c, rec_offset, fp_offset)
+
+        p = self.parts
+        p["border_keys"].append(rt["border_keys"])
+        p["border_codes"].append(conv(rt["border_codes"]))
+        p["plat_keys"].append(rt["plat_keys"])
+        p["plat_z"].append(rt["plat_z"])
+        p["plat_exit"].append(rt["plat_exit"])
+        p["plat_codes"].append(conv(rt["plat_codes"]))
+        p["fp_gid"].append(rt["fp_ids"] + fp_offset)
+        p["fp_exit"].append(rt["fp_exit"])
+        p["fp_dest"].append(conv(rt["fp_dest"]))
+        p["fpb_keys"].append(rt["fpb_keys"])
+        p["fpb_gid"].append(rt["fpb_ids"] + fp_offset)
+        p["fpb_level"].append(rt["fpb_level"])
+        p["rec_spill"].append(conv(rt["rec_spill"]))
+        p["rec_exit"].append(rt["rec_exit"])
+        acc = conv(rt["acc_code"])
+        if len(acc):
+            cparts.add(acc, rt["acc_cell"], np.zeros(len(acc)), rt["acc_area"], np.zeros(len(acc)))
+            totals, inverse = np.unique(acc, return_inverse=True)
+            p["code_codes"].append(totals)
+            p["code_area"].append(np.bincount(inverse, weights=rt["acc_area"]))
+        self.n_fp += int(rt["n_fp"])
+
+    def get(self, name, dtype=np.int64):
+        a = self.parts[name]
+        return np.concatenate(a) if a else np.zeros(0, dtype=dtype)
+
+
+def _settle_routing(routing, out, comp, kept, dep_comp, width, height, transform, crs):
+    """Join the routing pieces of all tiles: the catchment and spill columns of the depression
+    table, the settled ends, and the depression id of each joined sink (-1 if not kept)."""
+    g = routing.get
+    fpc = join_surfaces(g("fpb_keys"), g("fpb_gid"), g("fpb_level", float), routing.n_fp,
+                        width, height)
+    big = np.iinfo(np.int64).max
+    fp_gid, fp_exit, fp_dest = g("fp_gid"), g("fp_exit"), g("fp_dest")
+    n_fpc = int(fpc.max()) + 1 if len(fpc) else 0
+    fpc_exit = np.full(n_fpc, -1, dtype=np.int64)
+    fpc_dest = np.full(n_fpc, OUT_CODE, dtype=np.int64)
+    if len(fp_gid):
+        ex = np.where(fp_exit < 0, big, fp_exit)
+        c = fpc[fp_gid]
+        order = np.lexsort((ex, c))
+        first = order[np.r_[True, c[order][1:] != c[order][:-1]]]
+        fpc_exit[c[first]] = np.where(ex[first] == big, -1, ex[first])
+        fpc_dest[c[first]] = fp_dest[first]
+    flat_keys, flat_next = np.zeros(0, np.int64), np.zeros(0, np.int64)
+    if len(routing.parts["plat_keys"]) and len(g("plat_keys")):
+        flat_keys, flat_next = settle_flats(g("plat_keys"), g("plat_z", float),
+                                            g("plat_exit", bool), g("plat_codes"), width, height)
+    rec_spill, rec_exit = g("rec_spill"), g("rec_exit")
+    n_comp = len(kept)
+    comp_spill = np.full(n_comp, OUT_CODE, dtype=np.int64)
+    comp_exit = np.full(n_comp, -1, dtype=np.int64)
+    if len(comp):
+        comps, first_rec = np.unique(comp, return_index=True)
+        comp_spill[comps], comp_exit[comps] = rec_spill[first_rec], rec_exit[first_rec]
+    recs = np.arange(len(comp))
+    node = [encode(E_SINK, recs), encode(E_HALO, g("border_keys")), encode(E_FLAT, flat_keys),
+            encode(E_FP, fp_gid)]
+    nxt = [np.where(kept[comp], encode(E_KEPT, comp), comp_spill[comp]) if len(comp) else
+           np.zeros(0, np.int64), g("border_codes"), flat_next,
+           fpc_dest[fpc[fp_gid]] if len(fp_gid) else np.zeros(0, np.int64)]
+    ends = Ends(np.concatenate(node), np.concatenate(nxt))
+    id_of_comp = np.full(n_comp, -1, dtype=np.int64)
+    if out is None:
+        return None, ends, id_of_comp
+    id_of_comp[dep_comp] = out["id"].to_numpy()
+
+    spill = comp_spill[dep_comp]
+    kind, ident = decode(ends.final(spill))
+    spill_to = np.where(kind == E_KEPT, id_of_comp[np.where(kind == E_KEPT, ident, 0)], 0)
+    sk, sid = decode(spill)
+    via_surface = sk == E_FP
+    key = comp_exit[dep_comp].copy()
+    key[via_surface] = fpc_exit[fpc[sid[via_surface]]]
+    if (key < 0).any():
+        raise RuntimeError("a depression has no spill point: the fill is inconsistent")
+    lon, lat = lonlat(crs, *pixel_centers(transform, key // width, key % width))
+    codes, areas = g("code_codes"), g("code_area", float)
+    ck, ci = decode(ends.final(codes))
+    mine = ck == E_KEPT
+    owner = id_of_comp[ci[mine]]
+    catch = np.bincount(owner, weights=areas[mine], minlength=int(out["id"].max()) + 1)
+    out = out.assign(catchment_area_m2=catch[out["id"].to_numpy()],
+                     spill_to=spill_to.astype(np.int64), spill_lat=lat, spill_lon=lon)
+    return out, ends, id_of_comp
+
+
+def _catchment_chunks(cparts, ends, id_of_comp, rows=CHUNK_ROWS):
+    """The catchment table in pieces, ordered by H3 cell and then depression id."""
+    pending, n_pending = [], 0
+    for key in cparts.keys():
+        arr = cparts.load(key)
+        kind, ident = decode(ends.final(arr["rec"]))
+        keep = kind == E_KEPT
+        ids, cell, area = id_of_comp[ident[keep]], arr["cell"][keep], arr["area"][keep]
+        if len(ids) == 0:
+            continue
+        order = np.lexsort((ids, cell))
+        ids, cell, area = ids[order], cell[order], area[order]
+        start = _runs(cell, ids)
+        pending.append(pd.DataFrame({"id": ids[start].astype(np.int64),
+                                     "h3": [h3.int_to_str(int(c)) for c in cell[start]],
+                                     "area_m2": np.add.reduceat(area, start)}))
+        n_pending += len(start)
+        if n_pending >= rows:
+            yield pd.concat(pending, ignore_index=True)[CATCHMENT_TABLE]
+            pending, n_pending = [], 0
+    if pending:
+        yield pd.concat(pending, ignore_index=True)[CATCHMENT_TABLE]

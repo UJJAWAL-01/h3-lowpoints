@@ -47,8 +47,8 @@ water really can leave there.
 
 ## Catchments and spill
 
-With `catchments=True`, `analyze` and `analyze_array` also follow the water: where rain on each
-pixel ends up, and where each depression overflows when it is full
+With `catchments=True` (`--catchments` on the command line), every analysis also follows the
+water: where rain on each pixel ends up, and where each depression overflows when it is full
 (`h3lowpoints.hydro.routing`). The rules depend only on the terrain, never on the order in which
 pixels are processed:
 
@@ -92,7 +92,20 @@ pixel, on smooth terrain, terrain rounded into flats and ties, nodata, and longi
 grids; three deliberately wrong variants of the rules (ties broken the other way, drop not
 divided by distance, routing on the filled surface) are each detected.
 
-The tiled analysis (`analyze_tiled`, `build`) does not compute catchments yet.
+**Tiled.** `analyze_tiled` and `build` give exactly the same catchments and spill links,
+whatever the tile size (`h3lowpoints.hydro.tiled_routing`). Each tile is processed with a
+one-pixel rim of its neighbours, whose filled levels the fill's border solve already knows, so
+every rule that looks at a pixel's neighbours is applied exactly. Water is followed inside the
+tile until it reaches a sink, an outlet, a pixel of another tile, a flat that continues into
+another tile, or the full surface of a sink that continues into another tile. Shallow sinks that
+lie wholly inside a tile pass their water on there already. Once every tile is done, the flats
+that cross tile borders are solved as a whole (rule 4 over all their pixels), full surfaces that
+cross borders are joined and take their first exit across all tiles (rule 5), and every path is
+followed to its end. `tests/test_tiled_routing.py` compares tiled and whole on random terrain,
+terrain rounded into flats and ties, nodata, masks, longitude/latitude grids, a perfectly flat
+corridor winding through every tile, and a lake whose overflow runs through a tile that holds no
+sink, at tile sizes down to 4 pixels; on the 30 m elevation data of Houston (1.36 million
+pixels) tiles of 100, 333 and 512 pixels give results identical to the whole raster.
 
 ## Tiles
 

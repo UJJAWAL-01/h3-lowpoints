@@ -17,7 +17,7 @@ Conventions used throughout:
 
 ## Analysis
 
-### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False)`
+### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, workers=1)`
 
 Find the depressions in an elevation file and describe them on H3 cells. Reads the whole raster
 into memory; for rasters larger than memory use `analyze_tiled`, which gives the same answer.
@@ -32,21 +32,22 @@ into memory; for rasters larger than memory use `analyze_tiled`, which gives the
 | `buildings` | Optional GeoDataFrame or iterable of shapely polygons in the raster's CRS. Adds `building_overlap` and `likely_building_artifact`. |
 | `drain_radius_m` | How close a drain must be to the deep core for `drain_at_core` (default 5 m). |
 | `drain_core_frac` | The deep core is the part of a depression at least this fraction of its maximum depth deep (default 0.8). |
-| `catchments` | Also follow the water ([rules](definition.md#catchments-and-spill)): adds `catchment_area_m2`, `spill_to`, `spill_lat` and `spill_lon` to the depression table and fills `Result.catchments` (default `False`). Not yet available in `analyze_tiled`. |
+| `catchments` | Also follow the water ([rules](definition.md#catchments-and-spill)): adds `catchment_area_m2`, `spill_to`, `spill_lat` and `spill_lon` to the depression table and fills `Result.catchments` (default `False`). |
+| `workers` | Label pixels with their H3 cells in this many processes (default 1). The result is identical; only the time changes (labelling was 3× faster with 4 processes on a laptop with 4 cores; more did not help). Processes are started on first use, so on Windows and macOS a script must call the analysis from under `if __name__ == "__main__":`. |
 
 Returns a `Result`. Raises `ValueError` when the raster has no CRS, a CRS that is neither
 projected nor in degrees, a rotated or sheared grid, latitudes beyond ±90°, or an invalid `res`.
 Warns when `res` is finer than the data supports, or when `min_depth` is below 1 m on data coarser
 than 2 m.
 
-### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, source="array")`
+### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, workers=1, source="array")`
 
 The same as `analyze` for an elevation array already in memory. `transform` is the raster's
 affine transform (as from rasterio), `crs` anything rasterio or pyproj accept (such as
 `"EPSG:32614"`), `nodata` the value marking missing pixels, and `source` the name recorded as
 `meta["dem"]`.
 
-### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", hours=None, mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8)`
+### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", hours=None, mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, workers=1)`
 
 Analyze a raster of any size in square tiles. The result is identical to `analyze` on the same
 raster: tiles only decide how much memory is needed. See [Large regions](large-regions.md).
@@ -74,7 +75,8 @@ depressions 1 to n. Raises `ValueError` for `tile <= 0` or a mask of another sha
 
 Write the part of a saved result inside `boundary` (a shapely geometry in longitude/latitude, or
 a vector file in any CRS) to `out_dir`: cells whose centre is inside, depressions whose
-`h3_lowpoint` cell is kept. Reads and writes the cell table in pieces, so any size can be
+`h3_lowpoint` cell is kept, and, when the result has a catchment table, the whole catchments of
+the kept depressions. Reads and writes the cell table in pieces, so any size can be
 clipped. `name` labels the boundary in `meta["clip"]`. Returns `out_dir`. See
 [Command line](cli.md#clip) for the rule's consequences.
 
@@ -195,7 +197,7 @@ See [Verification](verification.md) for what each check means.
 | Function | Returns |
 |---|---|
 | `check_result(result)` | List of problems (empty when every invariant holds). Works on results in memory and on disk. |
-| `check_tables(depressions, cells, meta)` | The same for three tables. |
+| `check_tables(depressions, cells, meta, catchments=None)` | The same for the tables. |
 | `check_saved(folder, rows=500000)` | The same for a saved folder, reading the cell table `rows` at a time so any size can be checked. |
 | `compare_results(a, b, rel=1e-9)` | Differences between two results of the same data (empty when they agree). |
 | `spot_check(dem_path, *, windows=3, size=600, tile=170, seed=0, **params)` | Cuts `windows` random `size` × `size` windows from a raster, analyzes each whole and tiled, and returns every disagreement or invariant failure. `params` go to both analyses (`res`, `min_depth`, ...). |
