@@ -89,6 +89,15 @@ def test_a_folder_reused_with_the_other_format_holds_only_the_new_tables(tmp_pat
     assert sorted(f.name for f in (tmp_path / "run").glob("*.*")) == ["cells.csv", "depressions.csv", "meta.json"]
 
 
+@pytest.mark.parametrize("fmt", FORMATS)
+def test_reading_only_some_columns(tmp_path, good, fmt):
+    S.write_table(good.cells, tmp_path / f"cells.{fmt}", fmt)
+    parts = list(S.iter_table(tmp_path, "cells", rows=5, columns=["max_depth_m", "h3", "absent"]))
+    same_tables(pd.concat(parts), good.cells[["h3", "max_depth_m"]])     # the table's order
+    S.write_table(good.cells.iloc[:0], tmp_path / f"cells.{fmt}", fmt)
+    assert list(next(S.iter_table(tmp_path, "cells", columns=["h3"])).columns) == ["h3"]
+
+
 def test_writing_in_pieces_equals_writing_at_once(tmp_path, good, monkeypatch):
     monkeypatch.setattr(S, "CHUNK_ROWS", 7)
     S.write_table(good.cells, tmp_path / "cells.csv")

@@ -129,8 +129,11 @@ def _text_ids(df):
     return df
 
 
-def iter_table(folder, name, rows=CHUNK_ROWS):
-    """Yield table `name` of a result folder as DataFrames of at most `rows` rows."""
+def iter_table(folder, name, rows=CHUNK_ROWS, columns=None):
+    """Yield table `name` of a result folder as DataFrames of at most `rows` rows.
+
+    `columns` reads only those of the named columns the table has (all columns when None).
+    """
     path = table_path(folder, name)
     if path is None:
         raise FileNotFoundError(f"{folder} has no {name}.csv or {name}.parquet")
@@ -140,6 +143,8 @@ def iter_table(folder, name, rows=CHUNK_ROWS):
         yielded = False
         # "round_trip" reads every number back to the exact value that was written
         opts = {"dtype": dtype, "float_precision": "round_trip"}
+        if columns is not None:
+            opts["usecols"] = [c for c in header if c in columns]
         for chunk in pd.read_csv(path, chunksize=rows, **opts):
             yielded = True
             yield _text_ids(chunk)
@@ -149,10 +154,12 @@ def iter_table(folder, name, rows=CHUNK_ROWS):
         import pyarrow.parquet as pq
 
         f = pq.ParquetFile(path)
+        cols = None if columns is None else [c for c in f.schema_arrow.names if c in columns]
         if f.metadata.num_rows == 0:
-            yield _text_ids(f.schema_arrow.empty_table().to_pandas())
+            empty = f.schema_arrow.empty_table()
+            yield _text_ids((empty if cols is None else empty.select(cols)).to_pandas())
             return
-        for batch in f.iter_batches(batch_size=rows):
+        for batch in f.iter_batches(batch_size=rows, columns=cols):
             yield _text_ids(batch.to_pandas())
 
 

@@ -29,6 +29,7 @@ running a GIS desktop application.
 | Analyze a state or a country | [Large regions](large-regions.md) |
 | Read and share the interactive map | [The map](map.md) |
 | Know how results are checked, and check your own | [Verification](verification.md) |
+| Test the depressions against observed flooding | [Validation](validation.md) |
 | Know what the results cannot tell you | [Accuracy and limits](limitations.md) |
 | Look up a term | [Glossary](glossary.md) |
 | See where the project is going | [Roadmap](roadmap.md) |
@@ -50,9 +51,11 @@ running a GIS desktop application.
    what it costs, and how to run one.
 9. [The map](map.md): the interactive web map, its controls and its shareable links.
 10. [Verification](verification.md): the checks every result can be put through, anywhere.
-11. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
-12. [Glossary](glossary.md): terms used across these pages.
-13. [Roadmap](roadmap.md): what is done and what comes next.
+11. [Validation](validation.md): whether observations (flood reports, claims) fall in or near
+    depressions more often than chance, with honest uncertainty.
+12. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
+13. [Glossary](glossary.md): terms used across these pages.
+14. [Roadmap](roadmap.md): what is done and what comes next.
 
 The [changelog](../CHANGELOG.md) lists every change, and [contributing](../CONTRIBUTING.md) explains
 how to help.

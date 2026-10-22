@@ -5,7 +5,7 @@ and may change without notice.
 
 ```python
 from h3lowpoints import (analyze, analyze_array, analyze_tiled, read_result, Result,
-                         resolution_guide, rollup, rollup_saved, reproject_to_utm)
+                         resolution_guide, rollup, rollup_saved, reproject_to_utm, validate)
 ```
 
 Conventions used throughout:
@@ -138,6 +138,53 @@ in metres (default: matched to the input). Returns `dst_path`.
 | `load()` | For a result written to disk: a copy with its tables read back. |
 | `to_html(path, title=None, max_cells=120000, max_points=20000, n_levels=6)` | Write the interactive web map ([The map](map.md)). Resolutions with more than `max_cells` cells are left out (coarser roll-ups are drawn instead); the deepest `max_points` depressions can be marked; `n_levels` resolutions are offered. Returns the path. |
 | `to_deck(value="max_depth_m", elevation_scale=20.0, hover=(), pitch=45)` | A pydeck map for notebooks (needs the `viz` extra): extruded hexagons whose height and colour follow `value`. |
+
+## Validation against observations
+
+See [Validation](validation.md) for the method, how to choose controls and how to read the
+result.
+
+### `validate(result, observations, controls=None, *, boundary=None, n_random=None, max_rings=5, depth_classes=(0.5, 1.0, 2.0), block_res=6, n_boot=1000, ci=0.95, seed=0, exclude_suspect=True, rows=500000)`
+
+How much more often `observations` fall in or near depressed ground than `controls` do.
+
+| Parameter | Meaning |
+|---|---|
+| `result` | A `Result`, or a folder written by `analyze`, `build`, `clip` or `Result.save` (read `rows` at a time, so the national dataset works). |
+| `observations`, `controls` | Points in any form `validation.read_points` accepts. Without `controls`, `n_random` random points in `boundary` (default 10 per observation, at least 1000), with a warning. |
+| `boundary` | The area studied: a shapely geometry in longitude/latitude or a vector file. Points outside it are left out. Without it, a `build` result's box is used if recorded. |
+| `max_rings` | Largest distance, in H3 rings of the result's resolution. |
+| `depth_classes` | Edges in metres of the depth classes of `by_depth`. |
+| `block_res`, `n_boot`, `ci`, `seed` | Bootstrap blocks (H3 resolution, not finer than the result's), samples, confidence level and seed. |
+| `exclude_suspect` | Leave out the ground around depressions flagged `deeper_than_wide`. |
+
+Returns a `Validation`. Raises `ValueError` for unusable settings, for no observations (or
+controls) inside the area, and when neither `controls` nor `boundary` is given. Caveats (random
+controls, few blocks, few observations, points left out) are issued as `UserWarning`s and kept in
+`report["warnings"]`.
+
+| `Validation` attribute or method | Content |
+|---|---|
+| `rings` | DataFrame, one row per k: `k`, `distance_m`, `obs_within`, `controls_within`, `obs_share`, `control_share`, `lift`, `lift_low`, `lift_high`. |
+| `by_depth` | The same per `depth_class` and `k`. |
+| `points` | One row per point used: `point_id`, `kind`, `lon`, `lat`, `h3`, `rings`, `depth_m`, `block`. |
+| `report` | Everything, with settings, counts and warnings, as a JSON-ready dict ([fields](validation.md#the-report)). |
+| `warnings` | The list of caveats. |
+| `summary()` | The ring table as text. |
+| `save(path, points=None)` | Write the report as JSON, and the point table to `points` (`.csv` or `.parquet`). Returns `path`. |
+
+### `validation.read_points(source)`
+
+Points as a DataFrame with `point_id`, `lon` and `lat`, from a CSV (`lon`/`lat`,
+`longitude`/`latitude` or `lng`/`lat` columns, optional `id`), a vector file in any CRS, a
+DataFrame or GeoDataFrame, or an (n, 2) array of longitude, latitude. Polygons and lines become a
+point on them. Rows without coordinates are dropped. Raises `ValueError` for missing columns or
+values that are not degrees.
+
+### `validation.random_points(boundary, n, seed=0)`
+
+`n` points spread evenly by area (on the sphere) over `boundary`, a shapely geometry in
+longitude/latitude or a vector file. `seed` may be a number or a numpy `Generator`.
 
 ## Verification: `h3lowpoints.verify`
 
@@ -285,7 +332,7 @@ The engine behind `Result.to_deck`, for any cell table (needs the `viz` extra).
 |---|---|
 | `h3lowpoints.resolution.finest_h3_resolution(pixel_m)` | Finest resolution whose cells hold at least four pixels of this size. |
 | `h3lowpoints.resolution.resolution_tier(pixel_m)` | `"fine"`, `"medium"` or `"coarse"`. |
-| `h3lowpoints.store.read_table(folder, name)` / `iter_table(folder, name, rows=500000)` | One table of a saved result, whole or in pieces (H3 ids as text). |
+| `h3lowpoints.store.read_table(folder, name)` / `iter_table(folder, name, rows=500000, columns=None)` | One table of a saved result, whole or in pieces (H3 ids as text); `columns` reads only those of the named columns the table has. |
 | `h3lowpoints.store.write_table(df, path, fmt="csv")` | Write a table as CSV or Parquet. |
 | `h3lowpoints.hydro.depressions.depth_from_array(arr, nodata_mask=None, drains=None)` | The depth raster alone (priority-flood fill minus ground). `drains` is a boolean raster of extra outlets. |
 | `Result.footprint.coverage(cells)` | Coverage and covered area of any list of H3 cells (any resolution) over this raster. |

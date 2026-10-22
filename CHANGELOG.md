@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Validation against observations: `validate` and `h3lowpoints validate`.** Do observations
+  (flood reports, claims, high-water marks, anything with coordinates) fall in or near depressed
+  ground more often than control points? For each distance of 0 to `max_rings` H3 rings, the
+  lift (share of observations within k rings over the share of controls), split also by the
+  depth of the nearest depressed ground, with percentile intervals from a spatial block
+  bootstrap (whole H3 cells at `block_res` resampled with their observations and controls).
+  Reads observations and controls from CSV, vector files in any CRS (polygons become a point on
+  them), DataFrames or arrays; leaves out points outside the boundary studied and the ground
+  around depressions flagged `deeper_than_wide`; warns when the controls are random points, the
+  blocks are few or points were left out. Works on any saved result in pieces: 5,000
+  observations and 50,000 controls against the national dataset took 20 s and 0.7 GB. Writes a
+  JSON report and a per-point table. See [docs/validation.md](docs/validation.md).
+- `store.iter_table(..., columns=...)` reads only the named columns.
+
 ## 0.1.1 (documentation)
 
 - Install from PyPI (`pip install h3-lowpoints`) in the README and the docs; badges; links to the

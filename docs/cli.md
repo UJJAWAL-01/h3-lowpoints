@@ -1,6 +1,6 @@
 # Command line
 
-Installing the package adds one command, `h3lowpoints`, with seven subcommands. Every option is
+Installing the package adds one command, `h3lowpoints`, with nine subcommands. Every option is
 listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 
 | Command | Does |
@@ -9,6 +9,7 @@ listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 | [`build`](#build) | Analyze a US region of any size straight from USGS 3DEP, then verify it. |
 | [`verify`](#verify) | Check a saved result. |
 | [`clip`](#clip) | Keep the part of a saved result inside a boundary (for example the US). |
+| [`validate`](#validate) | Do observations fall in or near depressions more often than chance? |
 | [`map`](#map) | Make the interactive web map from a saved result. |
 | [`fetch-dem`](#fetch-dem) | Download elevation data for a box. |
 | [`fetch-landcover`](#fetch-landcover) | Download land cover for a box. |
@@ -122,6 +123,36 @@ and is verified on writing.
 
 ```
 h3lowpoints clip conus_30m --boundary us48 --out us48_30m
+```
+
+## validate
+
+```
+h3lowpoints validate FOLDER --observations FILE [--controls FILE] [--boundary FILE] [options]
+```
+
+Measures how much more often observations (flood reports, claims, high-water marks) fall in or
+near depressed ground than control points do, at distances of 0 to `--max-rings` H3 rings, with
+block-bootstrap confidence intervals. Prints the table and any warnings, and writes the report.
+See [Validation](validation.md) for the method, the choice of controls and how to read the
+result.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--observations FILE` | | Observed locations: a CSV with `lon`/`lat` (or `longitude`/`latitude`, `lng`/`lat`) columns in degrees, or a vector file in any CRS. An `id` column is carried through. |
+| `--controls FILE` | | Where observations could have come from (addresses, building footprints), in the same forms. Without it, random points in `--boundary` are used, with a warning. |
+| `--boundary FILE` | the result's box, if any | The area studied (vector file, any CRS). Points outside are left out. Required without `--controls`. |
+| `--n-random N` | 10 per observation, at least 1000 | Number of random controls when `--controls` is not given. |
+| `--max-rings K` | `5` | Largest distance measured, in rings of the result's resolution. |
+| `--block-res R` | `6` | H3 resolution of the bootstrap blocks; must not be finer than the result's. |
+| `--boot N` | `1000` | Bootstrap samples (0: no intervals). |
+| `--seed S` | `0` | Random seed (bootstrap and random controls). |
+| `--keep-suspect` | | Keep the ground around depressions flagged `deeper_than_wide` (left out by default). |
+| `--out FILE` | `validation.json` | The report (JSON). |
+| `--points FILE` | | Also write the per-point table (`.csv`, or `.parquet` with pyarrow). |
+
+```
+h3lowpoints validate us48_30m_water --observations reports.csv --controls addresses.csv --boundary city.gpkg --points points.csv
 ```
 
 ## map

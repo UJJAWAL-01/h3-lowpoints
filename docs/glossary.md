@@ -6,6 +6,10 @@ resolutions are derived from it by roll-up.
 **Bare earth.** An elevation model of the ground with buildings and vegetation removed (also
 *digital terrain model*, DTM). The right input for where water flows.
 
+**Block bootstrap.** Estimating uncertainty by resampling whole areas (blocks) rather than single
+points, so that points that cluster together are not counted as independent evidence. See
+[Validation](validation.md#uncertainty-the-block-bootstrap).
+
 **Bounding box (bbox).** A rectangle in longitude and latitude, given as west, south, east, north
 in degrees.
 
@@ -16,6 +20,9 @@ point of its rim. Also called a sink, pit or low point.
 
 **Cloud-optimized GeoTIFF (COG).** A GeoTIFF arranged so programs can read just the part they
 need over the internet.
+
+**Control points.** In validation, points standing for where observations could have come from
+(addresses, buildings), against which observations are compared.
 
 **Core (of a depression).** Its pixels at least `drain_core_frac` (default 80%) of its maximum
 depth deep; used by `drain_at_core`.
@@ -59,6 +66,9 @@ add up to depression areas). Checked by `h3lowpoints verify`.
 **Lidar.** Light detection and ranging: elevation measured from aircraft with laser pulses, the
 source of 1 m elevation models.
 
+**Lift.** In validation, the share of observations within a distance of depressed ground divided
+by the same share for control points. 1 means no more often than the controls.
+
 **Lowest point.** A depression's deepest pixel. Ties go to the first in reading order.
 
 **Mask.** A raster marking pixels to ignore, such as open water. Masked pixels act like nodata.
@@ -85,6 +95,9 @@ its lowest edge.
 **Raster.** A grid of values stored as an image-like file, usually GeoTIFF.
 
 **Resolution (H3).** The size class of H3 cells, 0 (largest) to 15 (smallest).
+
+**Ring (H3).** The cells at exactly k steps from a cell form its k-th ring; "within k rings"
+means at most k steps away. One step is about 131 m at resolution 10.
 
 **Roll-up.** Computing a coarser cell table from a finer one: maximum of depths, sums of areas,
 volumes and counts.

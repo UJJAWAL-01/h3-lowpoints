@@ -95,6 +95,27 @@ def build_parser():
     v.add_argument("--dem", help="also spot-check this DEM: tiled and whole runs on random windows")
     v.add_argument("--windows", type=int, default=3, help="windows for the spot check (default 3)")
 
+    val = sub.add_parser("validate", help="do observations (flood reports, claims, ...) fall in or near "
+                                          "depressions more often than chance?")
+    val.add_argument("results", help="folder written by 'analyze', 'build' or 'clip'")
+    val.add_argument("--observations", required=True,
+                     help="observed locations: CSV with lon/lat columns, or a vector file")
+    val.add_argument("--controls", help="where observations could have come from (addresses, "
+                                        "buildings), in the same forms")
+    val.add_argument("--boundary", help="the area studied (vector file): points outside are left "
+                                        "out, and random controls are placed in it without --controls")
+    val.add_argument("--n-random", type=int, metavar="N",
+                     help="random controls without --controls (default 10 per observation, at least 1000)")
+    val.add_argument("--max-rings", type=int, default=5, help="largest distance, in H3 rings (default 5)")
+    val.add_argument("--block-res", type=int, default=6,
+                     help="H3 resolution of the bootstrap blocks (default 6)")
+    val.add_argument("--boot", type=int, default=1000, help="bootstrap samples (default 1000)")
+    val.add_argument("--seed", type=int, default=0, help="random seed (default 0)")
+    val.add_argument("--keep-suspect", action="store_true",
+                     help="keep the ground of depressions flagged deeper_than_wide (left out by default)")
+    val.add_argument("--out", default="validation.json", help="report file (default validation.json)")
+    val.add_argument("--points", help="also write the per-point table (.csv or .parquet)")
+
     r = sub.add_parser("rainfall", help="design rainfall from NOAA Atlas 14 for a point in the US")
     r.add_argument("lat", type=float)
     r.add_argument("lon", type=float)
@@ -297,6 +318,26 @@ def _verify(args):
     return 0
 
 
+def _validate(args):
+    import warnings
+
+    from .validation import validate
+
+    with warnings.catch_warnings():              # printed below, once, from the report
+        warnings.simplefilter("ignore", UserWarning)
+        result = validate(args.results, args.observations, args.controls, boundary=args.boundary,
+                          n_random=args.n_random, max_rings=args.max_rings,
+                          block_res=args.block_res, n_boot=args.boot, seed=args.seed,
+                          exclude_suspect=not args.keep_suspect)
+    print(result.summary())
+    for note in result.warnings:
+        print(f"\nwarning: {note}")
+    print(f"\nreport written to {result.save(args.out, points=args.points)}")
+    if args.points:
+        print(f"points written to {args.points}")
+    return 0
+
+
 def _map(args):
     from .viz.webmap import map_from_dir
 
@@ -309,7 +350,7 @@ def main(argv=None):
     try:
         commands = {"analyze": _analyze, "fetch-dem": _fetch, "map": _map,
                     "fetch-landcover": _landcover, "rainfall": _rainfall, "build": _build,
-                    "verify": _verify, "clip": _clip}
+                    "verify": _verify, "clip": _clip, "validate": _validate}
         return commands[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

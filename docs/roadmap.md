@@ -38,17 +38,21 @@ Each step is finished, tested and documented before the next starts. Nothing is 
 - Invariants for any result (`h3lowpoints verify`, also in pieces for national results), spot
   checks of the tiling on the user's own data, and oracle and mutation tests in the suite.
 
+**Validation against observations**
+
+- `validate` and `h3lowpoints validate` ([Validation](validation.md)): the lift of any set of
+  observations near depressions over control points, at distances of 0 to k H3 rings and by
+  depth class, with spatial block-bootstrap intervals. Works on any result, including the
+  national dataset, for any region; never tuned to one city.
+
 ## Next
 
 1. **National US layer.** Published 21 October 2026 as open data (CC BY 4.0):
    [doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773). 10,573,090 depressions and 34,046,636 resolution-10 cells from
    3DEP 30 m with open water masked, clipped to the lower 48 states
    ([Large regions](large-regions.md)).
-2. **General validation tools.** Score any set of observed locations (flood reports, high-water
-   marks, insurance claims, anything with coordinates) against the depressions: how much more
-   often observations fall in or near depressions than random locations do, with confidence
-   intervals that respect spatial clustering (block bootstrap). Works for any region and any
-   observations; never tuned to one city.
+2. **General validation tools.** Done (see above). Next: a worked example on a public set of
+   observations, added to [Validation](validation.md).
 3. **Physical susceptibility index.** For each depression, compare the water it could receive
    with the storage it has:
    - its contributing catchment, from flow routing on the filled surface;
