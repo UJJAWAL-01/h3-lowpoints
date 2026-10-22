@@ -82,4 +82,5 @@ def shape(m, transform, spacing):
     length = 4 * np.sqrt(half + spread)
     width = 4 * np.sqrt(np.maximum(half - spread, 0.0))
     orientation = np.degrees(0.5 * np.arctan2(2 * cen, cnn - cee)) % 180.0
+    orientation[orientation >= 180.0] = 0.0       # -1e-15 % 180 rounds to 180.0
     return length, width, orientation

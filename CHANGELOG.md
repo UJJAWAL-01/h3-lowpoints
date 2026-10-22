@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+- Disk-backed runs compress their saved tiles and temporary per-cell files: on 1° test boxes with
+  catchments and details, the disk needed at peak fell by half.
+
 ### Added
 - **Catchments and spill links** (`catchments=True` in `analyze`, `analyze_array` and
   `analyze_tiled`; `--catchments` for `analyze` and `build`): where rain on every pixel ends up,

@@ -256,3 +256,13 @@ def test_real_terrain_houston(tmp_path):
     whole = analyze(p, min_depth=0.5, details=True)
     for tile in (100, 512):
         same_details(whole, analyze_tiled(p, tile=tile, min_depth=0.5, details=True))
+
+
+def test_an_orientation_just_below_north_is_zero_not_180():
+    """-1e-15 % 180 is 180.0 in floating point; found on real terrain by the Houston gate."""
+    from h3lowpoints.hydro.details import shape
+
+    m = {"m_w": np.array([1.0]), "m_c": np.array([5.0]), "m_r": np.array([5.0]),
+         "m_cc": np.array([1 / 12]), "m_rr": np.array([4.0]), "m_cr": np.array([1e-17])}
+    _, _, orientation = shape(m, UTM[1], (np.full(10, 30.0), np.full(10, 30.0)))
+    assert 0.0 <= orientation[0] < 180.0

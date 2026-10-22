@@ -353,8 +353,8 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
                           tile_opener(tile, (height, width), _invalid_reader(boxes, ctx, work)))
     parts = CellParts(res, None if out_dir is None else out_dir / "_spill",
                       extra=AREA_DOWN if details else ())
-    cparts = (CellParts(res, None if out_dir is None else out_dir / "_spill_catchments")
-              if catchments else None)
+    cparts = (CellParts(res, None if out_dir is None else out_dir / "_spill_catchments",
+                        fields=("area",)) if catchments else None)
     try:
         records, rings = [], []
         routing = _RoutingParts() if catchments else None
@@ -948,7 +948,7 @@ class _RoutingParts:
         p["rec_exit"].append(rt["rec_exit"])
         acc = conv(rt["acc_code"])
         if len(acc):
-            cparts.add(acc, rt["acc_cell"], np.zeros(len(acc)), rt["acc_area"], np.zeros(len(acc)))
+            cparts.add(acc, rt["acc_cell"], rt["acc_area"])
             totals, inverse = np.unique(acc, return_inverse=True)
             p["code_codes"].append(totals)
             p["code_area"].append(np.bincount(inverse, weights=rt["acc_area"]))

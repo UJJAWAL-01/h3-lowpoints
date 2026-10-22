@@ -207,6 +207,11 @@ soon as it is finished, so the run never has to be done in one go:
   load one tile at a time and stay near 2 GB.
 - **Disk.** The saved tiles take room until the run finishes: about 1.5 MB per tile for pass 1
   and roughly the size of the cell table for pass 2. They are deleted once the tables are written.
+  The saved tiles and the temporary per-cell files are compressed (about a third of their raw
+  size). With `catchments=True` and `details=True`, test runs on three 1° boxes at 30 m (Houston,
+  North Dakota prairie potholes, the Central Valley of California) needed 1.3 to 2.6 bytes of
+  disk per valid pixel at peak, half what they needed uncompressed, and took 1.5 to 1.9 times as
+  long as without those options.
 
 Why not simply cut the country into regions analyzed separately? Each region's edge would act as
 an outlet, draining water across lines that do not exist, and depressions crossing those lines

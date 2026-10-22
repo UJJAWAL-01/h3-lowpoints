@@ -19,6 +19,7 @@ from h3lowpoints import tiling as T
 from h3lowpoints import verify as V
 from h3lowpoints.cli import main
 from h3lowpoints.pipeline import Result
+from h3lowpoints.store import CellParts as CellPartsCls
 from test_verify import CORRUPTIONS, dem
 
 needs_pyarrow = pytest.mark.skipif(importlib.util.find_spec("pyarrow") is None,
@@ -216,3 +217,20 @@ def test_rolling_up_a_saved_result_in_pieces_equals_rolling_up_the_whole(tmp_pat
         want = rollup(good.cells, res).sort_values("h3").reset_index(drop=True)
         got = rollup_saved(folder, res, rows=rows).sort_values("h3").reset_index(drop=True)
         pd.testing.assert_frame_equal(got, want, check_dtype=False, rtol=1e-12)
+
+
+def test_spilled_parts_are_compressed_and_read_back_exactly(tmp_path):
+    rng = np.random.default_rng(3)
+    cells = np.sort(T.h3_ids(rng.uniform(30, 31, 5000), rng.uniform(-98, -97, 5000), 10))
+    disk = CellPartsCls(10, tmp_path / "spill", fields=("area",))
+    memory = CellPartsCls(10, None, fields=("area",))
+    for block in np.array_split(np.arange(5000), 7):        # several appends per partition
+        rec, area = rng.integers(0, 50, len(block)), rng.random(len(block))
+        disk.add(rec, cells[block], area)
+        memory.add(rec, cells[block], area)
+    assert disk.dtype.names == ("rec", "cell", "area")          # compact: 24 bytes a record
+    raw = sum(len(memory._memory[k][0]) for k in memory._memory) * 24
+    assert sum(f.stat().st_size for f in (tmp_path / "spill").iterdir()) < raw
+    for key in memory.keys():
+        np.testing.assert_array_equal(disk.load(key), memory.load(key))
+    disk.close()
