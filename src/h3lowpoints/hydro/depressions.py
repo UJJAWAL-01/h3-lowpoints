@@ -60,13 +60,20 @@ def fill_depressions(dem, valid, drains):
     return filled
 
 
-def depth_from_array(arr, nodata_mask=None, drains=None):
-    """Depression depth raster. `drains` is an optional bool raster of cells that drain away."""
+def fill_from_array(arr, nodata_mask=None, drains=None):
+    """(ground, filled, invalid): the heights used (0 where invalid), the priority-flood fill and
+    the invalid pixels. `drains` is an optional bool raster of cells that drain away."""
     arr = arr.astype(np.float64)
     invalid = np.isnan(arr) if nodata_mask is None else (nodata_mask | np.isnan(arr))
     work = np.where(invalid, 0.0, arr)
     d = np.zeros(arr.shape, dtype=np.bool_) if drains is None else drains.astype(np.bool_)
-    depth = fill_depressions(work, ~invalid, d) - work
+    return work, fill_depressions(work, ~invalid, d), invalid
+
+
+def depth_from_array(arr, nodata_mask=None, drains=None):
+    """Depression depth raster. `drains` is an optional bool raster of cells that drain away."""
+    work, filled, invalid = fill_from_array(arr, nodata_mask, drains)
+    depth = filled - work
     depth[invalid] = 0.0
     return depth
 

@@ -13,6 +13,9 @@ points, so that points that cluster together are not counted as independent evid
 **Bounding box (bbox).** A rectangle in longitude and latitude, given as west, south, east, north
 in degrees.
 
+**Catchment.** The land whose rain ends up in a given depression. See
+[Definition](definition.md#catchments-and-spill).
+
 **Cell.** In this documentation, an H3 hexagon. The squares of a raster are called *pixels*.
 
 **Closed depression.** An area from which water cannot flow out until it fills to the lowest
@@ -102,7 +105,9 @@ means at most k steps away. One step is about 131 m at resolution 10.
 **Roll-up.** Computing a coarser cell table from a finer one: maximum of depths, sums of areas,
 volumes and counts.
 
-**Spill point.** The lowest point of a depression's rim, where it overflows when full.
+**Spill point.** The lowest point of a depression's rim, where it overflows when full. With
+`catchments=True` it is reported (`spill_lat`, `spill_lon`), with the depression the overflow
+reaches (`spill_to`).
 
 **Spot check.** Re-running random windows of a raster whole and tiled to confirm they agree.
 

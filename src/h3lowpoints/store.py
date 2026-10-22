@@ -185,7 +185,7 @@ def write_meta(folder, meta):
 
 def remove_other_formats(folder, fmt):
     """Delete tables of the format not being written, so a reused folder holds one result."""
-    for name in ("depressions", "cells"):
+    for name in ("depressions", "cells", "catchments"):
         for other in FORMATS:
             if other != fmt:
                 (Path(folder) / f"{name}.{other}").unlink(missing_ok=True)

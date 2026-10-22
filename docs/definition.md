@@ -45,6 +45,55 @@ an outlet, so the true depression may extend beyond the data and its area and vo
 bounds. Cells next to nodata are outlets too, but a depression touching nodata is not flagged:
 water really can leave there.
 
+## Catchments and spill
+
+With `catchments=True`, `analyze` and `analyze_array` also follow the water: where rain on each
+pixel ends up, and where each depression overflows when it is full
+(`h3lowpoints.hydro.routing`). The rules depend only on the terrain, never on the order in which
+pixels are processed:
+
+1. **Sinks.** Every 8-connected region of positive depth is a sink, however shallow. Water
+   landing on a sink stays in it.
+2. **Outlets.** Valid pixels on the raster border or next to an invalid pixel (nodata, NaN, a
+   mask) are outlets, as in the fill. Water reaching one leaves the map.
+3. **Steepest descent.** Every other pixel passes its water to the neighbour with the steepest
+   drop in *ground* height: the drop divided by the distance between the pixel centres in
+   metres (on longitude/latitude grids the east-west and north-south spacings differ and are
+   measured per row). Ties go to the first neighbour in the order north-west, north,
+   north-east, west, east, south-west, south, south-east.
+4. **Flats.** A pixel with no lower neighbour lies on a flat: the connected non-sink pixels of
+   the same height. It passes its water to the neighbour on the flat that is one step nearer to
+   the flat's nearest way off (a pixel with a lower neighbour, or an outlet), counting
+   8-neighbour steps; ties as in rule 3.
+5. **Spill.** When a sink is full, its water surface joins every pixel of the same filled level
+   connected to it. It overflows at that region's way off (a pixel with a neighbour of lower
+   filled level, or an outlet) that comes first in reading order, onto that pixel's neighbour
+   with the steepest drop in filled level, and from there the water follows rules 1 to 4.
+
+**Depressions and shallow sinks.** Depressions are the sinks at least `min_depth` deep. A
+shallower sink fills almost at once, so its water is passed on along its spill path. A
+depression's **catchment** is therefore the land whose water reaches it first, plus the land
+draining to every shallow sink that spills into it. Rain falling on the depression itself is
+part of its catchment. Every valid pixel drains to exactly one depression or to an outlet.
+
+**Spill links.** A depression's `spill_to` is the depression that finally receives its overflow
+(through any chain of shallow sinks), or 0 when the overflow leaves the map. The receiving
+depression is always lower (its filled level is strictly below), so overflow never runs in a
+loop. Two depressions whose full surfaces meet at the same level share one water surface and the
+same spill point.
+
+**Choices made, and their limits.** Water follows one path per pixel (steepest descent, as in
+the D8 method), not a spread over several neighbours; for catchments, which add up whole
+pixels, this is the standard choice. A full depression with several equally low ways off
+spills at the first in reading order only. Pipes, culverts and drains are not in the elevation
+data: a road embankment over a culvert holds water back in the model. Checked in
+`tests/test_routing.py` against an independent implementation of the same rules, pixel by
+pixel, on smooth terrain, terrain rounded into flats and ties, nodata, and longitude/latitude
+grids; three deliberately wrong variants of the rules (ties broken the other way, drop not
+divided by distance, routing on the filled surface) are each detected.
+
+The tiled analysis (`analyze_tiled`, `build`) does not compute catchments yet.
+
 ## Tiles
 
 `analyze_tiled` gives the result of `analyze`, whatever the tile size. The tile size trades

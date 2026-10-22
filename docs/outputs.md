@@ -11,6 +11,7 @@ three files in a folder. This page describes every file, column and field.
 |---|---|---|
 | `depressions.csv` or `depressions.parquet` | every saved result | the depression table |
 | `cells.csv` or `cells.parquet` | every saved result | the cell table |
+| `catchments.csv` or `catchments.parquet` | results computed with `catchments=True` | the catchment table |
 | `meta.json` | every saved result | settings, versions, counts |
 | `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
 | `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
@@ -26,7 +27,7 @@ in the other format replaces the old files.
 numbers written with enough digits to read back exactly.
 
 **Parquet details.** Compressed with zstd. Column types: text for H3 ids, 64-bit floats for
-measurements, 64-bit integers for `id` and `n_lowpoints`, booleans for flags.
+measurements, 64-bit integers for `id`, `n_lowpoints` and `spill_to`, booleans for flags.
 
 **Row order.** Depressions are ordered by the position of their first pixel in reading order
 (top row first, left to right). Cells are ordered by ascending H3 id (as a 64-bit integer), which
@@ -59,6 +60,9 @@ the data behind them was supplied.
 | `drain_at_core` | boolean | | Only with drains: a drain lies within `drain_radius_m` of the depression's deep core. |
 | `building_overlap` | float | 0 to 1 | Only with buildings: share of the depression's pixels under building footprints. |
 | `likely_building_artifact` | boolean | | Only with buildings: `building_overlap` is at least 0.5. |
+| `catchment_area_m2` | float | m² | Only with `catchments=True`: ground area whose rain ends up in this depression, including the depression itself and the land draining to shallow sinks that spill into it. |
+| `spill_to` | integer | | Only with `catchments=True`: `id` of the depression that receives this one's overflow when it is full, or 0 when the overflow leaves the map. |
+| `spill_lat`, `spill_lon` | float | degrees (WGS 84) | Only with `catchments=True`: centre of the pixel where the full depression overflows. |
 
 How each value is computed, and the edge cases:
 
@@ -97,6 +101,11 @@ How each value is computed, and the edge cases:
 - **Buildings.** Footprints are burned onto the pixel grid (a pixel counts when its centre is
   inside a footprint). On projected grids footprints under 20 square map units are ignored (20 m²
   in metre-based CRSs), to skip sheds and slivers; on degree grids none are ignored.
+- **Catchments and spill.** The rules are in
+  [Definition](definition.md#catchments-and-spill). `catchment_area_m2` is at least `area_m2`.
+  Following `spill_to` from any depression always reaches 0, through depressions with ever lower
+  water levels. The catchment areas of all depressions plus the area draining straight off the
+  map equal the area of valid data.
 
 ## The cell table
 
@@ -135,6 +144,22 @@ Details:
 - **Exactness.** The sums in the cell table equal the sums in the depression table (area and
   volume), and `n_lowpoints` adds up to the number of depressions. `h3lowpoints verify` checks
   this for any saved result.
+
+## The catchment table
+
+Only with `catchments=True`: one row per depression and H3 cell of its catchment, for the
+depressions in the depression table (land draining off the map is not listed).
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | The depression (`id` in the depression table). |
+| `h3` | text | | An H3 cell at the table's resolution, `Result.res`. |
+| `area_m2` | float | m² | Ground area of the cell's pixels whose rain ends up in this depression. |
+
+A pixel belongs to the cell containing its centre. The rows of one depression add up to its
+`catchment_area_m2`. A cell on a divide appears once for each depression it drains to. Land
+cover, imperviousness, soils or rainfall can be attached to a catchment through these cells
+without analysing the terrain again.
 
 ## meta.json
 

@@ -17,7 +17,7 @@ Conventions used throughout:
 
 ## Analysis
 
-### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8)`
+### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False)`
 
 Find the depressions in an elevation file and describe them on H3 cells. Reads the whole raster
 into memory; for rasters larger than memory use `analyze_tiled`, which gives the same answer.
@@ -32,13 +32,14 @@ into memory; for rasters larger than memory use `analyze_tiled`, which gives the
 | `buildings` | Optional GeoDataFrame or iterable of shapely polygons in the raster's CRS. Adds `building_overlap` and `likely_building_artifact`. |
 | `drain_radius_m` | How close a drain must be to the deep core for `drain_at_core` (default 5 m). |
 | `drain_core_frac` | The deep core is the part of a depression at least this fraction of its maximum depth deep (default 0.8). |
+| `catchments` | Also follow the water ([rules](definition.md#catchments-and-spill)): adds `catchment_area_m2`, `spill_to`, `spill_lat` and `spill_lon` to the depression table and fills `Result.catchments` (default `False`). Not yet available in `analyze_tiled`. |
 
 Returns a `Result`. Raises `ValueError` when the raster has no CRS, a CRS that is neither
 projected nor in degrees, a rotated or sheared grid, latitudes beyond ±90°, or an invalid `res`.
 Warns when `res` is finer than the data supports, or when `min_depth` is below 1 m on data coarser
 than 2 m.
 
-### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, source="array")`
+### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, source="array")`
 
 The same as `analyze` for an elevation array already in memory. `transform` is the raster's
 affine transform (as from rasterio), `crs` anything rasterio or pyproj accept (such as
@@ -123,6 +124,7 @@ in metres (default: matched to the input). Returns `dst_path`.
 |---|---|
 | `depressions` | The depression table (pandas DataFrame), or `None` for a result written to disk. |
 | `cells` | The cell table, or `None` for a result written to disk. |
+| `catchments` | The catchment table ([Outputs](outputs.md#the-catchment-table)) with `catchments=True`, else `None`. |
 | `meta` | Settings, versions and counts (dict); see [Outputs](outputs.md#metajson). |
 | `res` | The cell table's H3 resolution (the resolved value when `"auto"` was asked for). |
 | `labels` | `analyze` only: integer raster, each depression's pixels set to its `id`, 0 elsewhere. |
@@ -134,7 +136,7 @@ in metres (default: matched to the input). Returns `dst_path`.
 | Method | Does |
 |---|---|
 | `at_resolution(res)` | The cell table at a coarser resolution: exact roll-up, coverage measured afresh. |
-| `save(folder, format="csv")` | Write `depressions`, `cells` and `meta.json`; `format` is `"csv"` or `"parquet"`. Returns the folder. |
+| `save(folder, format="csv")` | Write `depressions`, `cells` (and `catchments`, when present) and `meta.json`; `format` is `"csv"` or `"parquet"`. Returns the folder. |
 | `load()` | For a result written to disk: a copy with its tables read back. |
 | `to_html(path, title=None, max_cells=120000, max_points=20000, n_levels=6)` | Write the interactive web map ([The map](map.md)). Resolutions with more than `max_cells` cells are left out (coarser roll-ups are drawn instead); the deepest `max_points` depressions can be marked; `n_levels` resolutions are offered. Returns the path. |
 | `to_deck(value="max_depth_m", elevation_scale=20.0, hover=(), pitch=45)` | A pydeck map for notebooks (needs the `viz` extra): extruded hexagons whose height and colour follow `value`. |
