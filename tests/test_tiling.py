@@ -668,7 +668,9 @@ def test_cell_chunks_match_a_groupby(tmp_path, seed, on_disk, rows):
     comp = rng.integers(0, 12, 40)              # pieces joined into 12 depressions
     kept = rng.random(12) < 0.6
     lowpoints = raw["cell"].to_numpy()[rng.integers(0, len(raw), 30)]
-    chunks = list(T._cell_chunks(store, comp, kept, lowpoints, _FullCoverage(), rows=rows))
+    pairs = list(T._cell_chunks(store, comp, kept, lowpoints, _FullCoverage(), rows=rows))
+    assert all(dc is None for _, dc in pairs)    # no depression x cell rows without details
+    chunks = [c for c, _ in pairs]
     got = pd.concat(chunks, ignore_index=True)
     if rows == 1:                                # memory stays bounded: one piece per partition
         assert len(chunks) == len({int(k) for k in partition_key(S_ids(got["h3"]), 10)})

@@ -17,7 +17,7 @@ Conventions used throughout:
 
 ## Analysis
 
-### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, workers=1)`
+### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, workers=1)`
 
 Find the depressions in an elevation file and describe them on H3 cells. Reads the whole raster
 into memory; for rasters larger than memory use `analyze_tiled`, which gives the same answer.
@@ -33,6 +33,7 @@ into memory; for rasters larger than memory use `analyze_tiled`, which gives the
 | `drain_radius_m` | How close a drain must be to the deep core for `drain_at_core` (default 5 m). |
 | `drain_core_frac` | The deep core is the part of a depression at least this fraction of its maximum depth deep (default 0.8). |
 | `catchments` | Also follow the water ([rules](definition.md#catchments-and-spill)): adds `catchment_area_m2`, `spill_to`, `spill_lat` and `spill_lon` to the depression table and fills `Result.catchments` (default `False`). |
+| `details` | Also describe each depression further ([rules](definition.md#levels-shape-and-fill-curve)): `ground_m`, `water_level_m`, `length_m`, `width_m`, `orientation_deg` and the fill curve (`area_*_down_m2`, `volume_*_down_m3`), and fill `Result.depression_cells` (default `False`). |
 | `workers` | Label pixels with their H3 cells in this many processes (default 1). The result is identical; only the time changes (labelling was 3× faster with 4 processes on a laptop with 4 cores; more did not help). Processes are started on first use, so on Windows and macOS a script must call the analysis from under `if __name__ == "__main__":`. |
 
 Returns a `Result`. Raises `ValueError` when the raster has no CRS, a CRS that is neither
@@ -40,14 +41,14 @@ projected nor in degrees, a rotated or sheared grid, latitudes beyond ±90°, or
 Warns when `res` is finer than the data supports, or when `min_depth` is below 1 m on data coarser
 than 2 m.
 
-### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, workers=1, source="array")`
+### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, workers=1, source="array")`
 
 The same as `analyze` for an elevation array already in memory. `transform` is the raster's
 affine transform (as from rasterio), `crs` anything rasterio or pyproj accept (such as
 `"EPSG:32614"`), `nodata` the value marking missing pixels, and `source` the name recorded as
 `meta["dem"]`.
 
-### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", hours=None, mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, workers=1)`
+### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", hours=None, mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, workers=1)`
 
 Analyze a raster of any size in square tiles. The result is identical to `analyze` on the same
 raster: tiles only decide how much memory is needed. See [Large regions](large-regions.md).
@@ -75,8 +76,8 @@ depressions 1 to n. Raises `ValueError` for `tile <= 0` or a mask of another sha
 
 Write the part of a saved result inside `boundary` (a shapely geometry in longitude/latitude, or
 a vector file in any CRS) to `out_dir`: cells whose centre is inside, depressions whose
-`h3_lowpoint` cell is kept, and, when the result has a catchment table, the whole catchments of
-the kept depressions. Reads and writes the cell table in pieces, so any size can be
+`h3_lowpoint` cell is kept, and, when the result has them, the whole catchments and all the
+depression × cell rows of the kept depressions. Reads and writes the cell table in pieces, so any size can be
 clipped. `name` labels the boundary in `meta["clip"]`. Returns `out_dir`. See
 [Command line](cli.md#clip) for the rule's consequences.
 
@@ -127,6 +128,7 @@ in metres (default: matched to the input). Returns `dst_path`.
 | `depressions` | The depression table (pandas DataFrame), or `None` for a result written to disk. |
 | `cells` | The cell table, or `None` for a result written to disk. |
 | `catchments` | The catchment table ([Outputs](outputs.md#the-catchment-table)) with `catchments=True`, else `None`. |
+| `depression_cells` | The depression × cell table ([Outputs](outputs.md#the-depression--cell-table)) with `details=True`, else `None`. |
 | `meta` | Settings, versions and counts (dict); see [Outputs](outputs.md#metajson). |
 | `res` | The cell table's H3 resolution (the resolved value when `"auto"` was asked for). |
 | `labels` | `analyze` only: integer raster, each depression's pixels set to its `id`, 0 elsewhere. |
@@ -138,7 +140,7 @@ in metres (default: matched to the input). Returns `dst_path`.
 | Method | Does |
 |---|---|
 | `at_resolution(res)` | The cell table at a coarser resolution: exact roll-up, coverage measured afresh. |
-| `save(folder, format="csv")` | Write `depressions`, `cells` (and `catchments`, when present) and `meta.json`; `format` is `"csv"` or `"parquet"`. Returns the folder. |
+| `save(folder, format="csv")` | Write `depressions`, `cells` (and `catchments` and `depression_cells`, when present) and `meta.json`; `format` is `"csv"` or `"parquet"`. Returns the folder. |
 | `load()` | For a result written to disk: a copy with its tables read back. |
 | `to_html(path, title=None, max_cells=120000, max_points=20000, n_levels=6)` | Write the interactive web map ([The map](map.md)). Resolutions with more than `max_cells` cells are left out (coarser roll-ups are drawn instead); the deepest `max_points` depressions can be marked; `n_levels` resolutions are offered. Returns the path. |
 | `to_deck(value="max_depth_m", elevation_scale=20.0, hover=(), pitch=45)` | A pydeck map for notebooks (needs the `viz` extra): extruded hexagons whose height and colour follow `value`. |
@@ -197,7 +199,7 @@ See [Verification](verification.md) for what each check means.
 | Function | Returns |
 |---|---|
 | `check_result(result)` | List of problems (empty when every invariant holds). Works on results in memory and on disk. |
-| `check_tables(depressions, cells, meta, catchments=None)` | The same for the tables. |
+| `check_tables(depressions, cells, meta, catchments=None, depression_cells=None)` | The same for the tables. |
 | `check_saved(folder, rows=500000)` | The same for a saved folder, reading the cell table `rows` at a time so any size can be checked. |
 | `compare_results(a, b, rel=1e-9)` | Differences between two results of the same data (empty when they agree). |
 | `spot_check(dem_path, *, windows=3, size=600, tile=170, seed=0, **params)` | Cuts `windows` random `size` × `size` windows from a raster, analyzes each whole and tiled, and returns every disagreement or invariant failure. `params` go to both analyses (`res`, `min_depth`, ...). |

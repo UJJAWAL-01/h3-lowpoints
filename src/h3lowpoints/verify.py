@@ -31,9 +31,63 @@ def _close(a, b, rel=REL):
     return abs(a - b) <= rel * max(abs(a), abs(b), 1e-12)
 
 
-def check_tables(depressions, cells, meta, catchments=None):
+def check_tables(depressions, cells, meta, catchments=None, depression_cells=None):
     """Problems found in a result given as its tables (empty list = all invariants hold)."""
-    return _check(depressions, [cells], meta, None if catchments is None else [catchments])
+    return _check(depressions, [cells], meta, None if catchments is None else [catchments],
+                  None if depression_cells is None else [depression_cells])
+
+
+def _check_details(d, chunks):
+    """Level, shape and fill-curve invariants (results computed with details=True)."""
+    from .hydro.details import AREA_DOWN, FILL_LEVELS, VOLUME_DOWN
+
+    problems = []
+    add = problems.append
+    cols = ["ground_m", "water_level_m", "length_m", "width_m", "orientation_deg"] + AREA_DOWN + VOLUME_DOWN
+    if not np.isfinite(d[cols].to_numpy(dtype=float)).all():
+        add("level, shape or fill-curve columns hold NaN or infinite values")
+    rise = (d["water_level_m"] - d["ground_m"]).to_numpy(dtype=float)
+    if not np.allclose(rise, d["max_depth_m"].to_numpy(dtype=float), rtol=1e-9, atol=1e-6):
+        add("water_level_m - ground_m is not max_depth_m")
+    if ((d["width_m"] <= 0) | (d["width_m"] > d["length_m"] * (1 + REL))).any():
+        add("a width is not positive or exceeds its length")
+    if not d["orientation_deg"].between(0, 180, inclusive="left").all():
+        add("an orientation lies outside [0, 180)")
+    area = np.c_[d["area_m2"].to_numpy(dtype=float), d[AREA_DOWN].to_numpy(dtype=float)]
+    volume = np.c_[d["volume_m3"].to_numpy(dtype=float), d[VOLUME_DOWN].to_numpy(dtype=float)]
+    if (area < 0).any() or (np.diff(area, axis=1) > REL * area[:, :1]).any():
+        add("the flooded area grows as the water drops")
+    if (volume < 0).any() or (np.diff(volume, axis=1) > REL * volume[:, :1] + 1e-9).any():
+        add("the volume grows as the water drops")
+    for (t, _), a_name, v_name in zip(FILL_LEVELS, AREA_DOWN, VOLUME_DOWN):
+        room = np.maximum(d["max_depth_m"].to_numpy(dtype=float) - t, 0.0)
+        if (d[v_name].to_numpy(dtype=float) > room * d[a_name].to_numpy(dtype=float) * (1 + REL) + 1e-9).any():
+            add(f"{v_name} is larger than the depth left times the area")
+            break
+    if chunks is None:
+        return problems
+    ids = d["id"].to_numpy()
+    order = np.argsort(ids)
+    sums = {c: np.zeros(len(ids)) for c in ["area_m2", "volume_m3"] + AREA_DOWN}
+    deepest = np.zeros(len(ids))
+    stray = False
+    for c in chunks:
+        if len(c) == 0:
+            continue
+        at = np.minimum(np.searchsorted(ids[order], c["id"].to_numpy()), len(ids) - 1)
+        hit = ids[order][at] == c["id"].to_numpy()
+        stray |= not hit.all()
+        for name in sums:
+            np.add.at(sums[name], order[at[hit]], c[name].to_numpy(dtype=float)[hit])
+        np.maximum.at(deepest, order[at[hit]], c["max_depth_m"].to_numpy(dtype=float)[hit])
+    if stray:
+        add("the depression_cells table names depressions that are not in the depression table")
+    for name, total in sums.items():
+        if not np.allclose(total, d[name].to_numpy(dtype=float), rtol=REL, atol=1e-6):
+            add(f"the depression_cells table does not add up to {name}")
+    if not np.allclose(deepest, d["max_depth_m"].to_numpy(dtype=float), rtol=REL, atol=1e-9):
+        add("the deepest depression_cells row is not the depression's max_depth_m")
+    return problems
 
 
 def _check_routing(d, catchment_chunks, meta):
@@ -83,7 +137,7 @@ def _check_routing(d, catchment_chunks, meta):
     return problems
 
 
-def _check(d, cell_chunks, meta, catchment_chunks=None):
+def _check(d, cell_chunks, meta, catchment_chunks=None, detail_chunks=None):
     """The checks, with the cell table given as any number of pieces (read one at a time)."""
     problems = []
     res = (meta.get("params") or {}).get("res")
@@ -103,6 +157,8 @@ def _check(d, cell_chunks, meta, catchment_chunks=None):
         add("depression ids are not unique")
     if "catchment_area_m2" in d:
         problems += _check_routing(d, catchment_chunks, meta)
+    if "water_level_m" in d:
+        problems += _check_details(d, detail_chunks)
     numbers = d[["max_depth_m", "area_m2", "volume_m3", "lat", "lon"]].to_numpy(dtype=float)
     if not np.isfinite(numbers).all():
         add("depressions hold NaN or infinite values")
@@ -222,7 +278,8 @@ def check_result(result):
     """
     if result.depressions is None and result.path is not None:
         return check_saved(result.path)
-    return check_tables(result.depressions, result.cells, result.meta, result.catchments)
+    return check_tables(result.depressions, result.cells, result.meta, result.catchments,
+                        result.depression_cells)
 
 
 def check_saved(folder, rows=CHUNK_ROWS):
@@ -230,10 +287,10 @@ def check_saved(folder, rows=CHUNK_ROWS):
     missing = missing_files(folder)
     if missing:
         return [f"{folder} is missing {', '.join(missing)}"]
-    catchments = (iter_table(folder, "catchments", rows=rows)
-                  if table_path(folder, "catchments") else None)
+    optional = [iter_table(folder, name, rows=rows) if table_path(folder, name) else None
+                for name in ("catchments", "depression_cells")]
     return _check(read_table(folder, "depressions"), iter_table(folder, "cells", rows=rows),
-                  read_meta(folder), catchments)
+                  read_meta(folder), *optional)
 
 
 def compare_results(a, b, rel=1e-9):

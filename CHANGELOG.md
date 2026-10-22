@@ -13,6 +13,12 @@
   version gives exactly the whole-raster answer for any tile size, also on real terrain
   (Houston, 30 m). `verify` checks the new invariants and `clip` keeps the whole catchments of
   the depressions it keeps. See [docs/definition.md](docs/definition.md#catchments-and-spill).
+- **Levels, shape and fill curves** (`details=True`, `--details`): `ground_m`, `water_level_m`,
+  `length_m`, `width_m`, `orientation_deg`, and the flooded area and volume with the water 0.1,
+  0.25, 0.5, 1, 2 and 5 m below full; plus a depression × cell table (`depression_cells`) with
+  each depression's area, volume, depth and flooded areas per H3 cell. Tiled and whole results are
+  identical; `verify` checks them and `clip` carries the table. See
+  [docs/definition.md](docs/definition.md#levels-shape-and-fill-curve).
 - `workers=` (`--workers`): label pixels with H3 cells in several processes; identical results,
   labelling about 3× faster with 4 processes.
 - `hydro.depressions.fill_from_array`: the ground, the filled surface and the invalid pixels.

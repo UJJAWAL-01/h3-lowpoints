@@ -94,12 +94,14 @@ def clip_result(folder, boundary, out_dir, *, format=None, name=None, rows=CHUNK
         for start in range(0, len(kept_deps), CHUNK_ROWS):
             w.write(kept_deps.iloc[start:start + CHUNK_ROWS])
         w.close(empty=deps.iloc[:0])
-    if table_path(folder, "catchments"):
-        # a kept depression keeps its whole catchment, also where it reaches beyond the boundary
+    for table in ("catchments", "depression_cells"):
+        if not table_path(folder, table):
+            continue
+        # a kept depression keeps its whole catchment and all its cells, also beyond the boundary
         wanted = np.sort(kept_deps["id"].to_numpy())
-        with TableWriter(out / f"catchments.{fmt}", fmt) as w:
+        with TableWriter(out / f"{table}.{fmt}", fmt) as w:
             empty = None
-            for chunk in iter_table(folder, "catchments", rows=rows):
+            for chunk in iter_table(folder, table, rows=rows):
                 empty = chunk.iloc[:0]
                 ids = chunk["id"].to_numpy()
                 at = np.minimum(np.searchsorted(wanted, ids), max(len(wanted) - 1, 0))

@@ -20,6 +20,7 @@ result is wrong (or was damaged after it was written).
 | Depths are at least `min_depth`, areas positive, volumes between 0 and maximum depth × area, and no value is NaN or infinite; latitudes and longitudes are in range. | Arithmetic or filtering errors. |
 | Coverage lies in (0, 1]; `covered_area_m2` is coverage × the cell's exact area and never exceeds it; `depressed_share` lies in [0, 1]. | Coverage errors. |
 | `meta.json`'s depression count matches the table. | Tables and metadata from different runs. |
+| With details: `water_level_m - ground_m` is `max_depth_m`; `0 < width_m <= length_m`; `orientation_deg` in [0, 180); flooded areas and volumes never grow as the water drops and each volume fits in the depth left times its area; the depression × cell table adds up to each depression's area, volume and fill curve, its deepest row is the depression's depth, and it names only listed depressions. | Levels, shapes or fill curves computed wrongly, or tables out of step. |
 | With catchments: every catchment is at least as large as its depression; the catchment table adds up to `catchment_area_m2` and names only listed depressions; `spill_to` names a listed depression or 0, never the depression itself; following `spill_to` always ends; spill points are finite and in range. | Water counted twice or lost, overflow running in a loop, tables out of step. |
 
 ```
@@ -42,6 +43,9 @@ Saved results are checked **in pieces**: the depression table is read whole, the
 500,000 rows at a time, keeping only each cell's 8-byte id until the end (to find duplicates). A
 national result with tens of millions of cells is checked in modest memory.
 
+Details get eight damages of their own (a wrong ground height, a width above the length, an
+orientation of 200°, a flooded area or a volume that grows as the water drops, a depression ×
+cell table that no longer adds up, a wrong deepest row, rows for an unknown depression).
 Catchments get six more damages (a catchment table that no longer adds up, a catchment smaller
 than its depression, a depression spilling into itself, spills forming a loop, a spill to an
 unknown depression, catchment rows for an unknown depression), each of which must be caught.

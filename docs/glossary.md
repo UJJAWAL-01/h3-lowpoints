@@ -56,6 +56,9 @@ analyzing it whole (`analyze_tiled`).
 **Fill / filled level.** The lowest level water could stand at in each pixel, found by
 priority-flood.
 
+**Fill curve.** How a depression's flooded area and stored volume shrink as its water level
+drops below full. See [Definition](definition.md#levels-shape-and-fill-curve).
+
 **Footprint.** Where a raster holds valid data; used to measure coverage of any H3 cell.
 
 **H3.** A global grid of hexagons with 16 resolutions, from Uber. See [Concepts](concepts.md#h3).

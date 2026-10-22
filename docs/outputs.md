@@ -12,6 +12,7 @@ three files in a folder. This page describes every file, column and field.
 | `depressions.csv` or `depressions.parquet` | every saved result | the depression table |
 | `cells.csv` or `cells.parquet` | every saved result | the cell table |
 | `catchments.csv` or `catchments.parquet` | results computed with `catchments=True` (`--catchments`) | the catchment table |
+| `depression_cells.csv` or `depression_cells.parquet` | results computed with `details=True` (`--details`) | the depression × cell table |
 | `meta.json` | every saved result | settings, versions, counts |
 | `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
 | `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
@@ -63,6 +64,12 @@ the data behind them was supplied.
 | `catchment_area_m2` | float | m² | Only with `catchments=True`: ground area whose rain ends up in this depression, including the depression itself and the land draining to shallow sinks that spill into it. |
 | `spill_to` | integer | | Only with `catchments=True`: `id` of the depression that receives this one's overflow when it is full, or 0 when the overflow leaves the map. |
 | `spill_lat`, `spill_lon` | float | degrees (WGS 84) | Only with `catchments=True`: centre of the pixel where the full depression overflows. |
+| `ground_m` | float | m | Only with `details=True`: ground height at the lowest point. |
+| `water_level_m` | float | m | Only with `details=True`: water level when full; `water_level_m - ground_m = max_depth_m`. |
+| `length_m`, `width_m` | float | m | Only with `details=True`: axes of the depression's equivalent ellipse; `width_m <= length_m`. |
+| `orientation_deg` | float | degrees | Only with `details=True`: direction of the long axis, clockwise from north, 0 to 180. |
+| `area_10cm_down_m2`, `area_25cm_down_m2`, `area_50cm_down_m2`, `area_1m_down_m2`, `area_2m_down_m2`, `area_5m_down_m2` | float | m² | Only with `details=True`: area under water when the water stands 0.1, 0.25, 0.5, 1, 2 or 5 m below full. |
+| `volume_10cm_down_m3`, `volume_25cm_down_m3`, `volume_50cm_down_m3`, `volume_1m_down_m3`, `volume_2m_down_m3`, `volume_5m_down_m3` | float | m³ | Only with `details=True`: water held at the same six levels. |
 
 How each value is computed, and the edge cases:
 
@@ -106,6 +113,11 @@ How each value is computed, and the edge cases:
   Following `spill_to` from any depression always reaches 0, through depressions with ever lower
   water levels. The catchment areas of all depressions plus the area draining straight off the
   map equal the area of valid data.
+- **Levels, shape and fill curve.** The rules are in
+  [Definition](definition.md#levels-shape-and-fill-curve). The flooded areas and volumes never
+  grow as the water drops (`area_m2 >= area_10cm_down_m2 >= ... >= area_5m_down_m2`, the same for
+  volumes), are 0 once the drop reaches `max_depth_m`, and each volume is at most the depth left
+  times the flooded area.
 
 ## The cell table
 
@@ -166,6 +178,25 @@ depression. A kept depression's `spill_to` may name a depression outside the bou
 not in the clipped table. Land
 cover, imperviousness, soils or rainfall can be attached to a catchment through these cells
 without analysing the terrain again.
+
+## The depression × cell table
+
+Only with `details=True`: one row per depression and H3 cell it covers, ordered by cell and
+then `id`. It splits the cell table by depression, and adds the fill curve per cell, so the
+flooded part of each cell can be found for any water level of its depression.
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | The depression. |
+| `h3` | text | | An H3 cell at the table's resolution. |
+| `area_m2`, `volume_m3` | float | m², m³ | The depression's area and volume in this cell. |
+| `max_depth_m` | float | m | The depression's greatest depth in this cell. |
+| `area_10cm_down_m2`, `area_25cm_down_m2`, `area_50cm_down_m2`, `area_1m_down_m2`, `area_2m_down_m2`, `area_5m_down_m2` | float | m² | Its area in this cell under water when the water stands 0.1, 0.25, 0.5, 1, 2 or 5 m below full. |
+
+The rows of one depression add up to its `area_m2`, `volume_m3` and fill-curve areas, and their
+deepest `max_depth_m` is the depression's. Summed over the depressions in a cell, area and
+volume give the cell table's `depress_area_m2` and `depress_volume_m3`. A clipped result keeps
+every row of the depressions it keeps.
 
 ## meta.json
 

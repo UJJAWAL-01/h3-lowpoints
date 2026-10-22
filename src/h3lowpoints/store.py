@@ -185,7 +185,7 @@ def write_meta(folder, meta):
 
 def remove_other_formats(folder, fmt):
     """Delete tables of the format not being written, so a reused folder holds one result."""
-    for name in ("depressions", "cells", "catchments"):
+    for name in ("depressions", "cells", "catchments", "depression_cells"):
         for other in FORMATS:
             if other != fmt:
                 (Path(folder) / f"{name}.{other}").unlink(missing_ok=True)
@@ -225,19 +225,23 @@ class CellParts:
     records in `spill_dir`, appended to as tiles finish; the folder is removed by `close`.
     """
 
-    def __init__(self, res, spill_dir=None):
+    def __init__(self, res, spill_dir=None, extra=()):
         self.res, self.dir = res, None if spill_dir is None else Path(spill_dir)
+        self.extra = tuple(extra)                         # more summed values, by name
+        self.dtype = np.dtype(PART_DTYPE.descr + [(name, "<f8") for name in self.extra])
         self._memory = {}
         self.n_records = 0
         if self.dir is not None:
             shutil.rmtree(self.dir, ignore_errors=True)   # leftovers of an interrupted run would count twice
             self.dir.mkdir(parents=True)
 
-    def add(self, rec, cell, depth, area, volume):
+    def add(self, rec, cell, depth, area, volume, *extra):
         if len(rec) == 0:
             return
-        arr = np.empty(len(rec), dtype=PART_DTYPE)
+        arr = np.empty(len(rec), dtype=self.dtype)
         arr["rec"], arr["cell"], arr["depth"], arr["area"], arr["volume"] = rec, cell, depth, area, volume
+        for name, values in zip(self.extra, extra):
+            arr[name] = values
         key = partition_key(arr["cell"], self.res)
         order = np.argsort(key, kind="stable")
         arr, key = arr[order], key[order]
@@ -260,7 +264,7 @@ class CellParts:
     def load(self, key):
         if self.dir is None:
             return np.concatenate(self._memory.pop(key))
-        return np.fromfile(self.dir / f"{key:016x}.bin", dtype=PART_DTYPE)
+        return np.fromfile(self.dir / f"{key:016x}.bin", dtype=self.dtype)
 
     def close(self):
         self._memory.clear()

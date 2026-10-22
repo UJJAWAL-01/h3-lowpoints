@@ -42,6 +42,10 @@ def build_parser():
     a.add_argument("--workers", type=int, default=1,
                    help="label pixels with H3 cells in this many processes: the same result in "
                         "less time (4 is a good choice on most laptops)")
+    a.add_argument("--details", action="store_true",
+                   help="also describe each depression further: ground and water levels, length, "
+                        "width and orientation, the area and volume as the water drops, and a "
+                        "depression_cells table on H3 cells")
     a.add_argument("--catchments", action="store_true",
                    help="also follow the water: each depression's catchment area, the depression it "
                         "overflows into and where, and a catchments table on H3 cells")
@@ -90,6 +94,10 @@ def build_parser():
     b.add_argument("--workers", type=int, default=1,
                    help="label pixels with H3 cells in this many processes: the same result in "
                         "less time (4 is a good choice on most laptops)")
+    b.add_argument("--details", action="store_true",
+                   help="also describe each depression further: ground and water levels, length, "
+                        "width and orientation, the area and volume as the water drops, and a "
+                        "depression_cells table on H3 cells")
     b.add_argument("--catchments", action="store_true",
                    help="also follow the water: each depression's catchment area, the depression it "
                         "overflows into and where, and a catchments table on H3 cells")
@@ -210,12 +218,12 @@ def _analyze(args):
         result = analyze_tiled(dem, drains_xy=drains, buildings=buildings, tile=args.tile,
                                res=args.res, min_depth=args.min_depth, out_dir=args.out,
                                format=args.format, catchments=args.catchments,
-                               workers=args.workers)
+                               details=args.details, workers=args.workers)
         out = result.path
     else:
         result = analyze(dem, drains_xy=drains, res=args.res, min_depth=args.min_depth,
                          buildings=buildings, catchments=args.catchments,
-                         workers=args.workers)
+                         details=args.details, workers=args.workers)
         out = result.save(args.out, format=args.format)
     print(f"{result.meta['n_depressions']} depressions on H3 resolution {result.res} written to {out}")
     print(f"  {result.meta['n_edge']} cut off by the data border")
@@ -265,7 +273,8 @@ def _build(args):
         result = analyze_tiled(str(vrt), tile=args.tile, res=args.res, min_depth=args.min_depth,
                                verbose=True, out_dir=out, format=args.format, hours=hours,
                                mask_path=None if mask is None else str(mask),
-                               catchments=args.catchments, workers=args.workers)
+                               catchments=args.catchments, details=args.details,
+                               workers=args.workers)
     except Paused as stop:
         print(f"part finished ({100 * stop.done / stop.total:.0f}% of this stage done): {stop}")
         return 3

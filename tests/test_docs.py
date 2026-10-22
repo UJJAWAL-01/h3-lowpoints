@@ -11,7 +11,8 @@ from rasterio.transform import from_origin
 from h3lowpoints import analyze_array, read_result
 from h3lowpoints.cli import build_parser
 from h3lowpoints.pipeline import (BUILDING_COLUMNS, CATCHMENT_COLUMNS, CATCHMENT_TABLE, CELL_TABLE,
-                                  CORE_COLUMNS, DRAIN_COLUMNS)
+                                  CORE_COLUMNS, DEPRESSION_CELL_TABLE, DETAIL_COLUMNS,
+                                  DRAIN_COLUMNS)
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted((ROOT / "docs").glob("*.md")) + [ROOT / "README.md", ROOT / "CONTRIBUTING.md"]
@@ -84,7 +85,7 @@ def test_every_documented_function_exists():
 def test_every_column_is_documented():
     text = (ROOT / "docs" / "outputs.md").read_text(encoding="utf-8")
     for column in (CORE_COLUMNS + DRAIN_COLUMNS + BUILDING_COLUMNS + CATCHMENT_COLUMNS + CELL_TABLE
-                   + CATCHMENT_TABLE):
+                   + CATCHMENT_TABLE + DETAIL_COLUMNS + DEPRESSION_CELL_TABLE):
         assert f"`{column}`" in text, f"column {column} is not described in outputs.md"
 
 

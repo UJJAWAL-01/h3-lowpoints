@@ -107,6 +107,37 @@ corridor winding through every tile, and a lake whose overflow runs through a ti
 sink, at tile sizes down to 4 pixels; on the 30 m elevation data of Houston (1.36 million
 pixels) tiles of 100, 333 and 512 pixels give results identical to the whole raster.
 
+## Levels, shape and fill curve
+
+With `details=True` (`--details`), each depression is described further
+(`h3lowpoints.hydro.details`), identically by the whole-raster and the tiled analyses:
+
+- **Levels.** `ground_m` is the ground height at the lowest point and `water_level_m` the level
+  of the water when the depression is full (its filled level, the same over the whole
+  depression). Their difference is `max_depth_m`. Heights are in the elevation data's vertical
+  datum (for USGS 3DEP, NAVD 88 metres).
+- **Fill curve.** With the water `t` metres below full (t = 0.1, 0.25, 0.5, 1, 2 and 5 m), a
+  pixel of depth `d` is under water when `d > t` and holds `d - t` of water. The flooded area and
+  the volume at each level are sums over the depression's pixels. With the curve, a volume of
+  water can be turned into a level and a flooded area by interpolation (the rain simulator
+  planned for the web app does this). The depression is treated as **one pool**: when it is
+  only partly full, water is assumed to stand at one level everywhere in it, although separate
+  hollows inside a large depression may in reality fill one by one.
+- **Shape.** `length_m` and `width_m` are the axes of the ellipse with the same second moments
+  as the depression's pixels (each pixel a uniform rectangle of its ground size, weighted by its
+  area), 4 standard deviations each; `orientation_deg` is the direction of the long axis,
+  clockwise from north, from 0 to 180. A one-pixel depression on 30 m data is 34.6 m by 34.6 m;
+  a straight canal one pixel wide and n pixels long is about 1.15 × n pixels long and 34.6 m
+  wide. The direction of a depression that is about as wide as it is long means little. On
+  longitude/latitude grids, pixel sizes are taken at the depression's centre row, so very large
+  depressions spanning many degrees of latitude are measured approximately.
+
+The moments are kept per piece (weight, centre, centred sums) and merged exactly when pieces of
+one depression from different tiles are joined. `tests/test_details.py` checks a one-pixel pit,
+canals in four directions, a rectangle, every fill-curve value against the depression's own
+pixels, north-up and south-up grids, and tiled against whole on random terrain, flats, nodata
+and longitude/latitude grids; the network test repeats the comparison on Houston 30 m data.
+
 ## Tiles
 
 `analyze_tiled` gives the result of `analyze`, whatever the tile size. The tile size trades
