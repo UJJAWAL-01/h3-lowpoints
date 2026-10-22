@@ -17,6 +17,11 @@
   JSON report and a per-point table. See [docs/validation.md](docs/validation.md).
 - `store.iter_table(..., columns=...)` reads only the named columns.
 
+### Fixed
+- Reading CSV results with pandas 3.1, which deprecates `float_precision` (the test suite
+  treats deprecations as errors). pandas 3.1 reads numbers back exactly by default; older
+  versions still get `float_precision="round_trip"`.
+
 ## 0.1.1 (documentation)
 
 - Install from PyPI (`pip install h3-lowpoints`) in the README and the docs; badges; links to the

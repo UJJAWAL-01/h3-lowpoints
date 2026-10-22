@@ -13,6 +13,7 @@ either in memory or in files on disk.
 """
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -23,6 +24,10 @@ FORMATS = ("csv", "parquet")
 H3_COLUMNS = ("h3", "h3_lowpoint", "h3_lowpoint_15")
 CHUNK_ROWS = 500_000            # rows read or written at a time
 PART_DEPTH = 6                  # partitions are parents this many levels coarser than the cells
+# Every number must read back to the exact value written. pandas 3.1 does so by default (and
+# deprecates the option); older versions need float_precision="round_trip".
+_EXACT_FLOATS = ({} if tuple(map(int, re.match(r"(\d+)\.(\d+)", pd.__version__).groups())) >= (3, 1)
+                 else {"float_precision": "round_trip"})
 
 
 class Paused(Exception):
@@ -141,8 +146,7 @@ def iter_table(folder, name, rows=CHUNK_ROWS, columns=None):
         header = pd.read_csv(path, nrows=0).columns
         dtype = {c: str for c in H3_COLUMNS if c in header}
         yielded = False
-        # "round_trip" reads every number back to the exact value that was written
-        opts = {"dtype": dtype, "float_precision": "round_trip"}
+        opts = {"dtype": dtype, **_EXACT_FLOATS}
         if columns is not None:
             opts["usecols"] = [c for c in header if c in columns]
         for chunk in pd.read_csv(path, chunksize=rows, **opts):
