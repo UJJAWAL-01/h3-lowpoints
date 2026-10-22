@@ -157,6 +157,33 @@ borders. Both grow with the region, so a computer with **16 GB of memory** is th
 minimum for the lower 48 at resolution 10. A hierarchical version of the method would bound them
 ([Roadmap](roadmap.md)).
 
+### With open water masked
+
+Measured on 20 and 21 October 2026: the same box and settings with `--water-mask`, after the
+improvements that came out of the first run (one outlet node per tile, validity records for
+coverage, a tile-by-tile mask, retried requests). Run in four parts.
+
+| | Without the mask (19 Oct) | With the mask (20 to 21 Oct) |
+|---|---|---|
+| Depressions | 12,304,679 | 12,124,617 |
+| H3 cells (resolution 10) | 82,027,455 | 39,124,039 |
+| Depressed area / volume | 831,258 km² / 22,404 km³ | 222,662 km² / 838 km³ |
+| Largest depression | Lake Superior, 82,407 km² | a desert basin on the Nevada–Utah border, 868 km² |
+| Border graph | 14.3 million nodes, 69.1 million crossings | 12.7 million nodes, 61.9 million crossings |
+| Time | 7.3 hours | 8.9 hours, of which 1.4 for the water mask |
+| Extra memory at peak | 13.0 GB | 11.9 GB (border solve); 7.1 GB in the final step |
+| Internet traffic | 100.5 GB | about 113 GB |
+| Results (Parquet) | 3.1 GB | 1.9 GB |
+| Verification | all invariants, 3 spot checks | all invariants, 3 spot checks |
+
+Masking water kept 98.5% of the depressions, with the same typical size (median about 1 m deep
+and 2,700 m²), and removed what was open water counted as terrain: the Great Lakes, reservoirs
+and lakes held by their outlets, which made up most of the depressed area and volume and over
+half of the cells. The largest depressions are now dry closed basins of the desert West. A closed
+basin whose lowest part holds a permanent lake (the Great Salt Lake basin, for instance) now
+drains into that lake instead of counting as one depression: the right reading when the question
+is where water ponds on land.
+
 ## Running in parts
 
 A national run takes many hours. Every tile's result is saved to `_work/` in the output folder as
