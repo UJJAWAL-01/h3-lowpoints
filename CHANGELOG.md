@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (22 October 2026)
 
 ### Added
 - **Validation against observations: `validate` and `h3lowpoints validate`.** Do observations
@@ -16,11 +16,16 @@
   observations and 50,000 controls against the national dataset took 20 s and 0.7 GB. Writes a
   JSON report and a per-point table. See [docs/validation.md](docs/validation.md).
 - `store.iter_table(..., columns=...)` reads only the named columns.
+- A worked example in [docs/validation.md](docs/validation.md#worked-example-new-york-city-street-flooding):
+  New York City 311 street-flooding reports against every address in the city, on the national
+  dataset (lift 1.54, 95% interval 1.31 to 1.79, in depressed cells; about 1 beyond two rings).
 
 ### Fixed
 - Reading CSV results with pandas 3.1, which deprecates `float_precision` (the test suite
   treats deprecations as errors). pandas 3.1 reads numbers back exactly by default; older
   versions still get `float_precision="round_trip"`.
+- An unreadable vector file (points or boundary, for example a download cut off midway) is now
+  an input error (`error: could not read ...`) instead of a traceback.
 
 ## 0.1.1 (documentation)
 

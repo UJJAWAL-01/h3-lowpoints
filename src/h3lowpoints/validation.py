@@ -314,7 +314,10 @@ def _read_vector(path):
     except ImportError as exc:
         raise ImportError("Reading vector files needs geopandas: "
                           "pip install 'h3-lowpoints[sources]'") from exc
-    frame = gpd.read_file(str(path))
+    try:
+        frame = gpd.read_file(str(path))
+    except Exception as exc:              # each I/O engine raises its own error types
+        raise ValueError(f"could not read {path}: {exc}") from exc
     if frame.crs is None:
         raise ValueError(f"{path} has no coordinate reference system")
     return _from_geometry(frame)

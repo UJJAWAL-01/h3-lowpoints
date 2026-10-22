@@ -15,7 +15,7 @@ identifiers:
     value: "10.5281/zenodo.23552973"
     description: "Version 0.1.1"
 license: Apache-2.0
-version: "0.1.1"
+version: "0.2.0"
 references:
   - type: dataset
     title: "Closed depressions on land, lower 48 US states, on H3 (USGS 3DEP 30 m)"

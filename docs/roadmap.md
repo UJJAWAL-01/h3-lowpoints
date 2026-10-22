@@ -51,8 +51,8 @@ Each step is finished, tested and documented before the next starts. Nothing is 
    [doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773). 10,573,090 depressions and 34,046,636 resolution-10 cells from
    3DEP 30 m with open water masked, clipped to the lower 48 states
    ([Large regions](large-regions.md)).
-2. **General validation tools.** Done (see above). Next: a worked example on a public set of
-   observations, added to [Validation](validation.md).
+2. **General validation tools.** Done in 0.2.0 (see above), with a worked example on New York
+   City street-flooding reports ([Validation](validation.md#worked-example-new-york-city-street-flooding)).
 3. **Physical susceptibility index.** For each depression, compare the water it could receive
    with the storage it has:
    - its contributing catchment, from flow routing on the filled surface;

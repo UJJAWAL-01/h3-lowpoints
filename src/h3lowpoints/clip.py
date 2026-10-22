@@ -33,7 +33,10 @@ def load_boundary(boundary):
     except ImportError as exc:
         raise ImportError("Reading a boundary file needs geopandas: "
                           "pip install 'h3-lowpoints[sources]'") from exc
-    frame = gpd.read_file(str(boundary))
+    try:
+        frame = gpd.read_file(str(boundary))
+    except Exception as exc:              # each I/O engine raises its own error types
+        raise ValueError(f"could not read {boundary}: {exc}") from exc
     if frame.crs is None:
         raise ValueError(f"{boundary} has no coordinate reference system")
     return frame.to_crs(4326).geometry.union_all()

@@ -178,4 +178,90 @@ used:
   without drains or culverts ([Accuracy and limits](limitations.md)). A low lift can mean the
   drainage works.
 
-A real-world worked example on public data will be added to this page.
+## Worked example: New York City street flooding
+
+An example of the method on public data, run against the published national dataset. It is
+an illustration of how to use and read the tool, not a study of New York: nothing was tuned to
+the city, and every setting below was fixed before any result was seen.
+
+**Data** (all from [NYC Open Data](https://opendata.cityofnewyork.us), downloaded 22 October
+2026):
+
+| Role | Dataset | Rows |
+|---|---|---|
+| Observations | 311 service requests (`erm2-nwe9`) with descriptor *Street Flooding (SJ)*, January 2020 to July 2026 | 21,472 (248 without coordinates) |
+| Secondary observations | the same, descriptor *Catch Basin Clogged/Flooding (Use Comments) (SC)* | 44,362 (313 without coordinates) |
+| Controls | NYC Address Points (`uf93-f8nk`): every address in the city, so the controls stand for where residents who could report live | 967,871 |
+| Boundary | Borough Boundaries (`gthc-hcne`) | 5 boroughs |
+
+**Settings fixed in advance:** the defaults (0 to 5 rings, blocks at resolution 6, 1,000
+samples, seed 0) for the main run; one sensitivity run with blocks at resolution 7, because the
+city holds only about 40 resolution-6 blocks; and the catch-basin requests as a second set of
+observations, expected to show a weaker association because many concern drain maintenance
+rather than standing water.
+
+**To reproduce:**
+
+```
+B=https://data.cityofnewyork.us/resource
+curl -o street_flooding.csv "$B/erm2-nwe9.csv?\$select=unique_key,created_date,latitude,longitude&\$where=descriptor='Street%20Flooding%20(SJ)'&\$limit=100000"
+curl -o address_points_raw.csv "$B/uf93-f8nk.csv?\$select=addresspointid,the_geom&\$limit=2000000&\$order=addresspointid"
+curl -o boroughs.geojson "https://data.cityofnewyork.us/api/geospatial/gthc-hcne?method=export&format=GeoJSON"
+```
+
+The address points come as text such as `POINT (-73.95 40.74)`; one pandas step turns them into
+`lon`/`lat` columns:
+
+```python
+import pandas as pd
+a = pd.read_csv("address_points_raw.csv")
+xy = a["the_geom"].str.extract(r"POINT \(([-\d.]+) ([-\d.]+)\)").astype(float)
+pd.DataFrame({"id": a["addresspointid"], "lon": xy[0], "lat": xy[1]}).to_csv("address_points.csv", index=False)
+```
+
+```
+h3lowpoints validate us48_30m_water --observations street_flooding.csv --controls address_points.csv --boundary boroughs.geojson --out main.json --points main_points.csv
+```
+
+Each run took about 40 seconds on a laptop against the full national dataset.
+
+**Main result** (21,221 reports and 967,866 addresses inside the boundary; 3 reports and 5
+addresses fell just outside it):
+
+```
+rings  ~metres  observations  controls   lift  95% interval
+    0        0         16.7%     10.8%   1.54  1.31 to 1.79
+    1      131         31.1%     27.0%   1.15  1.02 to 1.27
+    2      263         45.7%     42.6%   1.07  0.99 to 1.16
+    3      394         57.3%     55.9%   1.02  0.96 to 1.08
+    4      526         66.1%     67.0%   0.99  0.94 to 1.02
+    5      657         74.0%     76.0%   0.97  0.93 to 1.00
+```
+
+**Sensitivity** (blocks at resolution 7, 209 blocks): the same lifts, with intervals of 1.38 to
+1.72 at 0 rings and 1.06 to 1.25 at 1 ring. **Catch-basin requests** (44,045 inside): lift 1.31
+(1.16 to 1.45) at 0 rings and 1.04 (0.96 to 1.11) at 1 ring, weaker, as expected.
+
+**By depth** (0 rings; the depth is the deepest depressed ground in the report's cell, which
+can be under the national layer's 0.5 m minimum where a cell holds only the shallow rim of a
+deeper depression):
+
+| Depth class | Reports | Addresses | Lift | 95% interval |
+|---|---|---|---|---|
+| 0-0.5 m | 1,019 | 33,047 | 1.41 | 1.12 to 1.77 |
+| 0.5-1 m | 1,143 | 31,502 | 1.65 | 1.40 to 1.91 |
+| 1-2 m | 762 | 24,859 | 1.40 | 1.01 to 1.90 |
+| >= 2 m | 611 | 15,218 | 1.83 | 1.23 to 2.43 |
+
+**Reading it.** Street-flooding reports come from addresses in depressed cells about one and a
+half times as often as addresses in general do, and the excess is confined to the depressed cell
+and its immediate neighbours: by two to three rings (260 to 400 m) the lift is 1. That is the
+pattern expected if water collects in the low spots themselves, and it holds with smaller blocks.
+It is also modest: 83% of the reports are *not* in depressed cells, so most street flooding in
+the city happens where the 30 m terrain model shows no depression (blocked drains, sewers at
+capacity, depressions too small for 30 m data). There is no clear dose-response: the deepest
+class has the highest lift, but the classes' intervals overlap. Reports are located at
+an address or an intersection, and come from the residents who chose to report. They cluster in
+time as well as space: the ten busiest days (among them 1 and 2 September 2021, the remnants of
+Hurricane Ida) hold 16% of all reports. The city's combined sewers and pumps are not in the
+terrain model at all.

@@ -296,6 +296,21 @@ def test_points_are_read_from_vector_files_in_any_crs(tmp_path):
     assert read_points(frame)["point_id"].tolist() == [7, 8]
 
 
+def test_an_unreadable_vector_file_is_an_input_error(tmp_path, capsys):
+    pytest.importorskip("geopandas")
+    broken = tmp_path / "cut.geojson"                             # a download cut off midway
+    broken.write_text('{"type": "FeatureCollection", "features": [{"type": "Feat')
+    with pytest.raises(ValueError, match="could not read"):
+        read_points(broken)
+    folder = make_result({}).save(tmp_path / "r")
+    good = tmp_path / "obs.csv"
+    pd.DataFrame({"lon": [-97.5], "lat": [30.5]}).to_csv(good, index=False)
+    for args in (["--observations", str(broken), "--controls", str(good)],     # points
+                 ["--observations", str(good), "--boundary", str(broken)]):   # boundary
+        with pytest.raises(SystemExit, match="error: could not read"):
+            main(["validate", str(folder), *args])
+
+
 def test_bad_settings_are_refused():
     res = make_result({})
     pts = [[-97.5, 30.5]]
