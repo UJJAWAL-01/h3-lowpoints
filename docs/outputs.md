@@ -41,7 +41,7 @@ groups neighbouring cells under the same coarse parent together.
 
 ## The depression table
 
-One row per depression. The first nine columns are always present; the others appear only when
+One row per depression. The first ten columns are always present; the others appear only when
 the data behind them was supplied.
 
 | Column | Type | Unit | Meaning |
@@ -54,6 +54,7 @@ the data behind them was supplied.
 | `h3_lowpoint` | text | | H3 cell, at the table's resolution, containing (`lat`, `lon`). Matches a row of the cell table. |
 | `h3_lowpoint_15` | text | | Resolution-15 H3 cell containing (`lat`, `lon`): the lowest point to the finest precision H3 has. |
 | `edge` | boolean | | True when the depression comes within one pixel of the raster's edge: it may continue beyond the data, so its area and volume are lower bounds. |
+| `deeper_than_wide` | boolean | | True when the depression is deeper than the side of a square of its own area: almost always an error in the elevation data (see below). |
 | `dist_to_drain_m` | float | m | Only with drains: distance from the lowest point to the nearest drain. |
 | `drain_at_core` | boolean | | Only with drains: a drain lies within `drain_radius_m` of the depression's deep core. |
 | `building_overlap` | float | 0 to 1 | Only with buildings: share of the depression's pixels under building footprints. |
@@ -83,6 +84,11 @@ How each value is computed, and the edge cases:
   30 m pixel.
 - **`edge`.** Measured on the depression's bounding box against the raster border. Nodata inside
   the raster is not an edge: water can leave there.
+- **`deeper_than_wide`.** `max_depth_m > sqrt(area_m2)`. Natural hollows, and even open-pit
+  mines, are far wider than they are deep; a depression this narrow is almost always a spike of
+  bad pixels or a strip stored as 0 m in the elevation data. In the 3DEP 30 m national run, 43 of
+  10.6 million depressions were flagged, up to 620 m deep, and they dominate any "deepest"
+  figure: filter them out for depth statistics. Nothing is removed; the flag only marks them.
 - **Drains.** `dist_to_drain_m` is geodesic (on the WGS 84 ellipsoid) for degree grids and
   straight-line for projected grids, to the nearest of all drains supplied. The **core** of a
   depression is its pixels at least `drain_core_frac` (default 0.8) of its maximum depth deep.

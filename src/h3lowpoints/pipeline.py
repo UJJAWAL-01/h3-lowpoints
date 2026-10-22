@@ -18,13 +18,23 @@ from .store import (check_format, missing_files, read_meta, read_table, remove_o
                     write_meta, write_table)
 
 CORE_COLUMNS = ["id", "max_depth_m", "area_m2", "volume_m3", "lat", "lon", "h3_lowpoint",
-                "h3_lowpoint_15", "edge"]
+                "h3_lowpoint_15", "edge", "deeper_than_wide"]
 CELL_TABLE = ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3", "n_lowpoints",
               "covered_area_m2", "coverage", "depressed_share"]
 DRAIN_COLUMNS = ["dist_to_drain_m", "drain_at_core"]
 BUILDING_COLUMNS = ["building_overlap", "likely_building_artifact"]
 TEXT_COLUMNS = {"h3", "h3_lowpoint", "h3_lowpoint_15"}
-BOOL_COLUMNS = {"edge", "drain_at_core", "likely_building_artifact"}
+BOOL_COLUMNS = {"edge", "deeper_than_wide", "drain_at_core", "likely_building_artifact"}
+
+
+def deeper_than_wide(max_depth_m, area_m2):
+    """True where a depression is deeper than the side of a square of its own area.
+
+    Natural hollows and even open-pit mines are much wider than deep; a depression this narrow
+    is almost always an error in the elevation data (a spike of bad pixels, a strip stored as
+    0 m). In the 3DEP 30 m national run, 43 of 10.6 million depressions were, up to 620 m deep.
+    """
+    return np.asarray(max_depth_m, dtype=float) > np.sqrt(np.asarray(area_m2, dtype=float))
 INT_COLUMNS = {"id", "n_lowpoints"}
 
 
@@ -272,7 +282,7 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         "id": ids, "max_depth_m": mx, "area_m2": area, "volume_m3": vol, "lat": lat, "lon": lon,
         "h3_lowpoint": [h3.latlng_to_cell(la, lo, res) for la, lo in zip(lat, lon)],
         "h3_lowpoint_15": [h3.latlng_to_cell(la, lo, FINEST_H3) for la, lo in zip(lat, lon)],
-        "edge": edge})
+        "edge": edge, "deeper_than_wide": deeper_than_wide(mx, area)})
     if has_drains:
         deps["dist_to_drain_m"] = nearest_distance_m(drains_xy, np.c_[xs, ys], crs)
         deps["drain_at_core"] = drains_at_core(

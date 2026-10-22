@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "h3-lowpoints"
-version = "0.0.1"
+version = "0.1.0"
 description = "Find closed depressions in elevation models and map them on H3 cells at any resolution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,7 +17,14 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Scientific/Engineering :: Hydrology",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
     "numpy",
@@ -40,7 +47,10 @@ dev = ["pytest", "ruff", "shapely", "pyarrow>=14"]
 h3lowpoints = "h3lowpoints.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ujjawal-01/h3-lowpoints"
+Homepage = "https://github.com/UJJAWAL-01/h3-lowpoints"
+Documentation = "https://ujjawal-01.github.io/h3-lowpoints/"
+Changelog = "https://github.com/UJJAWAL-01/h3-lowpoints/blob/main/CHANGELOG.md"
+Issues = "https://github.com/UJJAWAL-01/h3-lowpoints/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/h3lowpoints"]

@@ -51,6 +51,9 @@ and the world, or from choices the library makes and states.
   mask permanent water (for example the "permanent water bodies" class of ESA WorldCover) before
   reading such results. By contrast, the next largest, the Great Basin of Nevada and the
   Bonneville basin around the Great Salt Lake, really have no outlet.
+- **Errors in the elevation data.** A few pixels can hold wrong values: spikes hundreds of metres
+  deep, or strips stored as 0 m. They make narrow, impossibly deep depressions, which the
+  `deeper_than_wide` column flags (43 of 10.6 million in the national 3DEP 30 m run).
 - **Survey seams.** Where two surveys meet, a small step in the data can create or cut off shallow
   depressions along the seam. The library takes each 3DEP pixel from its own tile so it adds no
   seam of its own, but it cannot remove seams in the data.

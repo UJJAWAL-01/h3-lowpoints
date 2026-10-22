@@ -78,6 +78,7 @@ CORRUPTIONS = {
     "share above 1": (lambda d, c, m: (d, c.assign(depressed_share=2.0), m), "depressed_share outside"),
     "meta count": (lambda d, c, m: (d, c, {**m, "n_depressions": m["n_depressions"] + 3}), "meta says"),
     "cells at mixed res": (lambda d, c, m: (d, c.assign(h3=[h3.cell_to_parent(x, 10) if i == 0 else x for i, x in enumerate(c["h3"])]), m), "not all at resolution"),
+    "flag off": (lambda d, c, m: (d.assign(deeper_than_wide=~d["deeper_than_wide"]), c, m), "deeper_than_wide does not match"),
     "lowpoint outside the table": (lambda d, c, m: (d.assign(h3_lowpoint=[x if i else _outside(x, c) for i, x in enumerate(d["h3_lowpoint"])]), c, m), "lie in cells missing from the cell table"),
 }
 

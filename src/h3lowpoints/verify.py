@@ -62,6 +62,10 @@ def _check(d, cell_chunks, meta):
         add("depressions with zero or negative area")
     if (d["volume_m3"] < 0).any() or (d["volume_m3"] > d["max_depth_m"] * d["area_m2"] * (1 + REL)).any():
         add("a volume is negative or larger than its deepest depth times its area")
+    if "deeper_than_wide" in d:
+        want = d["max_depth_m"].to_numpy(dtype=float) > np.sqrt(d["area_m2"].to_numpy(dtype=float))
+        if (d["deeper_than_wide"].to_numpy(dtype=bool) != want).any():
+            add("deeper_than_wide does not match the depths and areas")
     if not d["lat"].between(-90, 90).all() or not d["lon"].between(-180, 180).all():
         add("a lowest point lies outside valid latitude/longitude")
     if res is not None:

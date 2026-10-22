@@ -65,9 +65,8 @@ cell with the deepest depth, the area and volume held, the number of lowest poin
 of the cell the data covered. Coarser H3 resolutions are exact roll-ups of the finest one, so the
 same result can be viewed from a street to a continent.
 
-## Author, citing and licence
+## Citing and licence
 
-h3-lowpoints is created and maintained by **Ujjawal Patel**
-([@UJJAWAL-01](https://github.com/UJJAWAL-01)). Code is Apache-2.0, copyright 2026 Ujjawal Patel. If you use the library in published work, cite it using `CITATION.cff` in
+Code is Apache-2.0. If you use the library in published work, cite it using `CITATION.cff` in
 the repository. Data you download through it keeps its own licence (see
 [Data sources](data-sources.md)).

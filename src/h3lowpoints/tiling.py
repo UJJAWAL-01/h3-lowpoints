@@ -30,8 +30,8 @@ from .h3agg.aggregate import h3_ids, lonlat, pixel_centers
 from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
-from .pipeline import (CELL_TABLE, Result, add_coverage, base_meta, dep_columns, empty_cells,
-                       empty_depressions, plan_analysis)
+from .pipeline import (CELL_TABLE, Result, add_coverage, base_meta, deeper_than_wide, dep_columns,
+                       empty_cells, empty_depressions, plan_analysis)
 from .resolution import FINEST_H3, metres_to_cells
 from .sources._common import gdal_env
 from .store import (CHUNK_ROWS, CellParts, Checkpoints, Paused, TableWriter, check_format,
@@ -598,7 +598,8 @@ def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, 
         "area_m2": dep["area"].to_numpy(), "volume_m3": dep["volume"].to_numpy(),
         "lat": lat, "lon": lon,
         "edge": ((dep["rmin"] <= 1) | (dep["cmin"] <= 1) | (dep["rmax"] + 1 >= height - 1)
-                 | (dep["cmax"] + 1 >= width - 1)).to_numpy()})
+                 | (dep["cmax"] + 1 >= width - 1)).to_numpy(),
+        "deeper_than_wide": deeper_than_wide(dep["maxd"].to_numpy(), dep["area"].to_numpy())})
     if drains is not None:
         out["dist_to_drain_m"] = nearest_distance_m(drains, np.c_[xs, ys], crs)
         out["drain_at_core"] = (dep["near_max"] >= drain_core_frac * dep["maxd"]).to_numpy()

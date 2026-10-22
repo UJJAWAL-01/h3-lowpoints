@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased (towards 0.1)
+## 0.1.0 (first release; date set when published)
 
-Not yet published. Breaking changes from the earlier prototype are expected while the API settles.
+The first public release. The API may still change before 1.0.
 
 ### Direction
 - The library is now a general depression layer on H3 (see [docs/roadmap.md](docs/roadmap.md)).
@@ -21,6 +21,12 @@ Not yet published. Breaking changes from the earlier prototype are expected whil
 - The deepest point of a depression is the first tied cell in row-major order.
 
 ### Added
+- **`deeper_than_wide` column.** Flags depressions deeper than the side of a square of their own
+  area, which are almost always errors in the elevation data (43 of 10.6 million in the national
+  3DEP 30 m run, up to 620 m deep); nothing is removed. `verify` checks the flag.
+- **Release automation.** Publishing a GitHub release builds the package and uploads it to PyPI
+  through trusted publishing (`.github/workflows/release.yml`); package metadata lists the
+  documentation site, changelog and issues, with the SPDX licence expression Apache-2.0.
 - **Clipping a result to a boundary, after the analysis.** `clip.clip_result` and
   `h3lowpoints clip --boundary FILE|us48` keep cells whose centre is inside and depressions whose
   lowest point's cell is kept, in pieces for results of any size; `meta["clip"]` records it and

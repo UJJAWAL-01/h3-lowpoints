@@ -38,3 +38,20 @@ def test_building_overlap(tmp_path):
     assert bool(row["likely_building_artifact"])
     res2 = analyze(str(p))
     assert "building_overlap" not in res2.depressions   # no footprints given: no claim made
+
+
+
+def test_a_spike_of_bad_pixels_is_flagged_deeper_than_wide_and_a_hollow_is_not():
+    import numpy as np
+    from rasterio.transform import from_origin
+
+    from h3lowpoints import analyze_array
+
+    arr = np.full((80, 80), 100.0)
+    arr[20:22, 20:22] = 0.0                       # 4 bad pixels at 0 m in terrain at 100 m
+    yy, xx = np.mgrid[:80, :80]
+    arr -= 3.0 * np.exp(-((yy - 55) ** 2 + (xx - 55) ** 2) / 60.0)    # a broad 3 m hollow
+    res = analyze_array(arr, from_origin(500000, 3350000, 10, 10), "EPSG:32614", res=9, min_depth=0.5)
+    d = res.depressions.set_index(res.depressions["max_depth_m"].round(0))
+    assert bool(d.loc[100.0, "deeper_than_wide"]) is True        # 100 m deep, 20 m wide
+    assert bool(d.loc[3.0, "deeper_than_wide"]) is False

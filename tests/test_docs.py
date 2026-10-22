@@ -99,13 +99,13 @@ def test_every_metadata_field_is_documented(tmp_path):
         assert f"`{field}`" in text, f"meta field {field} is not described in outputs.md"
 
 
-def test_the_author_is_named_everywhere_the_project_is_presented():
+def test_package_metadata_is_consistent():
     import h3lowpoints
 
-    author = "Ujjawal Patel"
-    assert h3lowpoints.__author__ == author
-    assert f'authors = [{{ name = "{author}" }}]' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    for name in ("README.md", "NOTICE", "docs/index.md"):
-        assert author in (ROOT / name).read_text(encoding="utf-8"), name
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    name = re.search(r'authors = \[\{ name = "([^"]+)" \}\]', pyproject).group(1)
+    assert h3lowpoints.__author__ == name
+    assert f"Copyright 2026 {name}" in (ROOT / "NOTICE").read_text(encoding="utf-8")
+    given, family = name.split(" ", 1)
     citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
-    assert 'family-names: "Patel"' in citation and 'given-names: "Ujjawal"' in citation
+    assert f'family-names: "{family}"' in citation and f'given-names: "{given}"' in citation
