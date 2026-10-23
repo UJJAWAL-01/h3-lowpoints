@@ -253,7 +253,9 @@ Class codes and names are in `sources.landcover.WORLDCOVER_CLASSES`.
 ### `sources.landcover.build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, tile=4096, hours=None, verbose=False)`
 
 A water mask on exactly the pixel grid of an elevation raster (any CRS), from ESA WorldCover: a
-pixel is 1 (water) when at least 5 of 9 evenly spaced points inside it fall on class 80,
+pixel is 1 (water) when at least 5 of 9 evenly spaced points inside it fall on class 80, or
+when at least 5 fall where WorldCover has no data and the pixel is at or below 0 m (the open sea,
+see [Data sources](data-sources.md#water-mask-from-esa-worldcover)),
 "permanent water bodies", else 0. Pass it as `mask_path` to `analyze_tiled`. `source` is a
 folder of local WorldCover tiles, `cache_dir` downloads each tile once; otherwise tiles are read
 over the internet.

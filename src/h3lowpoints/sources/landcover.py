@@ -189,11 +189,20 @@ def worldcover_vrt(bbox, path, *, source=None, cache_dir=None, workers=8):
     return out
 
 
-def _water(samples):
-    """1 where at least 5 of a pixel's 3 x 3 samples are permanent water, from the sample array."""
+def _majority(samples, value):
+    """Per pixel: are at least 5 of its 3 x 3 samples equal to `value`?"""
     h, w = samples.shape[0] // SAMPLES, samples.shape[1] // SAMPLES
-    hits = (samples == WATER_CLASS).reshape(h, SAMPLES, w, SAMPLES).sum(axis=(1, 3))
-    return (hits * 2 > SAMPLES * SAMPLES).astype("uint8")
+    hits = (samples == value).reshape(h, SAMPLES, w, SAMPLES).sum(axis=(1, 3))
+    return hits * 2 > SAMPLES * SAMPLES
+
+
+def _water(samples, sea=None):
+    """1 where at least 5 of a pixel's 3 x 3 samples are permanent water, or where `sea` is
+    True (open sea, see `build_water_mask`)."""
+    water = _majority(samples, WATER_CLASS)
+    if sea is not None:
+        water |= sea
+    return water.astype("uint8")
 
 
 def _sample_geographic(wc, dem_transform, r0, r1, c0, c1):
@@ -229,7 +238,12 @@ def build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, tile=40
     """A water mask on exactly the pixel grid of an elevation raster, from ESA WorldCover.
 
     A pixel is water (1) when at least 5 of SAMPLES x SAMPLES = 9 evenly spaced points inside it
-    fall on WorldCover "permanent water bodies"; otherwise 0. Pass the result as `mask_path` to
+    fall on WorldCover "permanent water bodies", or when it is open sea: at least 5 of its points
+    fall where WorldCover has no data (WorldCover maps land and the water near it; beyond lies
+    the open sea) and its own elevation is at or below 0 m. Elevation models such as USGS 3DEP
+    store that sea as flat ground at 0 m, which would otherwise be analysed as land. The height
+    condition keeps any gap in WorldCover over dry land from being masked; heights are read only
+    where WorldCover has no data, so inland the mask costs no extra reading. Otherwise 0. Pass the result as `mask_path` to
     `analyze_tiled` so open water acts as a place water leaves instead of as terrain.
 
     out_path ending in `.tif`: one GeoTIFF, written under a temporary name and renamed when
@@ -280,7 +294,15 @@ def build_water_mask(dem_path, out_path, *, source=None, cache_dir=None, tile=40
                     s = min(r + 1024, r1)
                     samples = (_sample_geographic(wc, dem.transform, r, s, c0, c1) if warped is None
                                else _sample_warped(warped, r, s, c0, c1))
-                    strips.append(_water(samples))
+                    outside = _majority(samples, 0)
+                    sea = None
+                    if outside.any():                    # open sea: off WorldCover, at or below 0 m
+                        heights = dem.read(1, window=Window(c0, r, c1 - c0, s - r)).astype("float64")
+                        valid = np.isfinite(heights)
+                        if dem.nodata is not None:
+                            valid &= heights != dem.nodata
+                        sea = outside & valid & (heights <= 0)
+                    strips.append(_water(samples, sea))
                 return np.vstack(strips)
 
             if out.suffix.lower() == ".tif":

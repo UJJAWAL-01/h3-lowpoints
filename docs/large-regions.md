@@ -212,6 +212,15 @@ soon as it is finished, so the run never has to be done in one go:
   North Dakota prairie potholes, the Central Valley of California) needed 1.3 to 2.6 bytes of
   disk per valid pixel at peak, half what they needed uncompressed, and took 1.5 to 1.9 times as
   long as without those options.
+- **Memory at the end.** Joining the pieces of every tile is done column by column on plain arrays,
+  flats that cross tile borders are settled without lists of neighbour pairs, and `verify` and
+  `clip` read the depression table in pieces. Rehearsed on the saved tiles of a national run with
+  catchments and details (12.3 million depression pieces, 52 million flat pixels across tile
+  borders): the final assembly took 61 minutes with a peak of 7.2 GB; `verify` 10 minutes, 8.8 GB;
+  clipping to the lower 48 states 7 minutes, 6.3 GB. The border solve (about 12 GB for the lower 48)
+  stays the run's highest point.
+- **A run's mask is fingerprinted.** The saved settings record the mask's content (size and time
+  of its files), so a mask rebuilt in place cannot continue a run started with another.
 
 Why not simply cut the country into regions analyzed separately? Each region's edge would act as
 an outlet, draining water across lines that do not exist, and depressions crossing those lines

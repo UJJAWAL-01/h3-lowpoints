@@ -251,3 +251,31 @@ def test_a_finished_run_still_measures_coverage_when_rolled_up(raster, tmp_path)
     pd.testing.assert_frame_equal(a.sort_values("h3").reset_index(drop=True),
                                   b.sort_values("h3").reset_index(drop=True), check_dtype=False)
     assert (a["coverage"] < 1).any()
+
+
+def test_a_mask_rebuilt_in_place_cannot_continue_a_run(tmp_path, monkeypatch):
+    """The run's settings fingerprint the mask's content, not only its path: a mask rebuilt
+    under the same name (as after the open-sea fix of October 2026) is refused, never mixed."""
+    import os
+    import time
+
+    import rasterio
+
+    raster = dem(tmp_path / "d.tif", seed=5)
+    mask = tmp_path / "mask.tif"
+    with rasterio.open(raster) as src:
+        profile = {**src.profile, "dtype": "uint8", "nodata": None}
+        arr = np.zeros((src.height, src.width), dtype="uint8")
+    with rasterio.open(mask, "w", **profile) as dst:
+        dst.write(arr, 1)
+    fail_on_call(monkeypatch, "_pass2_tile", 3)
+    with pytest.raises(RuntimeError):
+        analyze_tiled(raster, out_dir=tmp_path / "run", mask_path=str(mask), **KW)
+    monkeypatch.undo()
+    arr[50:60, 50:60] = 1                                     # rebuilt: same path, new content
+    with rasterio.open(mask, "w", **profile) as dst:
+        dst.write(arr, 1)
+    later = time.time() + 5
+    os.utime(mask, (later, later))
+    with pytest.raises(ValueError, match="mask_id"):
+        analyze_tiled(raster, out_dir=tmp_path / "run", mask_path=str(mask), **KW)

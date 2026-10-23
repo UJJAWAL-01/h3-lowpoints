@@ -203,3 +203,41 @@ def test_a_mask_build_split_by_its_time_limit_gives_the_same_mask(tmp_path, monk
 def test_the_output_must_be_a_tif_or_a_vrt(tmp_path):
     with pytest.raises(ValueError, match=r"\.tif .*\.vrt"):
         landcover.build_water_mask(tmp_path / "dem.tif", tmp_path / "mask.png")
+
+
+def test_open_sea_beyond_worldcover_is_water_but_dry_land_there_is_not(tmp_path):
+    """USGS 3DEP stores the sea beyond WorldCover's coverage as flat ground at 0 m (found by the
+    national run of 22-23 October 2026). Off WorldCover, a pixel at or below 0 m is open sea;
+    one above 0 m (a gap over dry land) is not; nodata is not."""
+    wc = blobs((400, 300), 3)                          # covers only the west of the DEM
+    wc_west, wc_north = -98.0 + 10 * WPX, 31.0 - 7 * WPX
+    fake_worldcover(tmp_path, 30, -99, wc_west, wc_north, wc)
+    dem_tr = from_origin(-98.0 + 5 * PX1 + EPS, 31.0 - 5 * PX1 - EPS, PX1, PX1)
+    shape = (100, 130)
+    heights = np.full(shape, 0.0)                      # the sea, at exactly 0 m
+    heights[:, 110:] = 3.0                             # dry land with no WorldCover data
+    heights[60:80, 90:100] = -0.5                      # a strip of sea below 0 m
+    heights[85:95, 95:105] = -9999.0                   # nodata
+    dem = write(tmp_path / "dem.tif", heights, "EPSG:4269", dem_tr, -9999.0)
+    got_path = landcover.build_water_mask(dem, tmp_path / "water.tif", source=tmp_path, tile=37)
+    with rasterio.open(got_path) as m:
+        got = m.read(1)
+    want = oracle(dem_tr, shape, wc_west, wc_north, wc)
+    k = (np.arange(3) + 0.5) / 3
+    for r in range(shape[0]):                          # off WorldCover: 5 or more of 9 points
+        for c in range(shape[1]):
+            xs = dem_tr.c + (c + k) * dem_tr.a
+            ys = dem_tr.f + (r + k) * dem_tr.e
+            cols = np.floor((xs - wc_west) / WPX).astype(int)
+            rows = np.floor((wc_north - ys) / WPX).astype(int)
+            outside = sum(not (0 <= rr < wc.shape[0] and 0 <= cc < wc.shape[1])
+                          for rr in rows for cc in cols)
+            if outside >= 5 and heights[r, c] != -9999.0 and heights[r, c] <= 0:
+                want[r, c] = 1
+    np.testing.assert_array_equal(got, want)
+    off = np.zeros(shape, dtype=bool)
+    off[:, 105:] = True                                # well beyond WorldCover's east edge
+    assert got[off & (heights == 0.0)].all()           # the sea is masked
+    assert not got[off & (heights == 3.0)].any()       # dry land never is
+    assert not got[85:95, 95:105].any()                # nor is nodata
+    assert got[60:80, 95:100].all()                    # sea below 0 m is

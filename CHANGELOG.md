@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- **The water mask also masks the open sea**: pixels where ESA WorldCover has no data and the
+  elevation is at or below 0 m. USGS 3DEP stores the sea beyond WorldCover's coverage as flat
+  ground at 0 m; it was analysed as land, which the national routing could not settle (302 million
+  flat sea pixels across tile borders). Results made before analysed that strip of sea as land.
+- Memory of national runs with catchments and details, rehearsed at full size: the final assembly
+  joins tile pieces column by column (peak 7.2 GB, down from more than 17 GB), flats across tile
+  borders are settled without neighbour-pair lists, and `verify` and `clip` read the depression
+  table in pieces (8.8 GB and 6.3 GB, down from 11.3 GB and 13.3 GB).
+- A disk-backed run's saved settings fingerprint its mask's content, so a mask rebuilt in place
+  cannot continue a run started with another.
 - Disk-backed runs compress their saved tiles and temporary per-cell files: on 1° test boxes with
   catchments and details, the disk needed at peak fell by half.
 

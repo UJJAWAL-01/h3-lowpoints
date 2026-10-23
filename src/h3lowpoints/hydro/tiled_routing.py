@@ -317,26 +317,119 @@ def collapse(order, cand, spill_t, spill_i):
 
 
 @njit(cache=True)
-def _bfs_steps(n, indptr, indices, is_exit):
-    """Breadth-first steps from the exits over an undirected graph (CSR); -1 if unreachable."""
-    steps = np.full(n, -1, np.int64)
-    queue = np.empty(n, np.int64)
+def _find(keys, target):
+    """Index of `target` in the sorted array `keys`, or -1."""
+    j = np.searchsorted(keys, target)
+    if j < len(keys) and keys[j] == target:
+        return j
+    return -1
+
+
+@njit(cache=True)
+def _flat_exits(keys, z, is_exit, width, height):
+    """Rule 4 over the pixels with sorted `keys`: for each, the index of the exit its water
+    reaches (itself for an exit), or -1 for a flat pixel with no way off.
+
+    Neighbours are found by binary search in `keys`, so no list of neighbour pairs is built:
+    memory is a few arrays the size of the input (52 million pixels nationally).
+    """
+    n = len(keys)
+    steps = np.full(n, -1, np.int32)
+    queue = np.empty(n, np.int32)
     head = tail = 0
     for i in range(n):
         if is_exit[i]:
             steps[i] = 0
             queue[tail] = i
             tail += 1
-    while head < tail:
+    while head < tail:                              # breadth-first steps from the exits
         i = queue[head]
         head += 1
-        for k in range(indptr[i], indptr[i + 1]):
-            j = indices[k]
-            if steps[j] < 0 and not is_exit[j]:
+        r, c = keys[i] // width, keys[i] % width
+        for k in range(8):
+            rr, cc = r + _DR[k], c + _DC[k]
+            if rr < 0 or rr >= height or cc < 0 or cc >= width:
+                continue
+            j = _find(keys, rr * width + cc)
+            if j >= 0 and steps[j] < 0 and not is_exit[j] and z[j] == z[i]:
                 steps[j] = steps[i] + 1
                 queue[tail] = j
                 tail += 1
-    return steps
+    rcv = np.full(n, -1, np.int32)                  # one step nearer, first in the fixed order
+    for i in range(n):
+        if is_exit[i] or steps[i] < 0:
+            continue
+        r, c = keys[i] // width, keys[i] % width
+        for k in range(8):
+            rr, cc = r + _DR[k], c + _DC[k]
+            if rr < 0 or rr >= height or cc < 0 or cc >= width:
+                continue
+            j = _find(keys, rr * width + cc)
+            if j >= 0 and z[j] == z[i] and steps[j] == steps[i] - 1:
+                rcv[i] = j
+                break
+    exit_of = np.full(n, -1, np.int32)               # follow each pixel to its exit
+    for i in range(n):
+        if is_exit[i]:
+            exit_of[i] = i
+    path = queue                                    # reused: the search is done
+    for i in range(n):
+        if exit_of[i] >= 0 or steps[i] < 0:
+            continue
+        m, j = 0, i
+        while exit_of[j] < 0:
+            path[m] = j
+            m += 1
+            j = rcv[j]
+        for q in range(m):
+            exit_of[path[q]] = exit_of[j]
+    return exit_of
+
+
+def settle_flats(keys, z, is_exit, codes, width, height):
+    """Rule 4 over the flats that cross tile borders, all tiles at once.
+
+    keys, z, is_exit, codes: every pixel of those flats (codes: the end of each exit inside its
+    tile). Returns the sorted keys of the flat pixels (not exits) and, for each, the end its
+    water finally reaches beyond every flat: never itself a flat end, because a chain of flats
+    always goes down (an exit's own path leads to lower ground).
+    """
+    order = np.argsort(keys)
+    keys = keys[order]
+    z, is_exit, codes = z[order], is_exit[order], codes[order]
+    del order
+    exit_of = _flat_exits(keys, z, is_exit, width, height)
+    flat = ~is_exit
+    if (exit_of[flat] < 0).any():
+        raise RuntimeError("a flat crossing tile borders has no way off: the fill is inconsistent")
+    flat_keys, flat_codes = keys[flat], codes[exit_of[flat]]
+    del keys, z, is_exit, codes, exit_of
+    for _ in range(64):                             # an exit may lead onto a lower flat
+        kind, ident = decode(flat_codes)
+        onto = np.flatnonzero(kind == E_FLAT)
+        if len(onto) == 0:
+            return flat_keys, flat_codes
+        pos = np.searchsorted(flat_keys, ident[onto])
+        flat_codes[onto] = flat_codes[pos]
+    raise RuntimeError("flats lead onto flats without end: the fill is inconsistent")
+
+
+class FlatEnds:
+    """Codes with flat ends replaced by where the flat's water finally goes."""
+
+    def __init__(self, flat_keys, flat_codes):
+        self.keys, self.codes = flat_keys, flat_codes
+
+    def __call__(self, codes):
+        codes = np.array(codes, dtype=np.int64)
+        kind, ident = decode(codes)
+        onto = np.flatnonzero(kind == E_FLAT)
+        if len(onto):
+            pos = np.minimum(np.searchsorted(self.keys, ident[onto]), max(len(self.keys) - 1, 0))
+            if len(self.keys) == 0 or not (self.keys[pos] == ident[onto]).all():
+                raise RuntimeError("a flat end was never settled")
+            codes[onto] = self.codes[pos]
+        return codes
 
 
 def _pairs(keys, width, height):
@@ -344,42 +437,6 @@ def _pairs(keys, width, height):
     from .tiled import neighbour_pairs
 
     return neighbour_pairs(keys, width, height)
-
-
-def settle_flats(keys, z, is_exit, codes, width, height):
-    """Rule 4 over flats that cross tile borders.
-
-    keys, z, is_exit, codes: every pixel of those flats (from all tiles; codes are the ends of
-    the exits). Returns, for each flat pixel (not an exit), the code its water passes to: the
-    end of the exit it steps onto, or the flat end of the next flat pixel.
-    """
-    order = np.argsort(keys)
-    keys, z, is_exit, codes = keys[order], z[order], is_exit[order], codes[order]
-    n = len(keys)
-    i, j = _pairs(keys, width, height)
-    same = z[i] == z[j]
-    i, j = i[same], j[same]
-    u, v = np.r_[i, j], np.r_[j, i]
-    srt = np.argsort(u, kind="stable")
-    indptr = np.zeros(n + 1, dtype=np.int64)
-    np.cumsum(np.bincount(u, minlength=n), out=indptr[1:])
-    steps = _bfs_steps(n, indptr, v[srt].astype(np.int64), is_exit)
-    flat = ~is_exit
-    if (steps[flat] < 0).any():
-        raise RuntimeError("a flat crossing tile borders has no way off: the fill is inconsistent")
-    nxt = np.full(n, -1, dtype=np.int64)
-    rows, cols = keys // width, keys % width
-    for k in range(8):                              # the first neighbour, in the fixed order
-        rr, cc = rows + _DR[k], cols + _DC[k]
-        ok = flat & (nxt < 0) & (rr >= 0) & (rr < height) & (cc >= 0) & (cc < width)
-        target = rr * width + cc
-        pos = np.minimum(np.searchsorted(keys, target), n - 1)
-        hit = ok & (keys[pos] == target) & (z[pos] == z) & (steps[pos] == steps - 1)
-        nxt[hit] = pos[hit]
-    out_keys = keys[flat]
-    to = nxt[flat]
-    to_code = np.where(is_exit[to], codes[to], encode(E_FLAT, keys[to]))
-    return out_keys, to_code
 
 
 def join_surfaces(keys, fp_id, level, n_fp, width, height):

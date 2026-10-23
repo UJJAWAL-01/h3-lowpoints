@@ -21,7 +21,7 @@ import h3
 import numpy as np
 
 from .store import (CHUNK_ROWS, TableWriter, check_format, ids_to_int, iter_table, read_meta,
-                    read_table, remove_other_formats, table_path, write_meta)
+                    remove_other_formats, table_path, write_meta)
 
 
 def load_boundary(boundary):
@@ -85,20 +85,31 @@ def clip_result(folder, boundary, out_dir, *, format=None, name=None, rows=CHUNK
         n_kept_cells = w.rows
     kept_ids = np.sort(np.concatenate(kept_ids)) if kept_ids else np.zeros(0, dtype=np.uint64)
 
-    deps = read_table(folder, "depressions")
-    low = ids_to_int(list(deps["h3_lowpoint"]))
-    at = np.minimum(np.searchsorted(kept_ids, low), max(len(kept_ids) - 1, 0))
-    keep = (kept_ids[at] == low) if len(kept_ids) else np.zeros(len(deps), dtype=bool)
-    kept_deps = deps[keep].reset_index(drop=True)
+    # depressions, a piece at a time: only the ids of those kept are held to the end
+    n_before = n_kept = n_edge = 0
+    has_edge, wanted = False, []
     with TableWriter(out / f"depressions.{fmt}", fmt) as w:
-        for start in range(0, len(kept_deps), CHUNK_ROWS):
-            w.write(kept_deps.iloc[start:start + CHUNK_ROWS])
-        w.close(empty=deps.iloc[:0])
+        empty = None
+        for deps in iter_table(folder, "depressions", rows=rows):
+            empty = deps.iloc[:0]
+            n_before += len(deps)
+            low = ids_to_int(list(deps["h3_lowpoint"]))
+            at = np.minimum(np.searchsorted(kept_ids, low), max(len(kept_ids) - 1, 0))
+            keep = (kept_ids[at] == low) if len(kept_ids) else np.zeros(len(deps), dtype=bool)
+            kept_deps = deps[keep].reset_index(drop=True)
+            if len(kept_deps):
+                w.write(kept_deps)
+                wanted.append(kept_deps["id"].to_numpy())
+            n_kept += len(kept_deps)
+            if "edge" in kept_deps:
+                has_edge = True
+                n_edge += int(kept_deps["edge"].sum())
+        w.close(empty=empty)
+    wanted = np.sort(np.concatenate(wanted)) if wanted else np.zeros(0, dtype=np.int64)
     for table in ("catchments", "depression_cells"):
         if not table_path(folder, table):
             continue
         # a kept depression keeps its whole catchment and all its cells, also beyond the boundary
-        wanted = np.sort(kept_deps["id"].to_numpy())
         with TableWriter(out / f"{table}.{fmt}", fmt) as w:
             empty = None
             for chunk in iter_table(folder, table, rows=rows):
@@ -114,9 +125,9 @@ def clip_result(folder, boundary, out_dir, *, format=None, name=None, rows=CHUNK
     meta["clip"] = {
         "boundary": name or (Path(boundary).name if not hasattr(boundary, "geom_type") else "geometry"),
         "rule": "cells whose centre is inside; depressions whose lowest point's cell is kept",
-        "depressions_before": len(deps), "cells_before": n_cells}
-    meta["n_depressions"] = len(kept_deps)
-    meta["n_edge"] = int(kept_deps["edge"].sum()) if "edge" in kept_deps else meta.get("n_edge")
+        "depressions_before": n_before, "cells_before": n_cells}
+    meta["n_depressions"] = n_kept
+    meta["n_edge"] = n_edge if has_edge else meta.get("n_edge")
     meta["output"] = {"format": fmt, "n_cells": n_kept_cells}
     write_meta(out, meta)
     return out

@@ -21,8 +21,7 @@ import rasterio
 from rasterio.windows import Window
 
 from .resolution import FINEST_H3
-from .store import (CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta, read_table,
-                    table_path)
+from .store import CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta, table_path
 
 REL = 1e-6        # relative tolerance for sums compared across tables (float summation order)
 
@@ -33,164 +32,252 @@ def _close(a, b, rel=REL):
 
 def check_tables(depressions, cells, meta, catchments=None, depression_cells=None):
     """Problems found in a result given as its tables (empty list = all invariants hold)."""
-    return _check(depressions, [cells], meta, None if catchments is None else [catchments],
+    return _check([depressions], [cells], meta, None if catchments is None else [catchments],
                   None if depression_cells is None else [depression_cells])
 
 
-def _check_details(d, chunks):
-    """Level, shape and fill-curve invariants (results computed with details=True)."""
-    from .hydro.details import AREA_DOWN, FILL_LEVELS, VOLUME_DOWN
+class _Depressions:
+    """What the checks need from the depression table, gathered one piece at a time.
 
-    problems = []
-    add = problems.append
-    cols = ["ground_m", "water_level_m", "length_m", "width_m", "orientation_deg"] + AREA_DOWN + VOLUME_DOWN
-    if not np.isfinite(d[cols].to_numpy(dtype=float)).all():
-        add("level, shape or fill-curve columns hold NaN or infinite values")
-    rise = (d["water_level_m"] - d["ground_m"]).to_numpy(dtype=float)
-    if not np.allclose(rise, d["max_depth_m"].to_numpy(dtype=float), rtol=1e-9, atol=1e-6):
-        add("water_level_m - ground_m is not max_depth_m")
-    if ((d["width_m"] <= 0) | (d["width_m"] > d["length_m"] * (1 + REL))).any():
-        add("a width is not positive or exceeds its length")
-    if not d["orientation_deg"].between(0, 180, inclusive="left").all():
-        add("an orientation lies outside [0, 180)")
-    area = np.c_[d["area_m2"].to_numpy(dtype=float), d[AREA_DOWN].to_numpy(dtype=float)]
-    volume = np.c_[d["volume_m3"].to_numpy(dtype=float), d[VOLUME_DOWN].to_numpy(dtype=float)]
-    if (area < 0).any() or (np.diff(area, axis=1) > REL * area[:, :1]).any():
-        add("the flooded area grows as the water drops")
-    if (volume < 0).any() or (np.diff(volume, axis=1) > REL * volume[:, :1] + 1e-9).any():
-        add("the volume grows as the water drops")
-    for (t, _), a_name, v_name in zip(FILL_LEVELS, AREA_DOWN, VOLUME_DOWN):
-        room = np.maximum(d["max_depth_m"].to_numpy(dtype=float) - t, 0.0)
-        if (d[v_name].to_numpy(dtype=float) > room * d[a_name].to_numpy(dtype=float) * (1 + REL) + 1e-9).any():
-            add(f"{v_name} is larger than the depth left times the area")
-            break
-    if chunks is None:
-        return problems
-    ids = d["id"].to_numpy()
+    Every check on single rows runs on each piece; only what the checks across rows and tables
+    need is kept (ids, totals, the lowest points' cells, and per depression the values the other
+    tables must add up to), so the whole table never has to be held at once.
+    """
+
+    def __init__(self, meta):
+        params = meta.get("params") or {}
+        self.res, self.min_depth = params.get("res"), params.get("min_depth", 0.0)
+        self.flags, self.counts, self.parts = set(), {}, {}
+        self.n, self.area, self.volume, self.deepest = 0, 0.0, 0.0, -np.inf
+        self.routing = self.details = False
+
+    def _keep(self, name, values):
+        self.parts.setdefault(name, []).append(np.asarray(values))
+
+    def _count(self, name, k):
+        self.counts[name] = self.counts.get(name, 0) + int(k)
+
+    def add(self, d):
+        if len(d) == 0:
+            return
+        from .hydro.details import AREA_DOWN, FILL_LEVELS, VOLUME_DOWN
+
+        flag = self.flags.add
+        self.n += len(d)
+        self._keep("id", d["id"].to_numpy())
+        depth = d["max_depth_m"].to_numpy(dtype=float)
+        area = d["area_m2"].to_numpy(dtype=float)
+        volume = d["volume_m3"].to_numpy(dtype=float)
+        self.area += float(area.sum())
+        self.volume += float(volume.sum())
+        self.deepest = max(self.deepest, float(depth.max()))
+        if not np.isfinite(d[["max_depth_m", "area_m2", "volume_m3", "lat", "lon"]].to_numpy(dtype=float)).all():
+            flag("nonfinite")
+        self._count("shallow", (depth < self.min_depth - 1e-9).sum())
+        if (area <= 0).any():
+            flag("area")
+        if (volume < 0).any() or (volume > depth * area * (1 + REL)).any():
+            flag("volume")
+        if "deeper_than_wide" in d and (d["deeper_than_wide"].to_numpy(dtype=bool) != (depth > np.sqrt(area))).any():
+            flag("deeper_than_wide")
+        if not d["lat"].between(-90, 90).all() or not d["lon"].between(-180, 180).all():
+            flag("latlon")
+        low = d["h3_lowpoint"].tolist()
+        valid = np.array([_valid(x) for x in low], dtype=bool)
+        if self.res is not None:
+            self._count("low_res", sum(1 for x, ok in zip(low, valid)
+                                       if not ok or h3.get_resolution(x) != self.res))
+        self._keep("low", ids_to_int([x for x, ok in zip(low, valid) if ok]))
+        if "h3_lowpoint_15" in d:
+            self._count("low15", sum(cell != h3.latlng_to_cell(la, lo, FINEST_H3) for cell, la, lo
+                                     in zip(d["h3_lowpoint_15"], d["lat"], d["lon"])))
+        if "catchment_area_m2" in d:                  # catchments=True
+            self.routing = True
+            catch = d["catchment_area_m2"].to_numpy(dtype=float)
+            if not np.isfinite(d[["catchment_area_m2", "spill_lat", "spill_lon"]].to_numpy(dtype=float)).all():
+                flag("routing nonfinite")
+            if (catch < area * (1 - REL)).any():
+                flag("catchment small")
+            if not d["spill_lat"].between(-90, 90).all() or not d["spill_lon"].between(-180, 180).all():
+                flag("spill latlon")
+            to = d["spill_to"].to_numpy()
+            if (to == d["id"].to_numpy()).any():
+                flag("self spill")
+            self._keep("spill_to", to)
+            self._keep("catchment_area_m2", catch)
+        if "water_level_m" in d:                      # details=True
+            self.details = True
+            cols = ["ground_m", "water_level_m", "length_m", "width_m", "orientation_deg"] + AREA_DOWN + VOLUME_DOWN
+            if not np.isfinite(d[cols].to_numpy(dtype=float)).all():
+                flag("details nonfinite")
+            rise = (d["water_level_m"] - d["ground_m"]).to_numpy(dtype=float)
+            if not np.allclose(rise, depth, rtol=1e-9, atol=1e-6):
+                flag("rise")
+            if ((d["width_m"] <= 0) | (d["width_m"] > d["length_m"] * (1 + REL))).any():
+                flag("width")
+            if not d["orientation_deg"].between(0, 180, inclusive="left").all():
+                flag("orientation")
+            curve_a = np.c_[area, d[AREA_DOWN].to_numpy(dtype=float)]
+            curve_v = np.c_[volume, d[VOLUME_DOWN].to_numpy(dtype=float)]
+            if (curve_a < 0).any() or (np.diff(curve_a, axis=1) > REL * curve_a[:, :1]).any():
+                flag("area curve")
+            if (curve_v < 0).any() or (np.diff(curve_v, axis=1) > REL * curve_v[:, :1] + 1e-9).any():
+                flag("volume curve")
+            for (t, _), a_name, v_name in zip(FILL_LEVELS, AREA_DOWN, VOLUME_DOWN):
+                room = np.maximum(depth - t, 0.0)
+                if (d[v_name].to_numpy(dtype=float) > room * d[a_name].to_numpy(dtype=float) * (1 + REL) + 1e-9).any():
+                    flag(f"room {v_name}")
+            for name in ["area_m2", "volume_m3", "max_depth_m"] + AREA_DOWN:
+                self._keep(f"d_{name}", d[name].to_numpy(dtype=float))
+
+    def array(self, name, dtype=np.float64):
+        parts = self.parts.pop(name, [])
+        return np.concatenate(parts) if parts else np.zeros(0, dtype=dtype)
+
+    def problems(self, meta):
+        out = []
+        add = out.append
+        if self.counts.get("shallow"):
+            add(f"{self.counts['shallow']} depressions are shallower than min_depth")
+        for key, message in (("nonfinite", "depressions hold NaN or infinite values"),
+                             ("area", "depressions with zero or negative area"),
+                             ("volume", "a volume is negative or larger than its deepest depth times its area"),
+                             ("deeper_than_wide", "deeper_than_wide does not match the depths and areas"),
+                             ("latlon", "a lowest point lies outside valid latitude/longitude")):
+            if key in self.flags:
+                add(message)
+        if self.counts.get("low_res"):
+            add(f"{self.counts['low_res']} h3_lowpoint ids are not at the table's resolution {self.res}")
+        if self.counts.get("low15"):
+            add(f"{self.counts['low15']} h3_lowpoint_15 ids do not contain their lowest point")
+        return out
+
+
+def _by_id(ids, chunks, columns, maximum=None):
+    """Per depression (in the order of `ids`): sums of `columns` over a side table's rows, the
+    largest value of `maximum`, and whether any row named an unknown depression."""
     order = np.argsort(ids)
-    sums = {c: np.zeros(len(ids)) for c in ["area_m2", "volume_m3"] + AREA_DOWN}
-    deepest = np.zeros(len(ids))
-    stray = False
+    sums = {c: np.zeros(len(ids)) for c in columns}
+    top = np.zeros(len(ids)) if maximum else None
+    stray, bad_cells = False, False
     for c in chunks:
         if len(c) == 0:
             continue
-        at = np.minimum(np.searchsorted(ids[order], c["id"].to_numpy()), len(ids) - 1)
+        if not all(_valid(x) for x in c["h3"]):
+            bad_cells = True
+        at = np.minimum(np.searchsorted(ids[order], c["id"].to_numpy()), max(len(ids) - 1, 0))
         hit = ids[order][at] == c["id"].to_numpy()
         stray |= not hit.all()
-        for name in sums:
+        for name in columns:
             np.add.at(sums[name], order[at[hit]], c[name].to_numpy(dtype=float)[hit])
-        np.maximum.at(deepest, order[at[hit]], c["max_depth_m"].to_numpy(dtype=float)[hit])
-    if stray:
-        add("the depression_cells table names depressions that are not in the depression table")
-    for name, total in sums.items():
-        if not np.allclose(total, d[name].to_numpy(dtype=float), rtol=REL, atol=1e-6):
-            add(f"the depression_cells table does not add up to {name}")
-    if not np.allclose(deepest, d["max_depth_m"].to_numpy(dtype=float), rtol=REL, atol=1e-9):
-        add("the deepest depression_cells row is not the depression's max_depth_m")
-    return problems
+        if maximum:
+            np.maximum.at(top, order[at[hit]], c[maximum].to_numpy(dtype=float)[hit])
+    return sums, top, stray, bad_cells
 
 
-def _check_routing(d, catchment_chunks, meta):
+def _check_routing(s, ids, catchment_chunks, meta):
     """Catchment and spill invariants (results computed with catchments=True)."""
     problems = []
     add = problems.append
-    clipped = bool(meta.get("clip"))
-    ids = d["id"].to_numpy()
-    catch = d["catchment_area_m2"].to_numpy(dtype=float)
-    if not np.isfinite(d[["catchment_area_m2", "spill_lat", "spill_lon"]].to_numpy(dtype=float)).all():
-        add("catchment or spill columns hold NaN or infinite values")
-    if (catch < d["area_m2"].to_numpy(dtype=float) * (1 - REL)).any():
-        add("a catchment is smaller than its own depression")
-    if not d["spill_lat"].between(-90, 90).all() or not d["spill_lon"].between(-180, 180).all():
-        add("a spill point lies outside valid latitude/longitude")
-    to = d["spill_to"].to_numpy()
-    if (to == ids).any():
-        add("a depression spills into itself")
+    for key, message in (("routing nonfinite", "catchment or spill columns hold NaN or infinite values"),
+                         ("catchment small", "a catchment is smaller than its own depression"),
+                         ("spill latlon", "a spill point lies outside valid latitude/longitude"),
+                         ("self spill", "a depression spills into itself")):
+        if key in s.flags:
+            add(message)
+    to = s.array("spill_to", np.int64)
+    catch = s.array("catchment_area_m2")
     order = np.argsort(ids)
     pos = np.minimum(np.searchsorted(ids[order], to), len(ids) - 1)
     known = (ids[order][pos] == to) & (to != 0)
-    if not clipped and ((to != 0) & ~known).any():
+    if not meta.get("clip") and ((to != 0) & ~known).any():
         add("spill_to names depressions that are not in the table")
     # following spill_to must end (at 0, or outside a clipped table) without going round in a loop
     nxt = np.where(known, order[pos], -1)
+    del to, pos, known
     for _ in range(64):                          # pointer doubling: chains of 2**64 steps end
         nxt = np.where(nxt >= 0, nxt[np.maximum(nxt, 0)], -1)
     if (nxt >= 0).any():
         add("following spill_to goes round in a loop")
+    del nxt
     if catchment_chunks is None:
         return problems
-    sums = np.zeros(len(ids))
-    stray = False
-    for c in catchment_chunks:
-        if len(c) == 0:
-            continue
-        if not all(_valid(x) for x in c["h3"]):
-            add("the catchment table holds ids that are not valid H3 cells")
-        at = np.minimum(np.searchsorted(ids[order], c["id"].to_numpy()), len(ids) - 1)
-        hit = ids[order][at] == c["id"].to_numpy()
-        stray |= not hit.all()
-        np.add.at(sums, order[at[hit]], c["area_m2"].to_numpy(dtype=float)[hit])
+    sums, _, stray, bad_cells = _by_id(ids, catchment_chunks, ["area_m2"])
+    if bad_cells:
+        add("the catchment table holds ids that are not valid H3 cells")
     if stray:
         add("the catchment table names depressions that are not in the depression table")
-    if not np.allclose(sums, catch, rtol=REL, atol=1e-6):
+    if not np.allclose(sums["area_m2"], catch, rtol=REL, atol=1e-6):
         add("the catchment table does not add up to catchment_area_m2")
     return problems
 
 
-def _check(d, cell_chunks, meta, catchment_chunks=None, detail_chunks=None):
-    """The checks, with the cell table given as any number of pieces (read one at a time)."""
-    problems = []
-    res = (meta.get("params") or {}).get("res")
-    min_depth = (meta.get("params") or {}).get("min_depth", 0.0)
-    add = problems.append
+def _check_details(s, ids, chunks):
+    """Level, shape and fill-curve invariants (results computed with details=True)."""
+    from .hydro.details import AREA_DOWN, VOLUME_DOWN
 
-    if meta.get("n_depressions") is not None and meta["n_depressions"] != len(d):
-        add(f"meta says {meta['n_depressions']} depressions, the table has {len(d)}")
-    if len(d) == 0:
+    problems = []
+    add = problems.append
+    for key, message in (("details nonfinite", "level, shape or fill-curve columns hold NaN or infinite values"),
+                         ("rise", "water_level_m - ground_m is not max_depth_m"),
+                         ("width", "a width is not positive or exceeds its length"),
+                         ("orientation", "an orientation lies outside [0, 180)"),
+                         ("area curve", "the flooded area grows as the water drops"),
+                         ("volume curve", "the volume grows as the water drops")):
+        if key in s.flags:
+            add(message)
+    for v_name in VOLUME_DOWN:
+        if f"room {v_name}" in s.flags:
+            add(f"{v_name} is larger than the depth left times the area")
+            break
+    own = {name: s.array(f"d_{name}") for name in ["area_m2", "volume_m3", "max_depth_m"] + AREA_DOWN}
+    if chunks is None:
+        return problems
+    sums, deepest, stray, _ = _by_id(ids, chunks, ["area_m2", "volume_m3"] + AREA_DOWN, "max_depth_m")
+    if stray:
+        add("the depression_cells table names depressions that are not in the depression table")
+    for name, total in sums.items():
+        if not np.allclose(total, own[name], rtol=REL, atol=1e-6):
+            add(f"the depression_cells table does not add up to {name}")
+    if not np.allclose(deepest, own["max_depth_m"], rtol=REL, atol=1e-9):
+        add("the deepest depression_cells row is not the depression's max_depth_m")
+    return problems
+
+
+def _check(dep_chunks, cell_chunks, meta, catchment_chunks=None, detail_chunks=None):
+    """The checks, with every table given as any number of pieces (read one at a time)."""
+    res = (meta.get("params") or {}).get("res")
+    s = _Depressions(meta)
+    for d in dep_chunks:
+        s.add(d)
+    problems = []
+    add = problems.append
+    if meta.get("n_depressions") is not None and meta["n_depressions"] != s.n:
+        add(f"meta says {meta['n_depressions']} depressions, the table has {s.n}")
+    if s.n == 0:
         n_cells = sum(len(c) for c in cell_chunks)
         if n_cells:
             add(f"no depressions but {n_cells} cells")
         return problems
 
     # --- depressions
-    if d["id"].duplicated().any():
+    ids = s.array("id", np.int64)
+    if len(np.unique(ids)) != len(ids):
         add("depression ids are not unique")
-    if "catchment_area_m2" in d:
-        problems += _check_routing(d, catchment_chunks, meta)
-    if "water_level_m" in d:
-        problems += _check_details(d, detail_chunks)
-    numbers = d[["max_depth_m", "area_m2", "volume_m3", "lat", "lon"]].to_numpy(dtype=float)
-    if not np.isfinite(numbers).all():
-        add("depressions hold NaN or infinite values")
-    if (d["max_depth_m"] < min_depth - 1e-9).any():
-        add(f"{int((d['max_depth_m'] < min_depth - 1e-9).sum())} depressions are shallower than min_depth")
-    if (d["area_m2"] <= 0).any():
-        add("depressions with zero or negative area")
-    if (d["volume_m3"] < 0).any() or (d["volume_m3"] > d["max_depth_m"] * d["area_m2"] * (1 + REL)).any():
-        add("a volume is negative or larger than its deepest depth times its area")
-    if "deeper_than_wide" in d:
-        want = d["max_depth_m"].to_numpy(dtype=float) > np.sqrt(d["area_m2"].to_numpy(dtype=float))
-        if (d["deeper_than_wide"].to_numpy(dtype=bool) != want).any():
-            add("deeper_than_wide does not match the depths and areas")
-    if not d["lat"].between(-90, 90).all() or not d["lon"].between(-180, 180).all():
-        add("a lowest point lies outside valid latitude/longitude")
-    if res is not None:
-        wrong = [x for x in d["h3_lowpoint"] if not _valid(x) or h3.get_resolution(x) != res]
-        if wrong:
-            add(f"{len(wrong)} h3_lowpoint ids are not at the table's resolution {res}")
-    if "h3_lowpoint_15" in d:
-        mismatched = sum(cell != h3.latlng_to_cell(la, lo, FINEST_H3)
-                         for cell, la, lo in zip(d["h3_lowpoint_15"], d["lat"], d["lon"]))
-        if mismatched:
-            add(f"{mismatched} h3_lowpoint_15 ids do not contain their lowest point")
+    if s.routing:
+        problems += _check_routing(s, ids, catchment_chunks, meta)
+    if s.details:
+        problems += _check_details(s, ids, detail_chunks)
+    problems += s.problems(meta)
+    del ids
 
     # --- cells, one piece at a time; only their ids (8 bytes per cell) are kept to the end
-    valid_low = [x for x in d["h3_lowpoint"] if _valid(x)]
-    low_ids, low_counts = np.unique(ids_to_int(valid_low), return_counts=True)
+    low_ids, low_counts = np.unique(s.array("low", np.uint64), return_counts=True)
+    n_valid_low = int(low_counts.sum())
     ids, flags = [], set()
     area = volume = 0.0
     deepest, n_low, n_low_found, has_counts = -np.inf, 0, 0, False
-    max_dep = d["max_depth_m"].max()
+    max_dep = s.deepest
     for c in cell_chunks:
         if len(c) == 0:
             continue
@@ -241,19 +328,19 @@ def _check(d, cell_chunks, meta, catchment_chunks=None, detail_chunks=None):
     # a clipped result keeps, for depressions across the boundary, only their cells inside it, so
     # the two tables' totals no longer match; every other invariant still holds
     if not meta.get("clip"):
-        if not _close(area, d["area_m2"].sum()):
-            add(f"cell areas add to {area:.6g} m2, depressions to {d['area_m2'].sum():.6g}")
-        if not _close(volume, d["volume_m3"].sum()):
-            add(f"cell volumes add to {volume:.6g} m3, depressions to {d['volume_m3'].sum():.6g}")
+        if not _close(area, s.area):
+            add(f"cell areas add to {area:.6g} m2, depressions to {s.area:.6g}")
+        if not _close(volume, s.volume):
+            add(f"cell volumes add to {volume:.6g} m3, depressions to {s.volume:.6g}")
         if not _close(deepest, max_dep):
             add("the deepest cell and the deepest depression differ")
         if "too deep" in flags:
             add("a cell is deeper than every depression")
     if has_counts:
-        if n_low != len(d):
-            add(f"n_lowpoints adds to {n_low}, not {len(d)} depressions")
-        if n_low_found < len(valid_low):
-            add(f"{len(valid_low) - n_low_found} lowest points lie in cells missing from the cell table")
+        if n_low != s.n:
+            add(f"n_lowpoints adds to {n_low}, not {s.n} depressions")
+        if n_low_found < n_valid_low:
+            add(f"{n_valid_low - n_low_found} lowest points lie in cells missing from the cell table")
         elif "n_lowpoints" in flags:
             add("n_lowpoints does not match the lowest points in each cell")
     if "coverage range" in flags:
@@ -289,7 +376,7 @@ def check_saved(folder, rows=CHUNK_ROWS):
         return [f"{folder} is missing {', '.join(missing)}"]
     optional = [iter_table(folder, name, rows=rows) if table_path(folder, name) else None
                 for name in ("catchments", "depression_cells")]
-    return _check(read_table(folder, "depressions"), iter_table(folder, "cells", rows=rows),
+    return _check(iter_table(folder, "depressions", rows=rows), iter_table(folder, "cells", rows=rows),
                   read_meta(folder), *optional)
 
 

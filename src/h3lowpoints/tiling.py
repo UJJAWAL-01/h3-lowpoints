@@ -31,8 +31,8 @@ from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
 from .hydro.routing import _distances, pixel_spacing_m
-from .hydro.tiled_routing import (E_FLAT, E_FP, E_HALO, E_KEPT, E_NONE, E_OUT, E_SINK, OUT_CODE,
-                                  Ends, collapse, decode, encode, join_surfaces,
+from .hydro.tiled_routing import (E_FP, E_HALO, E_KEPT, E_NONE, E_OUT, E_SINK, OUT_CODE, Ends,
+                                  FlatEnds, collapse, decode, encode, join_surfaces,
                                   settle_flats, tile_route)
 from .hydro.details import AREA_DOWN, MOMENTS, VOLUME_DOWN, fill_sums, merge_moments, moments, shape
 from .pipeline import (CATCHMENT_TABLE, CELL_TABLE, DEPRESSION_CELL_TABLE, Result, add_coverage,
@@ -314,9 +314,30 @@ def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radiu
         "drains": None if drains is None else hashlib.sha256(drains.tobytes()).hexdigest(),
         "buildings": None if buildings is None else len(buildings),
         "mask": None if mask_path is None else str(mask_path),
+        "mask_id": None if mask_path is None else _fingerprint(mask_path),
         "package_version": _package_version(), "catchments": bool(catchments),
         "details": bool(details),
         "checkpoint_format": 2}                     # 2: one outlet node per tile
+
+
+def _fingerprint(path):
+    """What identifies a mask's content cheaply: a .vrt's text plus the name, size and time of
+    every file in its `<name>_tiles` folder; any other file's size and time. A mask rebuilt in
+    the same place therefore never passes for the one a run was started with."""
+    import hashlib
+
+    path = Path(path)
+    h = hashlib.sha256()
+    stat = path.stat()
+    h.update(f"{stat.st_size}:{stat.st_mtime_ns}".encode())
+    if path.suffix.lower() == ".vrt":
+        h.update(path.read_bytes())
+        tiles = path.with_name(path.stem + "_tiles")
+        if tiles.is_dir():
+            for f in sorted(tiles.iterdir()):
+                st = f.stat()
+                h.update(f"{f.name}:{st.st_size}:{st.st_mtime_ns};".encode())
+    return h.hexdigest()
 
 
 def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
@@ -356,11 +377,11 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
     cparts = (CellParts(res, None if out_dir is None else out_dir / "_spill_catchments",
                         fields=("area",)) if catchments else None)
     try:
-        records, rings = [], []
+        records, rings = _Records(), []
         routing = _RoutingParts() if catchments else None
         for piece in pieces:                     # tile by tile, in order: identical ids every time
             _add_piece(piece, records, rings, parts, routing, cparts)
-        if not records:
+        if records.n == 0:
             out, lowpoints = None, np.zeros(0, dtype=np.uint64)
             comp, kept = np.zeros(0, dtype=np.int64), np.zeros(0, dtype=bool)
             dep_comp = np.zeros(0, dtype=np.int64)
@@ -369,12 +390,14 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
                 records, rings, width, height, transform, crs, res, min_depth, drains,
                 has_buildings, drain_core_frac, ctx["spacing"] if details else None)
         del records, rings
-        catchment_chunks = None
+        catchment_chunks = catch_area = None
         if catchments:
             out, ends, id_of_comp = _settle_routing(routing, out, comp, kept, dep_comp, width,
                                                     height, transform, crs)
             del routing
-            catchment_chunks = _catchment_chunks(cparts, ends, id_of_comp)
+            # catchment areas are summed from the very rows of the catchment table, as it is made
+            catch_area = np.zeros(1 if out is None else int(out["id"].max()) + 1)
+            catchment_chunks = _catchment_chunks(cparts, ends, id_of_comp, catch_area)
         meta.update({"n_depressions": 0 if out is None else len(out),
                      "n_edge": 0 if out is None else int(out["edge"].sum())})
         comp_ids = None
@@ -385,10 +408,16 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         cells = _cell_chunks(parts, comp, kept, lowpoints, footprint, id_of_comp=comp_ids)
         if out_dir is not None:
             result = _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs,
-                            footprint, catchment_chunks, details)
+                            footprint, catchment_chunks, details, catch_area)
             work.remove()                        # finished: the checkpoints are no longer needed
             footprint._opener = file_opener(dem_path, mask_path)   # their records went with them
             return result
+        catch = None
+        if catchments:
+            pieces_c = list(catchment_chunks)        # first: it sums the catchment areas
+            catch = pd.concat(pieces_c, ignore_index=True) if pieces_c else empty_catchments()
+            if out is not None:
+                out["catchment_area_m2"] = catch_area[out["id"].to_numpy()]
         deps = empty_depressions(columns) if out is None else _with_ids(out, lowpoints)[columns]
         chunks = list(cells)
         table = pd.concat([c for c, _ in chunks], ignore_index=True) if chunks else empty_cells()
@@ -397,10 +426,6 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
             parts_dc = [d for _, d in chunks if d is not None]
             dcells = (pd.concat(parts_dc, ignore_index=True) if parts_dc
                       else empty_depression_cells())
-        catch = None
-        if catchments:
-            pieces_c = list(catchment_chunks)
-            catch = pd.concat(pieces_c, ignore_index=True) if pieces_c else empty_catchments()
         return Result(deps, table, meta, transform=transform, crs=crs, footprint=footprint,
                       catchments=catch, depression_cells=dcells)
     finally:
@@ -675,15 +700,48 @@ def _add_piece(piece, records, rings, parts, routing=None, cparts=None):
     """Number a tile's pieces after those of the tiles before it and collect them."""
     if piece is None:
         return
-    offset = sum(len(r) for r in records) if records else 0
+    offset = records.n
     agg = piece["agg"]
     if agg is not None:
-        records.append(agg.assign(rec=np.arange(offset, offset + len(agg))))
+        records.add(agg)
         rings.append((piece["ring_keys"], piece["ring_rec"] + offset))
         rec, cell, depth, area, volume, *extra = piece["cells"]
         parts.add(rec + offset, cell, depth, area, volume, *extra)
     if routing is not None and "route" in piece:
         routing.add(piece["route"], offset, cparts)
+
+
+class _Records:
+    """The depression pieces of every tile, kept as one list of arrays per column, so joining
+    them never holds two copies of the whole table (12 million pieces nationally)."""
+
+    def __init__(self):
+        self.columns, self.n = None, 0
+
+    # values meaning "none" for columns a tile may lack: building pixels, the depth near a drain
+    _MISSING = {"bsum": 0.0, "near_max": -1.0}
+
+    def add(self, agg):
+        if self.columns is None:
+            self.columns = {c: [] for c in agg.columns}
+        for c in agg.columns:
+            if c not in self.columns:                  # first seen in this tile: earlier had none
+                self.columns[c] = [np.full(self.n, self._MISSING[c])]
+            self.columns[c].append(agg[c].to_numpy(copy=True))
+        for c in self.columns:
+            if c not in agg.columns:
+                self.columns[c].append(np.full(len(agg), self._MISSING[c]))
+        self.n += len(agg)
+
+    def has(self, name):
+        return self.columns is not None and name in self.columns
+
+    def take(self, name):
+        """One column for all pieces, in piece order; its per-tile parts are released."""
+        parts = self.columns.pop(name)
+        out = np.concatenate(parts)
+        parts.clear()
+        return out
 
 
 def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, drains,
@@ -692,69 +750,86 @@ def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, 
 
     Returns the depression table without its H3 id columns, the integer id of each lowest
     point's cell, the depression (component) of every piece, and which components were kept.
+    Works column by column on plain arrays, releasing each piece column once it is summarised.
     """
-    recs = pd.concat(records, ignore_index=True)
-    records.clear()                                  # the per-tile copies are no longer needed
+    n = records.n
     ring_keys = np.concatenate([r[0] for r in rings])
     ring_rec = np.concatenate([r[1] for r in rings])
     rings.clear()
     ci, cj = neighbour_pairs(ring_keys, width, height)
     graph_m = coo_matrix((np.ones(len(ci), dtype=np.int8), (ring_rec[ci], ring_rec[cj])),
-                         shape=(len(recs), len(recs)))
-    _, comp = connected_components(graph_m, directed=False)
-    recs["comp"] = comp
-    recs["first_key"] = recs["first_r"].astype(np.int64) * width + recs["first_c"]
-    recs["low_key"] = recs["low_r"].astype(np.int64) * width + recs["low_c"]
-    top = recs.groupby("comp")["maxd"].transform("max")
-    recs["low_key"] = recs["low_key"].where(recs["maxd"] >= top - _TIE, np.iinfo(np.int64).max)
-    spec = dict(npx=("npx", "sum"), area=("area", "sum"), volume=("volume", "sum"),
-                maxd=("maxd", "max"), rmin=("rmin", "min"), rmax=("rmax", "max"),
-                cmin=("cmin", "min"), cmax=("cmax", "max"), first_key=("first_key", "min"),
-                low_key=("low_key", "min"))
-    if has_buildings:
-        spec["bsum"] = ("bsum", "sum")
-    if drains is not None:
-        spec["near_max"] = ("near_max", "max")
-    if spacing is not None:                         # details
-        spec["level"] = ("level", "first")
-        spec.update({name: (name, "sum") for name in AREA_DOWN + VOLUME_DOWN})
-    dep = recs.groupby("comp").agg(**spec)
-    dep = dep[dep["maxd"] >= min_depth].sort_values("first_key")
-    dep["id"] = np.arange(1, len(dep) + 1)
+                         shape=(n, n))
+    del ring_keys, ring_rec, ci, cj
+    n_comp, comp = connected_components(graph_m, directed=False)
+    del graph_m
+    order = np.argsort(comp, kind="stable")          # pieces grouped by depression, in piece order
+    starts = np.flatnonzero(np.r_[True, comp[order][1:] != comp[order][:-1]])
 
-    low_r, low_c = dep["low_key"].to_numpy() // width, dep["low_key"].to_numpy() % width
+    def per_comp(values, how):
+        v = values[order]
+        if how == "first":
+            return v[starts]
+        return {"sum": np.add, "max": np.maximum, "min": np.minimum}[how].reduceat(v, starts)
+
+    stats = {}
+    for name, how in (("npx", "sum"), ("area", "sum"), ("volume", "sum"), ("rmin", "min"),
+                      ("rmax", "max"), ("cmin", "min"), ("cmax", "max")):
+        stats[name] = per_comp(records.take(name), how)
+    first_key = records.take("first_r").astype(np.int64) * width + records.take("first_c")
+    stats["first_key"] = per_comp(first_key, "min")
+    del first_key
+    maxd = records.take("maxd")
+    stats["maxd"] = per_comp(maxd, "max")
+    # the lowest point: the first, in reading order, of the deepest pixels over all pieces
+    low_key = records.take("low_r").astype(np.int64) * width + records.take("low_c")
+    low_key[maxd < stats["maxd"][comp] - _TIE] = np.iinfo(np.int64).max
+    del maxd
+    by_low = np.lexsort((low_key, comp))
+    first_low = by_low[np.r_[True, comp[by_low][1:] != comp[by_low][:-1]]]
+    stats["low_key"] = low_key[first_low]
+    del low_key, by_low
+    if has_buildings:
+        stats["bsum"] = per_comp(records.take("bsum"), "sum")
+    if drains is not None:
+        stats["near_max"] = per_comp(records.take("near_max"), "max")
+    detail = {}
+    if spacing is not None:
+        detail["water_level_m"] = per_comp(records.take("level"), "first")
+        detail["ground_m"] = records.take("low_z")[first_low]
+        for name in AREA_DOWN + VOLUME_DOWN:
+            detail[name] = per_comp(records.take(name), "sum")
+        merged = merge_moments(comp, {k: records.take(k) for k in MOMENTS}, n_comp)
+        detail["length_m"], detail["width_m"], detail["orientation_deg"] = shape(
+            merged, transform, spacing)
+        del merged
+    del first_low
+
+    keep = np.flatnonzero(stats["maxd"] >= min_depth)
+    dep_comp = keep[np.argsort(stats["first_key"][keep], kind="stable")]
+    s = {k: v[dep_comp] for k, v in stats.items()}
+    del stats
+    low_r, low_c = s["low_key"] // width, s["low_key"] % width
     xs, ys = pixel_centers(transform, low_r, low_c)
     lon, lat = lonlat(crs, xs, ys)
     out = pd.DataFrame({
-        "id": dep["id"].to_numpy(), "max_depth_m": dep["maxd"].to_numpy(),
-        "area_m2": dep["area"].to_numpy(), "volume_m3": dep["volume"].to_numpy(),
-        "lat": lat, "lon": lon,
-        "edge": ((dep["rmin"] <= 1) | (dep["cmin"] <= 1) | (dep["rmax"] + 1 >= height - 1)
-                 | (dep["cmax"] + 1 >= width - 1)).to_numpy(),
-        "deeper_than_wide": deeper_than_wide(dep["maxd"].to_numpy(), dep["area"].to_numpy())})
+        "id": np.arange(1, len(dep_comp) + 1), "max_depth_m": s["maxd"], "area_m2": s["area"],
+        "volume_m3": s["volume"], "lat": lat, "lon": lon,
+        "edge": ((s["rmin"] <= 1) | (s["cmin"] <= 1) | (s["rmax"] + 1 >= height - 1)
+                 | (s["cmax"] + 1 >= width - 1)),
+        "deeper_than_wide": deeper_than_wide(s["maxd"], s["area"])})
     if drains is not None:
         out["dist_to_drain_m"] = nearest_distance_m(drains, np.c_[xs, ys], crs)
-        out["drain_at_core"] = (dep["near_max"] >= drain_core_frac * dep["maxd"]).to_numpy()
+        out["drain_at_core"] = s["near_max"] >= drain_core_frac * s["maxd"]
     if has_buildings:
-        out["building_overlap"] = (dep["bsum"] / dep["npx"]).to_numpy()
+        out["building_overlap"] = s["bsum"] / s["npx"]
         out["likely_building_artifact"] = out["building_overlap"] >= 0.5
-    if spacing is not None:
-        comps = dep.index.to_numpy()
-        n_comp = int(comp.max()) + 1
-        merged = merge_moments(recs["comp"].to_numpy(), {k: recs[k].to_numpy() for k in MOMENTS},
-                               n_comp)
-        length, width_m, orientation = shape({k: v[comps] for k, v in merged.items()}, transform,
-                                             spacing)
-        lowest = recs.sort_values(["comp", "low_key"]).drop_duplicates("comp").set_index("comp")
-        out["ground_m"] = lowest["low_z"].reindex(comps).to_numpy()
-        out["water_level_m"] = dep["level"].to_numpy()
-        out["length_m"], out["width_m"], out["orientation_deg"] = length, width_m, orientation
-        for name in AREA_DOWN + VOLUME_DOWN:
-            out[name] = dep[name].to_numpy()
-
-    kept = np.zeros(int(comp.max()) + 1, dtype=bool)
-    kept[dep.index.to_numpy()] = True
-    return out, h3_ids(lat, lon, res), comp, kept, dep.index.to_numpy()
+    for name in ("ground_m", "water_level_m", "length_m", "width_m", "orientation_deg",
+                 *AREA_DOWN, *VOLUME_DOWN):
+        if name in detail:
+            out[name] = detail.pop(name)[dep_comp]
+    kept = np.zeros(n_comp, dtype=bool)
+    kept[dep_comp] = True
+    return out, h3_ids(lat, lon, res), comp, kept, dep_comp
 
 
 def _with_ids(out, lowpoints):
@@ -766,9 +841,16 @@ def _with_ids(out, lowpoints):
 
 
 def _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs, footprint,
-           catchment_chunks=None, details=False):
+           catchment_chunks=None, details=False, catch_area=None):
     """Write the tables piece by piece; return a `Result` that points at them."""
     remove_other_formats(out_dir, fmt)
+    if catchment_chunks is not None:                 # first: it sums the catchment areas
+        with TableWriter(out_dir / f"catchments.{fmt}", fmt) as w:
+            for chunk in catchment_chunks:
+                w.write(chunk)
+            w.close(empty=empty_catchments())
+        if out is not None:
+            out["catchment_area_m2"] = catch_area[out["id"].to_numpy()]
     with TableWriter(out_dir / f"depressions.{fmt}", fmt) as w:
         for s in range(0, 0 if out is None else len(out), CHUNK_ROWS):
             w.write(_with_ids(out.iloc[s:s + CHUNK_ROWS], lowpoints[s:s + CHUNK_ROWS])[columns])
@@ -783,11 +865,6 @@ def _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, c
     if dc is not None:
         dc.close(empty=empty_depression_cells())
     n_cells = w.rows
-    if catchment_chunks is not None:
-        with TableWriter(out_dir / f"catchments.{fmt}", fmt) as w:
-            for chunk in catchment_chunks:
-                w.write(chunk)
-            w.close(empty=empty_catchments())
     meta["output"] = {"format": fmt, "n_cells": n_cells}
     write_meta(out_dir, meta)
     return Result(None, None, meta, transform=transform, crs=crs, footprint=footprint, path=out_dir)
@@ -919,7 +996,7 @@ class _RoutingParts:
 
     _LISTS = ("border_keys", "border_codes", "plat_keys", "plat_z", "plat_exit", "plat_codes",
               "fp_gid", "fp_exit", "fp_dest", "fpb_keys", "fpb_gid", "fpb_level", "rec_spill",
-              "rec_exit", "code_codes", "code_area")
+              "rec_exit")
 
     def __init__(self):
         self.parts = {k: [] for k in self._LISTS}
@@ -949,20 +1026,20 @@ class _RoutingParts:
         acc = conv(rt["acc_code"])
         if len(acc):
             cparts.add(acc, rt["acc_cell"], rt["acc_area"])
-            totals, inverse = np.unique(acc, return_inverse=True)
-            p["code_codes"].append(totals)
-            p["code_area"].append(np.bincount(inverse, weights=rt["acc_area"]))
         self.n_fp += int(rt["n_fp"])
 
-    def get(self, name, dtype=np.int64):
-        a = self.parts[name]
-        return np.concatenate(a) if a else np.zeros(0, dtype=dtype)
+    def take(self, name, dtype=np.int64):
+        """One kind of piece for all tiles; the per-tile parts are released."""
+        a = self.parts.pop(name)
+        out = np.concatenate(a) if a else np.zeros(0, dtype=dtype)
+        a.clear()
+        return out
 
 
 def _settle_routing(routing, out, comp, kept, dep_comp, width, height, transform, crs):
     """Join the routing pieces of all tiles: the catchment and spill columns of the depression
     table, the settled ends, and the depression id of each joined sink (-1 if not kept)."""
-    g = routing.get
+    g = routing.take
     fpc = join_surfaces(g("fpb_keys"), g("fpb_gid"), g("fpb_level", float), routing.n_fp,
                         width, height)
     big = np.iinfo(np.int64).max
@@ -977,11 +1054,13 @@ def _settle_routing(routing, out, comp, kept, dep_comp, width, height, transform
         first = order[np.r_[True, c[order][1:] != c[order][:-1]]]
         fpc_exit[c[first]] = np.where(ex[first] == big, -1, ex[first])
         fpc_dest[c[first]] = fp_dest[first]
-    flat_keys, flat_next = np.zeros(0, np.int64), np.zeros(0, np.int64)
-    if len(routing.parts["plat_keys"]) and len(g("plat_keys")):
-        flat_keys, flat_next = settle_flats(g("plat_keys"), g("plat_z", float),
-                                            g("plat_exit", bool), g("plat_codes"), width, height)
-    rec_spill, rec_exit = g("rec_spill"), g("rec_exit")
+    plat_keys = g("plat_keys")
+    flats = FlatEnds(np.zeros(0, np.int64), np.zeros(0, np.int64))
+    if len(plat_keys):
+        flats = FlatEnds(*settle_flats(plat_keys, g("plat_z", float), g("plat_exit", bool),
+                                       g("plat_codes"), width, height))
+    del plat_keys
+    rec_spill, rec_exit = flats(g("rec_spill")), g("rec_exit")
     n_comp = len(kept)
     comp_spill = np.full(n_comp, OUT_CODE, dtype=np.int64)
     comp_exit = np.full(n_comp, -1, dtype=np.int64)
@@ -989,12 +1068,13 @@ def _settle_routing(routing, out, comp, kept, dep_comp, width, height, transform
         comps, first_rec = np.unique(comp, return_index=True)
         comp_spill[comps], comp_exit[comps] = rec_spill[first_rec], rec_exit[first_rec]
     recs = np.arange(len(comp))
-    node = [encode(E_SINK, recs), encode(E_HALO, g("border_keys")), encode(E_FLAT, flat_keys),
-            encode(E_FP, fp_gid)]
+    # flat pixels need no node of their own: their ends are replaced by where the flat drains
+    node = [encode(E_SINK, recs), encode(E_HALO, g("border_keys")), encode(E_FP, fp_gid)]
     nxt = [np.where(kept[comp], encode(E_KEPT, comp), comp_spill[comp]) if len(comp) else
-           np.zeros(0, np.int64), g("border_codes"), flat_next,
-           fpc_dest[fpc[fp_gid]] if len(fp_gid) else np.zeros(0, np.int64)]
-    ends = Ends(np.concatenate(node), np.concatenate(nxt))
+           np.zeros(0, np.int64), flats(g("border_codes")),
+           flats(fpc_dest[fpc[fp_gid]]) if len(fp_gid) else np.zeros(0, np.int64)]
+    ends = _SettledEnds(Ends(np.concatenate(node), np.concatenate(nxt)), flats)
+    del node, nxt
     id_of_comp = np.full(n_comp, -1, dtype=np.int64)
     if out is None:
         return None, ends, id_of_comp
@@ -1010,18 +1090,24 @@ def _settle_routing(routing, out, comp, kept, dep_comp, width, height, transform
     if (key < 0).any():
         raise RuntimeError("a depression has no spill point: the fill is inconsistent")
     lon, lat = lonlat(crs, *pixel_centers(transform, key // width, key % width))
-    codes, areas = g("code_codes"), g("code_area", float)
-    ck, ci = decode(ends.final(codes))
-    mine = ck == E_KEPT
-    owner = id_of_comp[ci[mine]]
-    catch = np.bincount(owner, weights=areas[mine], minlength=int(out["id"].max()) + 1)
-    out = out.assign(catchment_area_m2=catch[out["id"].to_numpy()],
-                     spill_to=spill_to.astype(np.int64), spill_lat=lat, spill_lon=lon)
+    out["spill_to"] = spill_to.astype(np.int64)      # catchment_area_m2 comes with the table
+    out["spill_lat"], out["spill_lon"] = lat, lon
     return out, ends, id_of_comp
 
 
-def _catchment_chunks(cparts, ends, id_of_comp, rows=CHUNK_ROWS):
-    """The catchment table in pieces, ordered by H3 cell and then depression id."""
+class _SettledEnds:
+    """`Ends`, accepting flat ends too (replaced first by where their flat drains)."""
+
+    def __init__(self, ends, flats):
+        self.ends, self.flats = ends, flats
+
+    def final(self, codes):
+        return self.ends.final(self.flats(codes))
+
+
+def _catchment_chunks(cparts, ends, id_of_comp, catch_area, rows=CHUNK_ROWS):
+    """The catchment table in pieces, ordered by H3 cell and then depression id. Each
+    depression's catchment area is added into `catch_area` (indexed by id) from the same rows."""
     pending, n_pending = [], 0
     for key in cparts.keys():
         arr = cparts.load(key)
@@ -1030,6 +1116,7 @@ def _catchment_chunks(cparts, ends, id_of_comp, rows=CHUNK_ROWS):
         ids, cell, area = id_of_comp[ident[keep]], arr["cell"][keep], arr["area"][keep]
         if len(ids) == 0:
             continue
+        np.add.at(catch_area, ids, area)
         order = np.lexsort((ids, cell))
         ids, cell, area = ids[order], cell[order], area[order]
         start = _runs(cell, ids)

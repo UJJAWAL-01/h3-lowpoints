@@ -154,6 +154,18 @@ river) stands higher than its surface fills as one huge depression. Measured on 
 Ninety-eight per cent of the depressions on land were unchanged; what disappeared were the lakes
 and the low shore land merged into them.
 
+**The open sea.** WorldCover maps land and the water near it; beyond that it has no data. USGS
+3DEP, however, continues offshore and stores the sea there as flat ground at 0 m (sampled every
+0.1° east of Atlantic City: WorldCover's water reaches about 25 km out, then 3DEP goes on at 0 m
+for roughly another 8 km before it stops). Without a rule for it, that sea is analysed as land: harmless for depressions
+(it has no depth) but a flat of hundreds of millions of pixels for water routing. So a pixel is
+also water when at least 5 of its 9 points fall where WorldCover has no data **and** its own
+elevation is at or below 0 m: open sea. The height condition keeps any gap in WorldCover over dry
+land from being masked. Elevations are read only where WorldCover has no data, so inland the mask
+costs no extra reading. Found by the national run of 22 to 23 October 2026, whose routing failed
+on 302 million flat sea pixels; results published before that (version 0.2 and the v1 national
+dataset) analysed this strip of sea as land at 0 m.
+
 Limits: only *permanent* water (2021) is masked, not seasonal flooding; water narrower than about
 half a pixel (15 m at 30 m) is not seen; WorldCover's own classification errors carry over.
 Elevation grids on NAD83 and WorldCover on WGS 84 differ by about a metre, far below a pixel.

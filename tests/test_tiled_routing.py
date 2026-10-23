@@ -230,3 +230,22 @@ def test_real_terrain_houston(tmp_path):
     for tile in (100, 333, 512):
         same_routing(whole, analyze_tiled(p, tile=tile, min_depth=0.5, catchments=True))
     assert len(whole.depressions) > 2000
+
+
+@pytest.mark.parametrize("tile", [5, 9, 16])
+def test_a_staircase_of_flats_each_crossing_tile_borders(tmp_path, tile):
+    """Terraces 13 pixels wide, each perfectly flat and crossing tile borders, falling west to
+    east, with pits on some terraces: water on a flat leaves onto the next, lower flat, so flat
+    ends lead onto flat ends across tiles (settled in a chain)."""
+    z = np.zeros((40, 78))
+    for k in range(6):
+        z[:, 13 * k:13 * (k + 1)] = 10.0 - k               # 10, 9, ..., 5 m
+    z[:, -1] = 4.0                                          # the map edge is lower still
+    rng = np.random.default_rng(1)
+    for _ in range(12):                                     # pits that catch some of it
+        r, c = rng.integers(2, 38), rng.integers(2, 76)
+        z[r, c] -= 0.8
+    z[[0, -1], :] = 20.0                                    # walls north and south
+    p = write_dem(tmp_path / "d.tif", z)
+    whole = check(p, [tile], res=12, min_depth=0.3)
+    assert len(whole.depressions) >= 5
