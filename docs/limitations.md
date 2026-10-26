@@ -20,9 +20,28 @@ and the world, or from choices the library makes and states.
   drain at their deep core, but the fill does not route water into them.
 - Much of the Netherlands lies below sea level behind dikes and is pumped dry: the library finds
   those polders as large depressions, correctly for the terrain, but they do not flood.
-- The library does not estimate how often, how deep or for how long water stands. The planned
-  susceptibility layer ([Roadmap](roadmap.md)) is the first step towards that question, and will
-  state its own evidence.
+- The library does not estimate how deep or for how long water stands. The susceptibility index
+  (below) estimates how much rain fills each depression, as a screening index.
+
+## The susceptibility index
+
+[Susceptibility](susceptibility.md) compares the runoff reaching each depression with its volume.
+It inherits every limit above, and adds its own:
+
+- **No drains, pipes, pumps or infiltration timing.** Engineered drainage can keep dry a
+  depression the index says fills; this matters most in cities, where most street sags have
+  inlets.
+- **One runoff coefficient per H3 cell** from imperviousness (Simple Method). It was made for
+  typical storms: in rare storms, fields and lawns shed more water than it assumes, so those
+  storms are underestimated there. Soils are not used.
+- **Volumes, not timing.** A storm enters only through its total depth; how fast it falls and how
+  long water stays are not modelled.
+- **Spill links from the terrain model**: water passes under roads through culverts the model
+  cannot see.
+- **Rainfall data.** NOAA Atlas 14 covers the US except Washington and Oregon; where its project
+  areas meet, neighbouring grids differ by a few percent. Elsewhere, rain must be supplied.
+- **Evidence against observations is not yet measured** (see
+  [Susceptibility](susceptibility.md#the-table-and-its-checks)).
 
 ## Limits that come from the elevation data
 

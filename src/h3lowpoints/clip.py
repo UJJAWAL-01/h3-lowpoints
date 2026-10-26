@@ -106,7 +106,7 @@ def clip_result(folder, boundary, out_dir, *, format=None, name=None, rows=CHUNK
                 n_edge += int(kept_deps["edge"].sum())
         w.close(empty=empty)
     wanted = np.sort(np.concatenate(wanted)) if wanted else np.zeros(0, dtype=np.int64)
-    for table in ("catchments", "depression_cells"):
+    for table in ("catchments", "depression_cells", "susceptibility"):
         if not table_path(folder, table):
             continue
         # a kept depression keeps its whole catchment and all its cells, also beyond the boundary
@@ -127,6 +127,9 @@ def clip_result(folder, boundary, out_dir, *, format=None, name=None, rows=CHUNK
         "rule": "cells whose centre is inside; depressions whose lowest point's cell is kept",
         "depressions_before": n_before, "cells_before": n_cells}
     meta["n_depressions"] = n_kept
+    if "susceptibility" in meta:
+        # computed before the clip: it counted water from depressions the clip has dropped
+        meta["susceptibility"]["clipped_after"] = True
     meta["n_edge"] = n_edge if has_edge else meta.get("n_edge")
     meta["output"] = {"format": fmt, "n_cells": n_kept_cells}
     write_meta(out, meta)

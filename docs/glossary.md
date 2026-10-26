@@ -59,7 +59,14 @@ priority-flood.
 **Fill curve.** How a depression's flooded area and stored volume shrink as its water level
 drops below full. See [Definition](definition.md#levels-shape-and-fill-curve).
 
+**Fill ratio.** The water reaching a depression in a storm (its own runoff plus overflow from
+upstream) divided by its volume; 1 or more means it fills. See
+[Susceptibility](susceptibility.md#design-storms).
+
 **Footprint.** Where a raster holds valid data; used to measure coverage of any H3 cell.
+
+**Imperviousness.** The percent of the ground that is paved or built, so water cannot soak in.
+NLCD gives it for every 30 m pixel of the lower 48 US states.
 
 **H3.** A global grid of hexagons with 16 resolutions, from Uber. See [Concepts](concepts.md#h3).
 
@@ -98,9 +105,17 @@ together to bound memory.
 **Priority-flood.** The algorithm that computes the fill exactly by always growing the water from
 its lowest edge.
 
+**Rain to fill.** The uniform rain depth that fills a depression, from its own catchment alone
+(`rain_to_fill_mm`) or with the overflow from upstream (`rain_to_fill_upstream_mm`). See
+[Susceptibility](susceptibility.md#rain-to-fill).
+
 **Raster.** A grid of values stored as an image-like file, usually GeoTIFF.
 
 **Resolution (H3).** The size class of H3 cells, 0 (largest) to 15 (smallest).
+
+**Return period.** For a storm, the average number of years between storms at least that large:
+the 100-year storm has a 1% chance of being reached or exceeded in any year. NOAA Atlas 14 gives
+storm depths for return periods of 1 to 1000 years.
 
 **Ring (H3).** The cells at exactly k steps from a cell form its k-th ring; "within k rings"
 means at most k steps away. One step is about 131 m at resolution 10.
@@ -108,9 +123,16 @@ means at most k steps away. One step is about 131 m at resolution 10.
 **Roll-up.** Computing a coarser cell table from a finer one: maximum of depths, sums of areas,
 volumes and counts.
 
+**Runoff coefficient.** The share of the rain on the ground that runs off its surface rather than
+soaking in; here `0.05 + 0.009 × imperviousness` (the Simple Method). See
+[Susceptibility](susceptibility.md#runoff).
+
 **Spill point.** The lowest point of a depression's rim, where it overflows when full. With
 `catchments=True` it is reported (`spill_lat`, `spill_lon`), with the depression the overflow
 reaches (`spill_to`).
+
+**Spill cascade.** Depressions filling and passing their overflow, along the spill links, to
+the depressions they spill into. See [Susceptibility](susceptibility.md#the-cascade).
 
 **Spot check.** Re-running random windows of a raster whole and tiled to confirm they agree.
 

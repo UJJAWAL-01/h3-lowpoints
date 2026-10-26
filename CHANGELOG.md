@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Susceptibility: how easily each depression fills** (`susceptibility.susceptibility` and
+  `write_susceptibility`; `h3lowpoints index`), for any result computed with catchments. Per
+  depression: the runoff coefficient of its catchment (Schueler's Simple Method,
+  0.05 + 0.009 x percent impervious, from any imperviousness raster or per-cell table, or one
+  coefficient), its runoff area, the rain that fills it from its own catchment
+  (`rain_to_fill_mm`) and with the overflow of the depressions upstream
+  (`rain_to_fill_upstream_mm`, exact to within 1%), and, with design storms, the share of its
+  volume each storm brings (`fill_ratio_2yr`, `fill_ratio_10yr`, `fill_ratio_100yr`) and the
+  smallest return period whose storm fills it (`fills_in_years`). Overflow passes down the spill
+  links (`hydro.cascade`), conserving water. Inputs covering too little of a catchment give NaN,
+  passed on downstream. Saved as `susceptibility.csv` or `.parquet` with its settings in
+  `meta.json`; read back by `read_result`, carried by `clip`, and checked by `verify` (nine new
+  damages caught). Checked against a plain recursive cascade, a bisection, and a uniform storm.
+  See [docs/susceptibility.md](docs/susceptibility.md).
+- `sources.rainfall.Atlas14Grids`: NOAA Atlas 14 depths for many points from NOAA's published
+  grids (all seven project areas of the conterminous US, every duration and return period),
+  with `atlas14_grid_url` and `read_ascii_grid`. It matches the point service to within 1%.
+- `susceptibility.cell_means`: the mean of any raster on each H3 cell, optionally only the cells
+  inside a coarser parent.
+- `store.iter_file`: any `.csv` or `.parquet` table file in pieces.
+
 ## 0.3.0 (26 October 2026)
 
 ### Changed

@@ -78,7 +78,9 @@ Each step is finished, tested and documented before the next starts.
    matters for waterlogging in residential and farm land. The catchments, fill curves and spill
    links both need are in version 0.2 of the national dataset, so they need no new national run.
    Every term can be inspected, and the index needs no training labels. It will be validated with
-   the tools of step 2 and documented with its evidence and its limits.
+   the tools of step 2 and documented with its evidence and its limits. The index itself is in
+   the library, unreleased: `h3lowpoints index` ([Susceptibility](susceptibility.md)); the
+   drained/landlocked flag, the national layer and the validation follow.
 4. **Machine learning, only if it earns its place.** Train on the step 3 features, judge it by
    leave-one-region-out validation (never scored on the place it learned from), and keep it only
    if it beats the physical index on unseen regions. Labels of street-level waterlogging are

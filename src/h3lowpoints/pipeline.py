@@ -79,6 +79,8 @@ class Result:
     meta         parameters, versions and resolution notes
     catchments   with `catchments=True`: one row per depression and H3 cell of its catchment
     depression_cells  with `details=True`: one row per depression and H3 cell it covers
+    susceptibility    after `susceptibility.write_susceptibility`: one row per depression with its
+                 runoff, the rain that fills it and how full design storms leave it
     path         the folder holding the tables, when they were written to disk instead of
                  returned (`analyze_tiled(out_dir=...)`); `load()` reads them back
     """
@@ -93,6 +95,7 @@ class Result:
     path: object = None
     catchments: pd.DataFrame = None
     depression_cells: pd.DataFrame = None
+    susceptibility: pd.DataFrame = None
 
     def at_resolution(self, res):
         """Cell table at a coarser H3 resolution, rolled up without re-analysis.
@@ -136,6 +139,8 @@ class Result:
             write_table(self.catchments, out / f"catchments.{format}", format)
         if self.depression_cells is not None:
             write_table(self.depression_cells, out / f"depression_cells.{format}", format)
+        if self.susceptibility is not None:
+            write_table(self.susceptibility, out / f"susceptibility.{format}", format)
         write_meta(out, {**self.meta, "output": {"format": format, "n_cells": len(self.cells)}})
         return out
 
@@ -146,7 +151,8 @@ class Result:
         loaded = read_result(self.path)
         return Result(loaded.depressions, loaded.cells, self.meta, transform=self.transform,
                       crs=self.crs, footprint=self.footprint, path=self.path,
-                      catchments=loaded.catchments, depression_cells=loaded.depression_cells)
+                      catchments=loaded.catchments, depression_cells=loaded.depression_cells,
+                      susceptibility=loaded.susceptibility)
 
 
 def rollup_saved(folder, res, rows=None):
@@ -173,14 +179,15 @@ def rollup_saved(folder, res, rows=None):
 def read_result(folder):
     """A result saved in a folder (by `Result.save`, `analyze_tiled(out_dir=...)` or the CLI).
 
-    The returned `Result` has the tables and `meta` (and the catchment table, if one was saved);
+    The returned `Result` has the tables and `meta` (and the catchment, depression x cell and
+    susceptibility tables, if they were saved);
     it has no footprint, so `at_resolution` rolls up without measuring coverage afresh.
     """
     missing = missing_files(folder)
     if missing:
         raise FileNotFoundError(f"{folder} is missing {', '.join(missing)}")
     optional = {name: read_table(folder, name) if table_path(folder, name) else None
-                for name in ("catchments", "depression_cells")}
+                for name in ("catchments", "depression_cells", "susceptibility")}
     return Result(read_table(folder, "depressions"), read_table(folder, "cells"), read_meta(folder),
                   path=Path(folder), **optional)
 

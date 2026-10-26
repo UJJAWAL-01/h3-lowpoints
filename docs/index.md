@@ -31,6 +31,7 @@ open data: [doi.org/10.5281/zenodo.23669497](https://doi.org/10.5281/zenodo.2366
 | Read and share the interactive map | [The map](map.md) |
 | Know how results are checked, and check your own | [Verification](verification.md) |
 | Test the depressions against observed flooding | [Validation](validation.md) |
+| Know how easily each depression fills in a storm | [Susceptibility](susceptibility.md) |
 | Know what the results cannot tell you | [Accuracy and limits](limitations.md) |
 | Look up a term | [Glossary](glossary.md) |
 | See where the project is going | [Roadmap](roadmap.md) |
@@ -54,9 +55,11 @@ open data: [doi.org/10.5281/zenodo.23669497](https://doi.org/10.5281/zenodo.2366
 10. [Verification](verification.md): the checks every result can be put through, anywhere.
 11. [Validation](validation.md): whether observations (flood reports, claims) fall in or near
     depressions more often than chance, with honest uncertainty.
-12. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
-13. [Glossary](glossary.md): terms used across these pages.
-14. [Roadmap](roadmap.md): what is done and what comes next.
+12. [Susceptibility](susceptibility.md): how easily each depression fills: runoff, the rain that
+    fills it, and design storms.
+13. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
+14. [Glossary](glossary.md): terms used across these pages.
+15. [Roadmap](roadmap.md): what is done and what comes next.
 
 The [changelog](../CHANGELOG.md) lists every change, and [contributing](../CONTRIBUTING.md) explains
 how to help.

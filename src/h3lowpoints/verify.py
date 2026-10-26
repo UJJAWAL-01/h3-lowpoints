@@ -30,10 +30,12 @@ def _close(a, b, rel=REL):
     return abs(a - b) <= rel * max(abs(a), abs(b), 1e-12)
 
 
-def check_tables(depressions, cells, meta, catchments=None, depression_cells=None):
+def check_tables(depressions, cells, meta, catchments=None, depression_cells=None,
+                 susceptibility=None):
     """Problems found in a result given as its tables (empty list = all invariants hold)."""
     return _check([depressions], [cells], meta, None if catchments is None else [catchments],
-                  None if depression_cells is None else [depression_cells])
+                  None if depression_cells is None else [depression_cells],
+                  None if susceptibility is None else [susceptibility])
 
 
 class _Depressions:
@@ -105,6 +107,8 @@ class _Depressions:
                 flag("self spill")
             self._keep("spill_to", to)
             self._keep("catchment_area_m2", catch)
+            for name, values in (("s_spill_to", to), ("s_catch", catch), ("s_volume", volume)):
+                self._keep(name, values)             # for the susceptibility checks
         if "water_level_m" in d:                      # details=True
             self.details = True
             cols = ["ground_m", "water_level_m", "length_m", "width_m", "orientation_deg"] + AREA_DOWN + VOLUME_DOWN
@@ -244,7 +248,99 @@ def _check_details(s, ids, chunks):
     return problems
 
 
-def _check(dep_chunks, cell_chunks, meta, catchment_chunks=None, detail_chunks=None):
+def _check_susceptibility(s, ids, chunks, meta):
+    """Invariants of the susceptibility table (see `susceptibility.susceptibility`)."""
+    from .hydro.cascade import cascade, spill_order
+    from .susceptibility import RUNOFF_RULE, UPSTREAM_REL, runoff_coefficient
+
+    problems = []
+    add = problems.append
+    settings = meta.get("susceptibility")
+    if settings is None:
+        add("a susceptibility table without its settings in meta.json")
+        settings = {}
+    if not s.routing:
+        add("a susceptibility table in a result computed without catchments")
+        return problems
+    to, catch, volume = s.array("s_spill_to", np.int64), s.array("s_catch"), s.array("s_volume")
+    n = len(ids)
+    order = np.argsort(ids)
+    seen = np.zeros(n, dtype=bool)
+    runoff_area, upstream_mm = np.full(n, np.nan), np.full(n, np.nan)
+    flags = set()
+    simple = settings.get("runoff") == RUNOFF_RULE
+    for c in chunks:
+        if len(c) == 0:
+            continue
+        cid = c["id"].to_numpy()
+        at = np.minimum(np.searchsorted(ids[order], cid), max(n - 1, 0))
+        hit = (ids[order][at] == cid) if n else np.zeros(len(cid), dtype=bool)
+        if not hit.all():
+            flags.add("stray")
+        pos = order[at[hit]]
+        c = c[hit]
+        if seen[pos].any() or len(np.unique(pos)) != len(pos):
+            flags.add("twice")
+        seen[pos] = True
+        imp, coef = c["impervious_pct"].to_numpy(dtype=float), c["runoff_coef"].to_numpy(dtype=float)
+        area, fill = c["runoff_area_m2"].to_numpy(dtype=float), c["rain_to_fill_mm"].to_numpy(dtype=float)
+        up = c["rain_to_fill_upstream_mm"].to_numpy(dtype=float)
+        with np.errstate(invalid="ignore"):
+            if ((imp < 0) | (imp > 100)).any():
+                flags.add("impervious range")
+            if ((coef <= 0) | (coef > 1)).any():
+                flags.add("coef range")
+            if simple and not np.allclose(coef, runoff_coefficient(imp), rtol=1e-9, equal_nan=True):
+                flags.add("simple method")
+            if not np.allclose(area, coef * catch[pos], rtol=REL, equal_nan=True):
+                flags.add("runoff area")
+            if not np.allclose(fill, 1000.0 * volume[pos] / area, rtol=REL, equal_nan=True):
+                flags.add("rain to fill")
+            if (up > fill * (1 + 1e-9)).any() or (np.isfinite(up) & ~np.isfinite(fill)).any():
+                flags.add("upstream more")
+            ratios = [col for col in c.columns if col.startswith("fill_ratio")]
+            if (c[ratios].to_numpy(dtype=float) < 0).any():
+                flags.add("ratio range")
+            if "fills_in_years" in c:
+                fills = c["fills_in_years"].to_numpy(dtype=float)
+                for col in ratios:
+                    years = float(col[len("fill_ratio_"):-len("yr")])
+                    if ((c[col].to_numpy(dtype=float) >= 1) & ~(fills <= years)).any():
+                        flags.add("fills in years")
+        runoff_area[pos], upstream_mm[pos] = area, up
+    for key, message in (
+            ("stray", "the susceptibility table names depressions that are not in the depression table"),
+            ("twice", "a depression appears more than once in the susceptibility table"),
+            ("impervious range", "impervious_pct outside [0, 100]"),
+            ("coef range", "runoff_coef outside (0, 1]"),
+            ("simple method", "runoff_coef is not 0.05 + 0.009 x impervious_pct"),
+            ("runoff area", "runoff_area_m2 is not runoff_coef x catchment_area_m2"),
+            ("rain to fill", "rain_to_fill_mm is not 1000 x volume_m3 / runoff_area_m2"),
+            ("upstream more", "rain_to_fill_upstream_mm is larger than rain_to_fill_mm"),
+            ("ratio range", "a fill ratio is negative"),
+            ("fills in years", "a storm with a fill ratio of 1 or more is rarer than fills_in_years")):
+        if key in flags:
+            add(message)
+    if not seen.all():
+        add(f"{int((~seen).sum())} depressions are missing from the susceptibility table")
+    if settings.get("clipped_after"):
+        return problems              # upstream water came also from depressions no longer listed
+    try:
+        spill, target = spill_order(ids, to)
+    except ValueError:
+        return problems                          # reported by the routing checks
+    # all the water from upstream can at most add the runoff of everything upstream
+    total, _ = cascade(spill, target, np.where(np.isfinite(runoff_area), runoff_area, 0.0),
+                       np.zeros(n))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        low = 1000.0 * volume / total / (1 + UPSTREAM_REL)
+        if (upstream_mm < low * (1 - 1e-9)).any():
+            add("rain_to_fill_upstream_mm is below what even all the water from upstream allows")
+    return problems
+
+
+def _check(dep_chunks, cell_chunks, meta, catchment_chunks=None, detail_chunks=None,
+           susceptibility_chunks=None):
     """The checks, with every table given as any number of pieces (read one at a time)."""
     res = (meta.get("params") or {}).get("res")
     s = _Depressions(meta)
@@ -264,6 +360,8 @@ def _check(dep_chunks, cell_chunks, meta, catchment_chunks=None, detail_chunks=N
     ids = s.array("id", np.int64)
     if len(np.unique(ids)) != len(ids):
         add("depression ids are not unique")
+    if susceptibility_chunks is not None:
+        problems += _check_susceptibility(s, ids, susceptibility_chunks, meta)
     if s.routing:
         problems += _check_routing(s, ids, catchment_chunks, meta)
     if s.details:
@@ -366,7 +464,7 @@ def check_result(result):
     if result.depressions is None and result.path is not None:
         return check_saved(result.path)
     return check_tables(result.depressions, result.cells, result.meta, result.catchments,
-                        result.depression_cells)
+                        result.depression_cells, result.susceptibility)
 
 
 def check_saved(folder, rows=CHUNK_ROWS):
@@ -375,7 +473,7 @@ def check_saved(folder, rows=CHUNK_ROWS):
     if missing:
         return [f"{folder} is missing {', '.join(missing)}"]
     optional = [iter_table(folder, name, rows=rows) if table_path(folder, name) else None
-                for name in ("catchments", "depression_cells")]
+                for name in ("catchments", "depression_cells", "susceptibility")]
     return _check(iter_table(folder, "depressions", rows=rows), iter_table(folder, "cells", rows=rows),
                   read_meta(folder), *optional)
 

@@ -186,6 +186,31 @@ Durations are labelled as NOAA labels them: `5-min`, `10-min`, `15-min`, `30-min
 `30-day`, `45-day`, `60-day`. Values are partial-duration-series estimates at a point; over a city
 they change little, so one point near the centre is a fair design value.
 
+**Grids, for many points.** For a whole region (every H3 cell of a result), `Atlas14Grids` reads
+NOAA's published grids instead (`https://hdsc.nws.noaa.gov/pub/hdsc/data/`): ESRI ASCII grids 30
+arc-seconds (about 800 m) apart, in thousandths of an inch (converted to millimetres), one zip of
+about 1 to 4 MB per project area and return period, downloaded only for the project areas a
+region lies in. Seven grid sets cover the conterminous US (checked in October 2026):
+
+| Folder | Project area |
+|---|---|
+| `sw` | Southwest: volumes 1 (semiarid Southwest) and 6 (California) |
+| `orb` | Volume 2, Ohio River Basin and surrounding states |
+| `mw` | Volume 8, Midwestern states |
+| `se` | Volume 9, Southeastern states |
+| `ne` | Volume 10, Northeastern states |
+| `tx` | Volume 11, Texas |
+| `inw` | Volume 12, Interior Northwest (Idaho, Montana, Wyoming) |
+
+Sampled on a regular lattice over the lower 48 states, they cover every state except Washington
+and Oregon (0.2% of their points), and the coastal states up to their shores (97% to 99.9% of
+points within the Census state outlines, which include bays and sounds). The files do not share
+one grid, and their no-data value differs (-9 or -999), so each is read with its own header.
+Where two project areas meet, both have values in a thin strip (0.4% of covered points); there
+they differ by about 5% typically and up to 41% (100-year 24-hour grids), as NOAA notes
+discrepancies at project boundaries are inevitable, and the mean is used. The 24-hour grid
+matches the point service to within 1% (a network test, at Houston).
+
 ## US Census Bureau boundaries
 
 - **What:** the cartographic boundary files of the US states, generalized for mapping at

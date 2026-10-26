@@ -19,7 +19,7 @@ Find closed depressions ("low points") in an elevation model and describe them o
 [outputs](https://ujjawal-01.github.io/h3-lowpoints/outputs), the [Python API](https://ujjawal-01.github.io/h3-lowpoints/python-api), the
 [command line](https://ujjawal-01.github.io/h3-lowpoints/cli), [data sources](https://ujjawal-01.github.io/h3-lowpoints/data-sources),
 [large regions](https://ujjawal-01.github.io/h3-lowpoints/large-regions), [the map](https://ujjawal-01.github.io/h3-lowpoints/map),
-[verification](https://ujjawal-01.github.io/h3-lowpoints/verification), [validation](https://ujjawal-01.github.io/h3-lowpoints/validation), [accuracy and limits](https://ujjawal-01.github.io/h3-lowpoints/limitations), a
+[verification](https://ujjawal-01.github.io/h3-lowpoints/verification), [validation](https://ujjawal-01.github.io/h3-lowpoints/validation), [susceptibility](https://ujjawal-01.github.io/h3-lowpoints/susceptibility), [accuracy and limits](https://ujjawal-01.github.io/h3-lowpoints/limitations), a
 [glossary](https://ujjawal-01.github.io/h3-lowpoints/glossary) and the [roadmap](https://ujjawal-01.github.io/h3-lowpoints/roadmap).
 
 ## What it does
@@ -37,6 +37,9 @@ Find closed depressions ("low points") in an elevation model and describe them o
 6. **Verifies** any result, anywhere, with checks that need no reference answer.
 7. **Validates** against observations: do flood reports, claims or high-water marks fall in or
    near depressions more often than chance? Lift with block-bootstrap confidence intervals.
+8. **Compares** the runoff reaching each depression with what it holds: the rain that fills it,
+   counting overflow from upstream, and how full NOAA Atlas 14 design storms leave it
+   ([susceptibility](https://ujjawal-01.github.io/h3-lowpoints/susceptibility)).
 
 ## Install
 

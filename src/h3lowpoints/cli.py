@@ -136,6 +136,24 @@ def build_parser():
     val.add_argument("--out", default="validation.json", help="report file (default validation.json)")
     val.add_argument("--points", help="also write the per-point table (.csv or .parquet)")
 
+    ix = sub.add_parser("index", help="how easily each depression fills: runoff, rain to fill and "
+                                      "design storms (needs a result made with --catchments)")
+    ix.add_argument("results", help="folder written by 'analyze', 'build' or 'clip' with --catchments")
+    ix.add_argument("--impervious",
+                    help="percent impervious: a raster (such as NLCD from 'fetch-landcover --from "
+                         "nlcd'), or a .csv/.parquet table of h3 and impervious_pct sorted by h3")
+    ix.add_argument("--runoff-coef", type=float,
+                    help="instead of --impervious: one runoff coefficient (0 to 1) for all ground")
+    ix.add_argument("--rain",
+                    help="design storms: 'atlas14' (US: 24-hour storms of 1 to 1000 years from NOAA "
+                         "Atlas 14) or one uniform depth in mm; without it, only the rain-to-fill "
+                         "columns")
+    ix.add_argument("--min-coverage", type=float, default=0.9,
+                    help="share of a catchment an input must cover (default 0.9)")
+    ix.add_argument("--cache-dir", help="keep downloaded rainfall grids here")
+    ix.add_argument("--workers", type=int, default=1,
+                    help="label raster pixels with H3 cells in this many processes")
+
     r = sub.add_parser("rainfall", help="design rainfall from NOAA Atlas 14 for a point in the US")
     r.add_argument("lat", type=float)
     r.add_argument("lon", type=float)
@@ -362,6 +380,40 @@ def _validate(args):
     return 0
 
 
+def _index(args):
+    import numpy as np
+
+    from .susceptibility import susceptibility, write_susceptibility
+    from .verify import check_saved
+
+    rain = args.rain
+    if rain is not None and rain != "atlas14":
+        try:
+            rain = float(rain)
+        except ValueError:
+            raise ValueError(f"--rain must be 'atlas14' or a depth in mm, got {rain!r}") from None
+    table = susceptibility(args.results, impervious=args.impervious, runoff_coef=args.runoff_coef,
+                           rain=rain, min_coverage=args.min_coverage, cache_dir=args.cache_dir,
+                           workers=args.workers)
+    path = write_susceptibility(args.results, table)
+    n = len(table)
+    known = int(np.isfinite(table["rain_to_fill_mm"]).sum())
+    print(f"{n:,} depressions; rain to fill known for {known:,}; median "
+          f"{np.nanmedian(table['rain_to_fill_mm']) if known else float('nan'):.0f} mm "
+          f"(own catchment), {np.nanmedian(table['rain_to_fill_upstream_mm']) if known else float('nan'):.0f}"
+          f" mm (with water from upstream)")
+    if "fills_in_years" in table:
+        f = table["fills_in_years"]
+        print(f"design storms known for {int(f.notna().sum()):,}; filled by the 2-year storm: "
+              f"{int((f <= 2).sum()):,}, by the 100-year storm: {int((f <= 100).sum()):,}")
+    elif "fill_ratio" in table:
+        print(f"filled by the storm: {int((table['fill_ratio'] >= 1).sum()):,}")
+    print(f"written to {path}")
+    problems = check_saved(args.results)
+    print("verification: " + ("all invariants hold" if not problems else f"{len(problems)} problem(s): {problems}"))
+    return 0 if not problems else 1
+
+
 def _map(args):
     from .viz.webmap import map_from_dir
 
@@ -374,7 +426,7 @@ def main(argv=None):
     try:
         commands = {"analyze": _analyze, "fetch-dem": _fetch, "map": _map,
                     "fetch-landcover": _landcover, "rainfall": _rainfall, "build": _build,
-                    "verify": _verify, "clip": _clip, "validate": _validate}
+                    "verify": _verify, "clip": _clip, "validate": _validate, "index": _index}
         return commands[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

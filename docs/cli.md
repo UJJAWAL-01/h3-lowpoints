@@ -1,6 +1,6 @@
 # Command line
 
-Installing the package adds one command, `h3lowpoints`, with nine subcommands. Every option is
+Installing the package adds one command, `h3lowpoints`, with ten subcommands. Every option is
 listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 
 | Command | Does |
@@ -10,12 +10,13 @@ listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 | [`verify`](#verify) | Check a saved result. |
 | [`clip`](#clip) | Keep the part of a saved result inside a boundary (for example the US). |
 | [`validate`](#validate) | Do observations fall in or near depressions more often than chance? |
+| [`index`](#index) | How easily each depression fills: runoff, rain to fill, design storms. |
 | [`map`](#map) | Make the interactive web map from a saved result. |
 | [`fetch-dem`](#fetch-dem) | Download elevation data for a box. |
 | [`fetch-landcover`](#fetch-landcover) | Download land cover for a box. |
 | [`rainfall`](#rainfall) | Design rainfall for a point in the US. |
 
-**Exit codes.** 0 on success. 1 when `verify` or `build` found problems. 3 when `build` stopped at
+**Exit codes.** 0 on success. 1 when `verify`, `build`, `clip` or `index` found problems. 3 when `build` stopped at
 its `--hours` limit (run it again to continue). Any input error
 (a bad box, a missing file, a CRS that cannot be used, a missing optional package) prints
 `error: <explanation>` and exits with code 1. `h3lowpoints --version` prints the version.
@@ -159,6 +160,30 @@ result.
 
 ```
 h3lowpoints validate us48_30m_water --observations reports.csv --controls addresses.csv --boundary city.gpkg --points points.csv
+```
+
+## index
+
+```
+h3lowpoints index FOLDER (--impervious FILE | --runoff-coef C) [--rain atlas14|MM] [options]
+```
+
+Compares the rain reaching each depression with what it holds, for a result made with
+`--catchments`, and writes the susceptibility table (`susceptibility.csv` or `.parquet`, in the
+result's format) into the folder, with its settings in `meta.json`. Prints a summary, then
+verifies the folder. See [Susceptibility](susceptibility.md) for the method.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--impervious FILE` | | Percent impervious: a raster in any CRS (its mean per H3 cell is used; for example NLCD, which `fetch-landcover` downloads), or a `.csv`/`.parquet` table with columns `h3` and `impervious_pct` at the result's resolution, sorted by `h3`. |
+| `--runoff-coef C` | | Instead of `--impervious`: one runoff coefficient (0 to 1) for all ground. |
+| `--rain atlas14\|MM` | | `atlas14`: 24-hour storms of 1 to 1000 years from NOAA Atlas 14 (US; only the grids of the project areas the result lies in are downloaded, about 10 to 40 MB each). A number: one uniform storm of that many millimetres. Without it, only the rain-to-fill columns. |
+| `--min-coverage F` | `0.9` | Share of a catchment an input must cover; below it the columns needing that input are NaN. |
+| `--cache-dir DIR` | | Keep the downloaded rainfall grids here and reuse them. |
+| `--workers N` | `1` | Label raster pixels with H3 cells in this many processes. |
+
+```
+h3lowpoints index houston --impervious imperv.tif --rain atlas14 --cache-dir atlas14
 ```
 
 ## map

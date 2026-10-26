@@ -13,6 +13,7 @@ three files in a folder. This page describes every file, column and field.
 | `cells.csv` or `cells.parquet` | every saved result | the cell table |
 | `catchments.csv` or `catchments.parquet` | results computed with `catchments=True` (`--catchments`) | the catchment table |
 | `depression_cells.csv` or `depression_cells.parquet` | results computed with `details=True` (`--details`) | the depression × cell table |
+| `susceptibility.csv` or `susceptibility.parquet` | `h3lowpoints index` or `write_susceptibility` (results with catchments) | the susceptibility table |
 | `meta.json` | every saved result | settings, versions, counts |
 | `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
 | `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
@@ -198,6 +199,29 @@ deepest `max_depth_m` is the depression's. Summed over the depressions in a cell
 volume give the cell table's `depress_area_m2` and `depress_volume_m3`. A clipped result keeps
 every row of the depressions it keeps.
 
+## The susceptibility table
+
+Written by `h3lowpoints index` (or `write_susceptibility`) into a result computed with
+catchments: one row per depression, saying how easily it fills. The method is in
+[Susceptibility](susceptibility.md).
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | The depression. |
+| `impervious_pct` | float | % | Mean imperviousness of its catchment (area-weighted over the catchment's H3 cells). NaN when one runoff coefficient was given, or when the imperviousness data covers less than `min_coverage` of the catchment. |
+| `runoff_coef` | float | 0 to 1 | Share of the rain on its catchment that runs off: `0.05 + 0.009 × impervious_pct` (Simple Method), or the one coefficient given. |
+| `runoff_area_m2` | float | m² | `runoff_coef × catchment_area_m2`: rain depth times this is the catchment's runoff. |
+| `rain_to_fill_mm` | float | mm | Uniform rain that fills it from its own catchment alone: `1000 × volume_m3 / runoff_area_m2`. |
+| `rain_to_fill_upstream_mm` | float | mm | The same, counting the overflow of the depressions upstream that fill first; never larger than `rain_to_fill_mm`. Exact to within 1%. |
+| `fill_ratio_2yr`, `fill_ratio_10yr`, `fill_ratio_100yr` | float | | Only with storms by return period (`--rain atlas14`): water reaching it in the 24-hour storm expected once in 2, 10 or 100 years (own runoff plus overflow from upstream), over its volume. 1 or more: it fills. Other return periods give `fill_ratio_<N>yr` (`ratio_years`). |
+| `fills_in_years` | float | years | Only with storms by return period: the smallest return period whose storm fills it; `inf` when none does. |
+| `fill_ratio` | float | | Only with one uniform storm (`--rain MM`): water reaching it over its volume. |
+
+NaN means unknown: an input does not cover enough of the catchment, or the depression receives
+water from one whose runoff is unknown (see
+[Susceptibility](susceptibility.md#missing-inputs-and-coverage)). Rows are in the order of the
+depression table. A clipped result keeps the rows of the depressions it keeps.
+
 ## meta.json
 
 | Field | Meaning |
@@ -220,6 +244,7 @@ every row of the depressions it keeps.
 | `tiling` | Tiled runs only: `tile` (tile size in pixels), `n_tiles`, `n_border_cells` and `n_crossings` (the size of the graph joining the tiles; see [Large regions](large-regions.md)). |
 | `output` | Saved results: `format` (`csv` or `parquet`) and `n_cells` (rows in the cell table). |
 | `clip` | Clipped results only: `boundary`, the membership `rule`, and `depressions_before` and `cells_before` (the counts before clipping). |
+| `susceptibility` | Results with a susceptibility table only: `runoff` (the rule for the runoff coefficient), `impervious` (its source, or `null`), `rain` (the storms' source, or `null`), `years` (the storms' return periods), `ratio_years`, `min_coverage`, `upstream_rel` (the precision of `rain_to_fill_upstream_mm`), `package_version`, and `clipped_after` (true when the result was clipped after the table was made). |
 | `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis (of the last part, for a run made in parts); with `--water-mask`, also `water_mask`, the rule that made the mask. |
 
 Example (from `examples/quickstart.py`):

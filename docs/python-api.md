@@ -192,6 +192,63 @@ values that are not degrees.
 `n` points spread evenly by area (on the sphere) over `boundary`, a shapely geometry in
 longitude/latitude or a vector file. `seed` may be a number or a numpy `Generator`.
 
+## Susceptibility: `h3lowpoints.susceptibility`
+
+See [Susceptibility](susceptibility.md) for the method and [Outputs](outputs.md#the-susceptibility-table)
+for the columns.
+
+### `susceptibility.susceptibility(result, *, impervious=None, runoff_coef=None, rain=None, ratio_years=(2, 10, 100), min_coverage=0.9, cache_dir=None, rows=500000, workers=1)`
+
+One row per depression: its runoff, the rain that fills it and, with storms, how full they leave
+it. Returns a DataFrame whose `attrs["settings"]` hold the settings for `meta.json`.
+
+| Parameter | Meaning |
+|---|---|
+| `result` | A `Result` computed with `catchments=True`, or its folder (the catchment table is read `rows` at a time). |
+| `impervious` | Percent impervious (0 to 100): a raster in any CRS (its mean per H3 cell is used), a `.csv` or `.parquet` table with columns `h3` and `impervious_pct` at the result's resolution (read in pieces; must be sorted by `h3`), or a DataFrame with those columns. |
+| `runoff_coef` | Instead of `impervious`: one runoff coefficient in (0, 1]. Exactly one of the two is required. |
+| `rain` | `None` (no storms), `"atlas14"` (24-hour storms of 1 to 1000 years from NOAA Atlas 14 grids), a depth in mm (one uniform storm, column `fill_ratio`), or a dict `{return period in years: depth in mm or function(lat, lon) -> mm}`. |
+| `ratio_years` | The return periods given a `fill_ratio_<N>yr` column; all storms count for `fills_in_years`. |
+| `min_coverage` | Share of a catchment an input must cover (by area for imperviousness, by runoff for rain). |
+| `cache_dir` | Keep downloaded rainfall grids here. |
+| `workers` | Processes for labelling raster pixels with H3 cells. |
+
+Raises `ValueError` for a result without catchments, for neither or both of `impervious` and
+`runoff_coef`, and for unusable settings.
+
+### `susceptibility.write_susceptibility(folder, table)`
+
+Writes `table` into a result folder as `susceptibility.csv` or `.parquet` (the format of the
+folder's tables) and records its settings in `meta.json` (`susceptibility`). Returns the path.
+
+### `susceptibility.cell_means(raster, res, *, parent=None, rows=1024, workers=1)`
+
+The mean of a raster's values on each H3 cell at resolution `res` (each pixel belongs to the cell
+containing its centre; no-data pixels are left out), as a table sorted by cell: `h3`, `mean`,
+`n_pixels`. `parent` (a coarser H3 cell) keeps only the cells inside it, so a large area can be
+done in pieces whose cells are complete. The raster is read `rows` rows at a time.
+
+### `susceptibility.runoff_coefficient(impervious_pct)`
+
+`0.05 + 0.009 × impervious_pct`: the Simple Method's share of rain that runs off.
+
+### `hydro.cascade.spill_order(ids, spill_to)`
+
+`(order, target)`: `target[i]` is the position of the depression row `i` spills into (-1 when its
+water leaves the table: `spill_to` 0 or a depression not listed), and `order` lists every
+position before the one it spills into. Raises `ValueError` if the spill links loop.
+
+### `hydro.cascade.cascade(order, target, own, volume)`
+
+The water reaching each depression (m³), given each one's own runoff (`own`, one column per
+storm, or 1-d for one storm) and its `volume`. Returns `(inflow, leaving)`, `leaving` being the
+water that left the table. NaN in `own` makes everything downstream NaN.
+
+### `hydro.cascade.rain_to_fill_upstream(order, target, runoff_area, volume, rel=0.01)`
+
+The uniform rain depth (m) that fills each depression, counting the overflow of the depressions
+upstream that fill first, exact to within a factor `1 + rel`.
+
 ## Verification: `h3lowpoints.verify`
 
 See [Verification](verification.md) for what each check means.
@@ -199,7 +256,7 @@ See [Verification](verification.md) for what each check means.
 | Function | Returns |
 |---|---|
 | `check_result(result)` | List of problems (empty when every invariant holds). Works on results in memory and on disk. |
-| `check_tables(depressions, cells, meta, catchments=None, depression_cells=None)` | The same for the tables. |
+| `check_tables(depressions, cells, meta, catchments=None, depression_cells=None, susceptibility=None)` | The same for the tables. |
 | `check_saved(folder, rows=500000)` | The same for a saved folder, reading the cell table `rows` at a time so any size can be checked. |
 | `compare_results(a, b, rel=1e-9)` | Differences between two results of the same data (empty when they agree). |
 | `spot_check(dem_path, *, windows=3, size=600, tile=170, seed=0, **params)` | Cuts `windows` random `size` × `size` windows from a raster, analyzes each whole and tiled, and returns every disagreement or invariant failure. `params` go to both analyses (`res`, `min_depth`, ...). |
@@ -298,6 +355,27 @@ DataFrame: rows are durations (`"5-min"` ... `"60-min"`, `"2-hr"` ... `"24-hr"`,
 One value from that table, in millimetres (for example the 1-hour storm expected once in 10
 years). Pass `table` to avoid fetching it again.
 
+### `sources.rainfall.Atlas14Grids(years=(1, 2, 5, 10, 25, 50, 100, 200, 500, 1000), duration="24h", *, cache_dir=None, volumes=None)`
+
+NOAA Atlas 14 depths for many points at once, from NOAA's published grids (one zip per project
+area and return period, about 1 to 4 MB each; `cache_dir` keeps them). `duration` is one of
+NOAA's file codes (`sources.rainfall.ATLAS14_DURATIONS`: `"05m"` ... `"60m"`, `"02h"` ... `"24h"`,
+`"48h"`, `"03d"` ... `"60d"`); `volumes` the project areas to use (default all of
+`ATLAS14_VOLUMES`). `depth(years, lat, lon)` returns millimetres at each point: the value of the
+grid cell containing it, the mean where two project areas overlap, NaN where none covers it
+(Washington, Oregon, the sea, outside the US). A grid is downloaded and read the first time a
+point falls within its project area's extent (`ATLAS14_EXTENTS`), so a city needs only its own
+area's grids; `grid(volume, years)` returns one grid as `(values, west, north, cell)`.
+
+### `sources.rainfall.atlas14_grid_url(volume, years, duration="24h")`
+
+The URL of one of NOAA's zipped Atlas 14 grids.
+
+### `sources.rainfall.read_ascii_grid(data)`
+
+Reads an ESRI ASCII grid (the bytes of an `.asc` file, or of a zip holding one): returns
+`(values, west, north, cell)`, with NaN for no data.
+
 ## Context: `h3lowpoints.context.readers` (needs the `sources` extra)
 
 ### `context.readers.read_drains(path, crs)`
@@ -341,6 +419,7 @@ The engine behind `Result.to_deck`, for any cell table (needs the `viz` extra).
 | `h3lowpoints.resolution.finest_h3_resolution(pixel_m)` | Finest resolution whose cells hold at least four pixels of this size. |
 | `h3lowpoints.resolution.resolution_tier(pixel_m)` | `"fine"`, `"medium"` or `"coarse"`. |
 | `h3lowpoints.store.read_table(folder, name)` / `iter_table(folder, name, rows=500000, columns=None)` | One table of a saved result, whole or in pieces (H3 ids as text); `columns` reads only those of the named columns the table has. |
+| `h3lowpoints.store.iter_file(path, rows=500000, columns=None)` | The same pieces from any `.csv` or `.parquet` table file. |
 | `h3lowpoints.store.write_table(df, path, fmt="csv")` | Write a table as CSV or Parquet. |
 | `h3lowpoints.hydro.depressions.depth_from_array(arr, nodata_mask=None, drains=None)` | The depth raster alone (priority-flood fill minus ground). `drains` is a boolean raster of extra outlets. |
 | `Result.footprint.coverage(cells)` | Coverage and covered area of any list of H3 cells (any resolution) over this raster. |

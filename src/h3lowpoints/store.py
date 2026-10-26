@@ -143,6 +143,14 @@ def iter_table(folder, name, rows=CHUNK_ROWS, columns=None):
     path = table_path(folder, name)
     if path is None:
         raise FileNotFoundError(f"{folder} has no {name}.csv or {name}.parquet")
+    yield from iter_file(path, rows, columns)
+
+
+def iter_file(path, rows=CHUNK_ROWS, columns=None):
+    """Yield a .csv or .parquet table file as DataFrames of at most `rows` rows (see iter_table)."""
+    path = Path(path)
+    if path.suffix not in (".csv", ".parquet"):
+        raise ValueError(f"{path} is not a .csv or .parquet file")
     if path.suffix == ".csv":
         header = pd.read_csv(path, nrows=0).columns
         dtype = {c: str for c in H3_COLUMNS if c in header}
@@ -186,7 +194,7 @@ def write_meta(folder, meta):
 
 def remove_other_formats(folder, fmt):
     """Delete tables of the format not being written, so a reused folder holds one result."""
-    for name in ("depressions", "cells", "catchments", "depression_cells"):
+    for name in ("depressions", "cells", "catchments", "depression_cells", "susceptibility"):
         for other in FORMATS:
             if other != fmt:
                 (Path(folder) / f"{name}.{other}").unlink(missing_ok=True)
