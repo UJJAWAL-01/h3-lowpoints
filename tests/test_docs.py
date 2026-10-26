@@ -13,6 +13,7 @@ from h3lowpoints.cli import build_parser
 from h3lowpoints.pipeline import (BUILDING_COLUMNS, CATCHMENT_COLUMNS, CATCHMENT_TABLE, CELL_TABLE,
                                   CORE_COLUMNS, DEPRESSION_CELL_TABLE, DETAIL_COLUMNS,
                                   DRAIN_COLUMNS)
+from h3lowpoints.drainage import DRAINAGE_COLUMNS
 from h3lowpoints.susceptibility import BASE_COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,7 +89,7 @@ def test_every_column_is_documented():
     for column in (CORE_COLUMNS + DRAIN_COLUMNS + BUILDING_COLUMNS + CATCHMENT_COLUMNS + CELL_TABLE
                    + CATCHMENT_TABLE + DETAIL_COLUMNS + DEPRESSION_CELL_TABLE + BASE_COLUMNS
                    + ["fill_ratio", "fill_ratio_2yr", "fill_ratio_10yr", "fill_ratio_100yr",
-                      "fills_in_years"]):
+                      "fills_in_years"] + DRAINAGE_COLUMNS):
         assert f"`{column}`" in text, f"column {column} is not described in outputs.md"
 
 

@@ -44,6 +44,10 @@ its deepest pixel (`max_depth_m`).
 
 **DEM (digital elevation model).** A raster of heights. Covers both bare-earth and surface models.
 
+**Drained depression.** One with a sign of drainage in mapped lines: a stream or canal at its
+lowest point or across most of its cells, or a road (likely with a culvert) where it overflows.
+See [Susceptibility](susceptibility.md#drained-or-landlocked).
+
 **DSM (digital surface model).** An elevation model of the top surface, including roofs and tree
 canopies. Copernicus GLO-30 is one.
 
@@ -76,6 +80,10 @@ NLCD gives it for every 30 m pixel of the lower 48 US states.
 **Invariant.** A property every correct result has, whatever the terrain (for example: cell areas
 add up to depression areas). Checked by `h3lowpoints verify`.
 
+**Landlocked depression.** One with no sign of drainage in the mapped lines given: water
+reaching it can only soak in or evaporate, unless it is drained by something not mapped (storm
+drains, pipes).
+
 **Lidar.** Light detection and ranging: elevation measured from aircraft with laser pulses, the
 source of 1 m elevation models.
 
@@ -87,6 +95,9 @@ by the same share for control points. 1 means no more often than the controls.
 **Mask.** A raster marking pixels to ignore, such as open water. Masked pixels act like nodata.
 
 **min_depth.** The shallowest depression kept, in metres.
+
+**NHD.** The US National Hydrography Dataset: mapped streams, rivers, canals, ditches,
+conduits and pipelines.
 
 **Nodata.** A pixel with no valid height. Treated as a place water can leave.
 

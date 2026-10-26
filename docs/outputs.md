@@ -201,9 +201,9 @@ every row of the depressions it keeps.
 
 ## The susceptibility table
 
-Written by `h3lowpoints index` (or `write_susceptibility`) into a result computed with
-catchments: one row per depression, saying how easily it fills. The method is in
-[Susceptibility](susceptibility.md).
+Written by `h3lowpoints index` and `h3lowpoints drainage` (or `write_susceptibility`): one row
+per depression, saying how easily it fills and whether it is drained. Each command fills its own
+columns and keeps the other's. The method is in [Susceptibility](susceptibility.md).
 
 | Column | Type | Unit | Meaning |
 |---|---|---|---|
@@ -216,6 +216,13 @@ catchments: one row per depression, saying how easily it fills. The method is in
 | `fill_ratio_2yr`, `fill_ratio_10yr`, `fill_ratio_100yr` | float | | Only with storms by return period (`--rain atlas14`): water reaching it in the 24-hour storm expected once in 2, 10 or 100 years (own runoff plus overflow from upstream), over its volume. 1 or more: it fills. Other return periods give `fill_ratio_<N>yr` (`ratio_years`). |
 | `fills_in_years` | float | years | Only with storms by return period: the smallest return period whose storm fills it; `inf` when none does. |
 | `fill_ratio` | float | | Only with one uniform storm (`--rain MM`): water reaching it over its volume. |
+| `land_cover` | integer | class | Only with drainage flags: land cover class at the lowest point (NLCD class in the US); 0 for no data or no land cover raster. |
+| `stream_m` | float | m | Only with drainage flags: distance from the lowest point to the nearest stream or river line; NaN beyond `max_distance_m` or without stream lines. |
+| `canal_m` | float | m | The same for canal, ditch, conduit and pipeline lines. |
+| `channel_share` | float | 0 to 1 | Share of the depression's area in H3 cells a stream or canal line crosses; NaN without `details=True` or without channel lines. |
+| `spill_road_m` | float | m | Distance from the spill point to the nearest road; NaN beyond `max_distance_m` or without roads. |
+| `drained` | boolean | | `stream_m` or `canal_m` at most `near_m`, `channel_share` at least `min_share`, or `spill_road_m` at most `near_m`. |
+| `landlocked` | boolean | | Not `drained`: no sign of drainage in the lines given. |
 
 NaN means unknown: an input does not cover enough of the catchment, or the depression receives
 water from one whose runoff is unknown (see
@@ -244,7 +251,7 @@ depression table. A clipped result keeps the rows of the depressions it keeps.
 | `tiling` | Tiled runs only: `tile` (tile size in pixels), `n_tiles`, `n_border_cells` and `n_crossings` (the size of the graph joining the tiles; see [Large regions](large-regions.md)). |
 | `output` | Saved results: `format` (`csv` or `parquet`) and `n_cells` (rows in the cell table). |
 | `clip` | Clipped results only: `boundary`, the membership `rule`, and `depressions_before` and `cells_before` (the counts before clipping). |
-| `susceptibility` | Results with a susceptibility table only: `runoff` (the rule for the runoff coefficient), `impervious` (its source, or `null`), `rain` (the storms' source, or `null`), `years` (the storms' return periods), `ratio_years`, `min_coverage`, `upstream_rel` (the precision of `rain_to_fill_upstream_mm`), `package_version`, and `clipped_after` (true when the result was clipped after the table was made). |
+| `susceptibility` | Results with a susceptibility table only: `runoff` (the rule for the runoff coefficient), `impervious` (its source, or `null`), `rain` (the storms' source, or `null`), `years` (the storms' return periods), `ratio_years`, `min_coverage`, `upstream_rel` (the precision of `rain_to_fill_upstream_mm`), `package_version`, and `clipped_after` (true when the result was clipped after the table was made); with drainage flags, `drainage`: the sources of `streams`, `canals`, `roads` and `land_cover`, `near_m`, `min_share`, `max_distance_m`, the `crs` distances were measured in, whether `channel_share` was measured, and `package_version`. |
 | `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis (of the last part, for a run made in parts); with `--water-mask`, also `water_mask`, the rule that made the mask. |
 
 Example (from `examples/quickstart.py`):

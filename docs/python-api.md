@@ -218,8 +218,10 @@ Raises `ValueError` for a result without catchments, for neither or both of `imp
 
 ### `susceptibility.write_susceptibility(folder, table)`
 
-Writes `table` into a result folder as `susceptibility.csv` or `.parquet` (the format of the
-folder's tables) and records its settings in `meta.json` (`susceptibility`). Returns the path.
+Writes `table` into a result folder's susceptibility table (`susceptibility.csv` or
+`.parquet`, in the format of the folder's tables) and records its settings in `meta.json`
+(`susceptibility`). A table from `susceptibility` replaces the index columns, one from
+`drainage.drainage_flags` the drainage columns; the other group is kept. Returns the path.
 
 ### `susceptibility.cell_means(raster, res, *, parent=None, rows=1024, workers=1)`
 
@@ -249,6 +251,27 @@ water that left the table. NaN in `own` makes everything downstream NaN.
 The uniform rain depth (m) that fills each depression, counting the overflow of the depressions
 upstream that fill first, exact to within a factor `1 + rel`.
 
+### `drainage.drainage_flags(result, *, streams=None, canals=None, roads=None, land_cover=None, near_m=30.0, min_share=0.5, max_distance_m=1000.0, crs=None, rows=500000)`
+
+One row per depression: `land_cover`, `stream_m`, `canal_m`, `channel_share`, `spill_road_m`,
+`drained`, `landlocked` ([Susceptibility](susceptibility.md#drained-or-landlocked)). Returns a
+DataFrame whose `attrs["settings"]` hold the settings; write it with `write_susceptibility`.
+Needs the `sources` extra.
+
+| Parameter | Meaning |
+|---|---|
+| `result` | A `Result` or its folder. `channel_share` needs `details=True`, `spill_road_m` needs `catchments=True`. |
+| `streams`, `canals`, `roads` | Lines: a vector file (any CRS), a GeoDataFrame or a GeoSeries. At least one is required. |
+| `land_cover` | A raster of land cover classes, read at each lowest point. |
+| `near_m`, `min_share` | The rule for `drained`. |
+| `max_distance_m` | Distances beyond this are NaN. |
+| `crs` | Projected CRS, in metres, to measure in; by default the UTM zone of the result's centre. |
+
+### `drainage.cells_along(lines, crs, res, step=None)`
+
+The H3 cells (as integers) at resolution `res` that lines in projected `crs` pass through, found
+by points every `step` metres along them (default a third of the cells' edge).
+
 ## Verification: `h3lowpoints.verify`
 
 See [Verification](verification.md) for what each check means.
@@ -256,7 +279,7 @@ See [Verification](verification.md) for what each check means.
 | Function | Returns |
 |---|---|
 | `check_result(result)` | List of problems (empty when every invariant holds). Works on results in memory and on disk. |
-| `check_tables(depressions, cells, meta, catchments=None, depression_cells=None, susceptibility=None)` | The same for the tables. |
+| `check_tables(depressions, cells, meta, catchments=None, depression_cells=None, susceptibility=None)` | The same for the tables (the susceptibility table with its index and drainage columns). |
 | `check_saved(folder, rows=500000)` | The same for a saved folder, reading the cell table `rows` at a time so any size can be checked. |
 | `compare_results(a, b, rel=1e-9)` | Differences between two results of the same data (empty when they agree). |
 | `spot_check(dem_path, *, windows=3, size=600, tile=170, seed=0, **params)` | Cuts `windows` random `size` × `size` windows from a raster, analyzes each whole and tiled, and returns every disagreement or invariant failure. `params` go to both analyses (`res`, `min_depth`, ...). |
@@ -335,6 +358,31 @@ A virtual raster of the WorldCover tiles over a box of any size (missing ocean t
 NLCD percent impervious surface (lower 48 US states, 30 m) as a GeoTIFF in EPSG:5070, values 0 to
 100 and 255 for no data. `year` is one of `sources.landcover.NLCD_YEARS`. `data` supplies the
 service's GeoTIFF bytes yourself (for tests or a cache).
+
+### `sources.landcover.fetch_land_cover(bbox, out_path, *, year=2021, max_area_km2=20000.0, data=None)`
+
+NLCD land cover classes (`sources.landcover.NLCD_CLASSES`; 0 for no data) for a box, at 30 m in
+NAD83 / Conus Albers. Lower 48 US states only.
+
+### `sources.nhd.fetch_flowlines(bbox, out_path=None, *, max_lines=200000, get=read_bytes)`
+
+NHD high-resolution flowlines intersecting a box, from the NHD map service, as a GeoDataFrame in
+WGS 84 with `ftype`, `fcode` and lines. `sources.nhd.STREAM_FTYPES` (460, 558) and
+`CANAL_FTYPES` (336, 420, 428) pick streams and canals. For areas beyond about a degree, use
+`state_flowlines`.
+
+### `sources.nhd.state_flowlines(state, *, cache_dir, bbox=None, ftypes=None)`
+
+A state's NHD high-resolution flowlines, read straight from its GeoPackage zip (downloaded once
+into `cache_dir`; up to 3.5 GB). `state` as named on The National Map ("Texas", "District of
+Columbia"); `bbox` and `ftypes` read only part of it.
+
+### `sources.roads.fetch_roads(bbox, out_path=None, *, cache_dir, year=2024, get=read_bytes)`
+
+Every road of the counties a box touches, from Census TIGER/Line, cut to the box: a GeoDataFrame
+in WGS 84 with the road class `MTFCC`. One zip per county is kept in `cache_dir`.
+`sources.roads.counties(bbox)` lists the counties' GEOIDs and `county_roads(geoid, *, cache_dir)`
+reads one county.
 
 ### `sources.boundaries.us_lower48(out_path=None, *, year=2025, data=None)`
 

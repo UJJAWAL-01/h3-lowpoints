@@ -66,8 +66,10 @@ def build_parser():
 
     lc = sub.add_parser("fetch-landcover", help="download land cover for a box")
     _bbox_out(lc)
-    lc.add_argument("--from", dest="dataset", default="worldcover", choices=["worldcover", "nlcd"],
-                    help="worldcover: global 10 m classes (default); nlcd: US 30 m percent impervious")
+    lc.add_argument("--from", dest="dataset", default="worldcover",
+                    choices=["worldcover", "nlcd", "nlcd-landcover"],
+                    help="worldcover: global 10 m classes (default); nlcd: US 30 m percent "
+                         "impervious; nlcd-landcover: US 30 m land cover classes")
     lc.add_argument("--year", type=int, default=2021, help="NLCD year (default 2021)")
 
     b = sub.add_parser("build", help="analyze a US region of any size from USGS 3DEP (streams the tiles)")
@@ -154,6 +156,29 @@ def build_parser():
     ix.add_argument("--workers", type=int, default=1,
                     help="label raster pixels with H3 cells in this many processes")
 
+    dr = sub.add_parser("drainage", help="drained or landlocked: mapped channels and roads near each "
+                                         "depression, and its land cover")
+    dr.add_argument("results", help="folder written by 'analyze', 'build' or 'clip'")
+    dr.add_argument("--streams", help="stream and river lines (vector file, any CRS)")
+    dr.add_argument("--canals", help="canal, ditch, conduit and pipeline lines (vector file, any CRS)")
+    dr.add_argument("--roads", help="road lines (vector file, any CRS)")
+    dr.add_argument("--nhd", action="store_true",
+                    help="US: fetch streams and canals from the USGS National Hydrography Dataset "
+                         "for the result's area (instead of --streams and --canals)")
+    dr.add_argument("--tiger", action="store_true",
+                    help="US: fetch roads from Census TIGER/Line for the result's area (instead of "
+                         "--roads; needs --cache-dir)")
+    dr.add_argument("--land-cover", help="raster of land cover classes, read at each lowest point "
+                                         "(for example from 'fetch-landcover')")
+    dr.add_argument("--near-m", type=float, default=30.0,
+                    help="a channel this close to the lowest point, or a road this close to the "
+                         "spill point, drains the depression (default 30)")
+    dr.add_argument("--min-share", type=float, default=0.5,
+                    help="or channels cross cells holding at least this share of its area (default 0.5)")
+    dr.add_argument("--max-distance-m", type=float, default=1000.0,
+                    help="distances beyond this are left empty (default 1000)")
+    dr.add_argument("--cache-dir", help="keep downloaded road files here")
+
     r = sub.add_parser("rainfall", help="design rainfall from NOAA Atlas 14 for a point in the US")
     r.add_argument("lat", type=float)
     r.add_argument("lon", type=float)
@@ -193,8 +218,12 @@ def _landcover(args):
     from .sources import landcover
 
     bbox = tuple(args.bbox)
-    out = (landcover.fetch_worldcover(bbox, args.out) if args.dataset == "worldcover"
-           else landcover.fetch_impervious(bbox, args.out, year=args.year))
+    if args.dataset == "worldcover":
+        out = landcover.fetch_worldcover(bbox, args.out)
+    elif args.dataset == "nlcd":
+        out = landcover.fetch_impervious(bbox, args.out, year=args.year)
+    else:
+        out = landcover.fetch_land_cover(bbox, args.out, year=args.year)
     with rasterio.open(out) as src:
         print(f"{src.width} x {src.height} pixels written to {out}")
     return 0
@@ -414,6 +443,56 @@ def _index(args):
     return 0 if not problems else 1
 
 
+def _drainage(args):
+    from .drainage import drainage_flags
+    from .susceptibility import write_susceptibility
+    from .verify import check_saved
+
+    streams, canals, roads = args.streams, args.canals, args.roads
+    if args.nhd or args.tiger:
+        bbox = _result_bbox(args.results)
+    if args.nhd:
+        from .sources.nhd import CANAL_FTYPES, STREAM_FTYPES, fetch_flowlines
+
+        lines = fetch_flowlines(bbox)
+        streams = lines[lines["ftype"].isin(STREAM_FTYPES)]
+        canals = lines[lines["ftype"].isin(CANAL_FTYPES)]
+        print(f"NHD: {len(streams):,} stream and {len(canals):,} canal lines")
+    if args.tiger:
+        if not args.cache_dir:
+            raise ValueError("--tiger needs --cache-dir (one road file per county is downloaded)")
+        from .sources.roads import fetch_roads
+
+        roads = fetch_roads(bbox, cache_dir=args.cache_dir)
+        print(f"TIGER: {len(roads):,} road lines")
+    table = drainage_flags(args.results, streams=streams, canals=canals, roads=roads,
+                           land_cover=args.land_cover, near_m=args.near_m,
+                           min_share=args.min_share, max_distance_m=args.max_distance_m)
+    path = write_susceptibility(args.results, table)
+    n, drained = len(table), int(table["drained"].sum())
+    print(f"{n:,} depressions: {drained:,} drained, {n - drained:,} landlocked "
+          f"(no channel within {args.near_m:g} m, no road at the spill point)")
+    print(f"written to {path}")
+    problems = check_saved(args.results)
+    print("verification: " + ("all invariants hold" if not problems else f"{len(problems)} problem(s): {problems}"))
+    return 0 if not problems else 1
+
+
+def _result_bbox(folder, margin=0.01):
+    """Lon/lat box around a saved result's lowest and spill points, with a margin in degrees."""
+    import pandas as pd
+
+    from .store import iter_table
+
+    cols = ["lat", "lon", "spill_lat", "spill_lon"]
+    d = pd.concat(list(iter_table(folder, "depressions", columns=cols)), ignore_index=True)
+    if len(d) == 0:
+        raise ValueError(f"{folder} has no depressions")
+    lat = pd.concat([d[c] for c in ("lat", "spill_lat") if c in d])
+    lon = pd.concat([d[c] for c in ("lon", "spill_lon") if c in d])
+    return (lon.min() - margin, lat.min() - margin, lon.max() + margin, lat.max() + margin)
+
+
 def _map(args):
     from .viz.webmap import map_from_dir
 
@@ -426,7 +505,8 @@ def main(argv=None):
     try:
         commands = {"analyze": _analyze, "fetch-dem": _fetch, "map": _map,
                     "fetch-landcover": _landcover, "rainfall": _rainfall, "build": _build,
-                    "verify": _verify, "clip": _clip, "validate": _validate, "index": _index}
+                    "verify": _verify, "clip": _clip, "validate": _validate, "index": _index,
+                    "drainage": _drainage}
         return commands[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

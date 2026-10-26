@@ -333,16 +333,51 @@ def _rain_on(cells, samplers):
             else np.full(len(cells), float(s)) for s in samplers]
 
 
+def _is_index_column(name):
+    return name in BASE_COLUMNS[1:] or name.startswith("fill_ratio") or name == "fills_in_years"
+
+
 def write_susceptibility(folder, table):
-    """Write `table` (from `susceptibility`) into a result folder as `susceptibility.<format>`, in
-    the format of the folder's tables, and record its settings in meta.json."""
+    """Write `table` into a result folder's susceptibility table (`susceptibility.<format>`, in
+    the format of the folder's tables), and record its settings in meta.json.
+
+    `table` comes from `susceptibility` (the index columns) or from `drainage.drainage_flags`
+    (the drainage columns). Each replaces its own group of columns and settings and keeps the
+    other's, so the two can be computed in either order and redone separately.
+    """
+    from .drainage import DRAINAGE_COLUMNS
+
     folder = Path(folder)
     fmt = table_path(folder, "depressions").suffix.lstrip(".")
+    settings = dict(table.attrs.get("settings", {}))
+    new_index = any(_is_index_column(c) for c in table.columns)
+    new_drainage = any(c in DRAINAGE_COLUMNS for c in table.columns)
+    old_path = table_path(folder, "susceptibility")
+    meta = read_meta(folder)
+    old_settings = dict(meta.get("susceptibility") or {})
+    if old_path is not None:
+        from .store import read_table
+
+        old = read_table(folder, "susceptibility")
+        keep = [c for c in old.columns if c != "id"
+                and not (new_index and _is_index_column(c))
+                and not (new_drainage and c in DRAINAGE_COLUMNS)]
+        if keep:
+            if len(old) != len(table) or set(old["id"]) != set(table["id"]):
+                raise ValueError("the susceptibility table in this folder lists other depressions; "
+                                 "remove it or recompute it")
+            table = old[["id"] + keep].merge(table, on="id", how="left")
+            if new_index:                 # keep the drainage settings, replace the rest
+                settings = {**settings, **{k: v for k, v in old_settings.items() if k == "drainage"}}
+            else:                         # keep the index settings, replace the drainage ones
+                settings = {**{k: v for k, v in old_settings.items() if k != "drainage"}, **settings}
+    order = (["id"] + [c for c in table.columns if _is_index_column(c)]
+             + [c for c in DRAINAGE_COLUMNS if c in table.columns])
+    table = table[order + [c for c in table.columns if c not in order]]
     for other in ("csv", "parquet"):
         if other != fmt:
             (folder / f"susceptibility.{other}").unlink(missing_ok=True)
     write_table(table, folder / f"susceptibility.{fmt}", fmt)
-    meta = read_meta(folder)
-    meta["susceptibility"] = dict(table.attrs.get("settings", {}))
+    meta["susceptibility"] = settings
     write_meta(folder, meta)
     return folder / f"susceptibility.{fmt}"

@@ -109,13 +109,51 @@ conserved: the runoff of all catchments equals the water stored plus the water l
 - **Washington and Oregon** have no Atlas 14 estimates (checked in October 2026), so their storm
   columns are NaN; the rain-to-fill columns are available there.
 
+## Drained or landlocked
+
+Many depressions in an elevation model are drained in reality: a canal, a ditch or a stream runs
+through them, or the rim they overflow at is a road embankment with a culvert under it that the
+model cannot see. **Landlocked** depressions, where the water has no way out but to soak in or
+evaporate, are the ones that matter for waterlogging in towns and on farms.
+`drainage.drainage_flags` (`h3lowpoints drainage`) looks for signs of drainage in mapped lines:
+
+```
+h3lowpoints fetch-landcover --from nlcd-landcover --bbox -95.6 29.6 -95.2 29.9 --out classes.tif
+h3lowpoints drainage houston --nhd --tiger --cache-dir tiger --land-cover classes.tif
+```
+
+- `stream_m`, `canal_m`: distance from the lowest point to the nearest mapped stream or river,
+  and to the nearest canal, ditch, underground conduit or pipeline. In the US these come from the
+  National Hydrography Dataset ([Data sources](data-sources.md#usgs-national-hydrography-dataset-nhd)):
+  streams are feature types 460 and 558, canals 336, 420 and 428.
+- `channel_share`: the share of the depression's area in H3 cells that a stream or canal line
+  crosses (lines are followed in steps of a third of a cell's edge). It needs a result computed
+  with `details=True`.
+- `spill_road_m`: distance from the spill point to the nearest road (Census TIGER/Line in the US).
+  It needs `catchments=True`.
+- `land_cover`: the land cover class at the lowest point (NLCD classes in the US, 0 for no data),
+  so residential and farm depressions can be picked out.
+- `drained`: a stream or canal within `near_m` (default 30 m) of the lowest point, channels
+  crossing cells that hold at least `min_share` (default half) of its area, or a road within
+  `near_m` of the spill point. `landlocked` is the opposite.
+
+Distances beyond `max_distance_m` (default 1 km) are left empty. A missing line file, or an
+empty distance, never makes a depression drained: `landlocked` means **no sign of drainage in
+the lines given**, not proof that there is none. The rule's default distances are not yet
+calibrated (see [Limits](#limits)).
+
+The drainage columns join the same susceptibility table as the index: computing either replaces
+only its own columns and settings, in any order.
+
 ## The table and its checks
 
 The columns are described in [Outputs](outputs.md#the-susceptibility-table), and the settings
 are recorded in `meta.json` (`susceptibility`). `verify` checks a saved table: every depression
 once; the coefficient, runoff area and rain to fill follow from their formulas;
 `rain_to_fill_upstream_mm` lies between its two bounds; and every storm with a fill ratio of 1 or
-more is no rarer than `fills_in_years` ([Verification](verification.md)).
+more is no rarer than `fills_in_years`; the drainage distances lie in [0, `max_distance_m`],
+`channel_share` in [0, 1], `drained` follows the rule and `landlocked` is its opposite
+([Verification](verification.md)).
 
 The test suite compares the cascade with a plain recursive version on random spill networks,
 checks that water is conserved, compares `rain_to_fill_upstream_mm` with a bisection that reruns
@@ -144,6 +182,15 @@ storms are where flooding is reported is the next step of the [roadmap](roadmap.
   later drops (`meta["susceptibility"]["clipped_after"]`); one computed after clipping misses the
   water from depressions beyond the boundary. Near a boundary, compute before clipping where you
   can.
+- **Drainage flags are only as good as the maps.** Storm drains and sewers are mostly not
+  mapped, so in cities many depressions flagged landlocked are drained by inlets. NHD maps
+  ditches unevenly from county to county.
+- **Roads are everywhere in cities.** On 30 m data in Houston, 53% of random points lie within
+  30 m of some road, and spill points (48%) are no more often near a road than random points
+  are; highways and ramps alone come closer (5.1% of spill points within 30 m against 3.4% of
+  random points). Streams (19% of lowest points within 30 m against 2% of random points) and
+  canals (10% against 3%) are far more telling. The road rule is therefore to be calibrated on
+  test regions before it is used for a national layer.
 - **Atlas 14 project boundaries.** Where two of NOAA's project areas meet, both grids have
   values; they typically differ by about 5% (at most 41% in the 100-year 24-hour grids), and the
   mean is used.

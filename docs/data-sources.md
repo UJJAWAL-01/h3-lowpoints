@@ -115,7 +115,52 @@ A trap found while testing: **the service labels 0 as "no data"**, but in this p
 "0% impervious" (a park, a field, a forest). Read naively, every unbuilt pixel would vanish. The
 library drops that label and treats only values above 100 as no data.
 
-This is an input for the planned susceptibility layer (rain on impervious ground runs off).
+It sets the runoff coefficient of the susceptibility index
+([Susceptibility](susceptibility.md#runoff)).
+
+## NLCD land cover
+
+- **What:** the National Land Cover Database's class of each 30 m pixel: open water (11),
+  developed land of four intensities (21 to 24), barren land (31), forests (41 to 43), shrubland
+  (51, 52), grassland (71 to 74), pasture and hay (81), cultivated crops (82), wetlands (90, 95);
+  in `NLCD_CLASSES`.
+- **Where, licence, format:** as NLCD impervious above. Years 2001 to 2021.
+- **Library:** `fetch_land_cover`, `h3lowpoints fetch-landcover --from nlcd-landcover`. Output is
+  uint8 class codes, 0 for no data (outside the lower 48 states, open sea), as the service sends.
+
+The drainage flags read it at each lowest point (`land_cover`), so residential and farm
+depressions can be studied apart.
+
+## USGS National Hydrography Dataset (NHD)
+
+- **What:** the mapped surface water of the US at high resolution (1:24,000 or finer): streams
+  and rivers, canals and ditches, underground conduits, pipelines, with a feature type (`ftype`)
+  on every line: 460 stream or river, 558 artificial path (through a lake or a wide river), 336
+  canal or ditch, 420 underground conduit, 428 pipeline, 334 connector, 566 coastline.
+- **Where:** the US. NHD high resolution was last updated in 2023, when USGS moved to its
+  successor, the 3D Hydrography Program; it is still the national map of small ditches.
+- **Licence:** public domain.
+- **Format:** a map service (2,000 lines per request) for boxes, and one GeoPackage zip per state
+  (3 MB to 3.5 GB; about 45 GB for the lower 48 states and DC), in NAD83. A state's file covers
+  whole river basins that cross its border, so neighbouring files overlap.
+- **Library:** `sources.nhd.fetch_flowlines` (a box, from the service), `state_flowlines` (a state,
+  read straight from its zip, by box and feature type), `h3lowpoints drainage --nhd`.
+
+Checked in October 2026: for a box in Washington, DC the service and the state file gave the
+same 430 lines (165.0 km). The service can be slow (single requests took 1 to 4 minutes, some
+timed out); for large areas use the state files. In that DC box most lines are underground
+pipelines (387 of 430, described as "Pipeline: General Case; Underground"), which the drainage
+flags count with canals.
+
+## US Census Bureau TIGER/Line roads
+
+- **What:** every public road, one file per county (3,233 counties and equivalents in 2024),
+  with its class (`MTFCC`: S1100 primary road, S1200 secondary road, S1400 local street, S1630
+  ramp, S1740 private road, ...).
+- **Licence:** public domain.
+- **Format:** zipped shapefiles of 1 to 12 MB per county, in NAD83.
+- **Library:** `sources.roads.fetch_roads` (the counties a box touches, cut to the box),
+  `county_roads`, `counties`, `h3lowpoints drainage --tiger`.
 
 ## ESA WorldCover
 

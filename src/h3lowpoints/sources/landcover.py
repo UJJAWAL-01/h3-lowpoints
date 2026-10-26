@@ -31,6 +31,15 @@ WORLDCOVER_CLASSES = {
     90: "herbaceous wetland", 95: "mangroves", 100: "moss and lichen",
 }
 MRLC_WCS = "https://www.mrlc.gov/geoserver/mrlc_download/wcs"
+NLCD_CLASSES = {
+    11: "open water", 12: "perennial ice and snow", 21: "developed, open space",
+    22: "developed, low intensity", 23: "developed, medium intensity",
+    24: "developed, high intensity", 31: "barren land", 41: "deciduous forest",
+    42: "evergreen forest", 43: "mixed forest", 51: "dwarf scrub", 52: "shrub and scrub",
+    71: "grassland and herbaceous", 72: "sedge and herbaceous", 73: "lichens", 74: "moss",
+    81: "pasture and hay", 82: "cultivated crops", 90: "woody wetlands",
+    95: "emergent herbaceous wetlands",
+}
 NLCD_YEARS = (2001, 2004, 2006, 2008, 2011, 2013, 2016, 2019, 2021)
 IMPERVIOUS_NODATA = 255
 
@@ -76,12 +85,21 @@ def fetch_worldcover(bbox, out_path, *, source=None, max_tiles=4):
 
 def impervious_request(bbox, year=2021):
     """The MRLC WCS URL that returns NLCD impervious percent for a lon/lat box."""
+    return _nlcd_request(bbox, year, "Impervious")
+
+
+def land_cover_request(bbox, year=2021):
+    """The MRLC WCS URL that returns NLCD land cover classes for a lon/lat box."""
+    return _nlcd_request(bbox, year, "Land_Cover")
+
+
+def _nlcd_request(bbox, year, product):
     if year not in NLCD_YEARS:
-        raise ValueError(f"NLCD impervious exists for {', '.join(map(str, NLCD_YEARS))}; got {year}")
+        raise ValueError(f"NLCD exists for {', '.join(map(str, NLCD_YEARS))}; got {year}")
     left, bottom, right, top = transform_bounds("EPSG:4326", "EPSG:5070", *check_bbox(bbox),
                                                 densify_pts=21)
     params = [("service", "WCS"), ("version", "2.0.1"), ("request", "GetCoverage"),
-              ("coverageId", f"mrlc_download__NLCD_{year}_Impervious_L48"),
+              ("coverageId", f"mrlc_download__NLCD_{year}_{product}_L48"),
               ("subset", f"X({_floor30(left)},{_ceil30(right)})"),
               ("subset", f"Y({_floor30(bottom)},{_ceil30(top)})"),
               ("format", "image/geotiff")]
@@ -108,26 +126,43 @@ def fetch_impervious(bbox, out_path, *, year=2021, max_area_km2=20_000.0, data=N
     Conterminous US only. `data` can supply the service's GeoTIFF bytes (for tests or a cache).
     Returns the path, in NAD83 / Conus Albers (EPSG:5070) at 30 m.
     """
+    array, transform, crs = _nlcd(bbox, impervious_request(bbox, year), max_area_km2, data)
+    array = clean_impervious(array)
+    if not np.any(array != IMPERVIOUS_NODATA):
+        raise ValueError("NLCD impervious holds no data for this box (outside the lower 48 US?)")
+    return write_raster(out_path, array, transform, crs, IMPERVIOUS_NODATA, "uint8")
+
+
+def fetch_land_cover(bbox, out_path, *, year=2021, max_area_km2=20_000.0, data=None):
+    """Write NLCD land cover classes (NLCD_CLASSES; 0 = no data) for a lon/lat box to a GeoTIFF.
+
+    Conterminous US only, in NAD83 / Conus Albers (EPSG:5070) at 30 m. `data` can supply the
+    service's GeoTIFF bytes (for tests or a cache). Returns the path.
+    """
+    array, transform, crs = _nlcd(bbox, land_cover_request(bbox, year), max_area_km2, data)
+    array = np.where(np.isin(array, list(NLCD_CLASSES)), array, 0).astype("uint8")
+    if not np.any(array):
+        raise ValueError("NLCD land cover holds no data for this box (outside the lower 48 US?)")
+    return write_raster(out_path, array, transform, crs, 0, "uint8")
+
+
+def _nlcd(bbox, url, max_area_km2, data):
+    """(array, transform, crs) of an NLCD GeoTIFF from the MRLC service (or from `data`)."""
     bbox = check_bbox(bbox)
     area = bbox_area_km2(bbox)
     if area > max_area_km2:
         raise ValueError(f"bbox is about {area:,.0f} km2 (limit {max_area_km2:,.0f}); fetch it in pieces")
     if data is None:
         try:
-            data = read_bytes(impervious_request(bbox, year))
+            data = read_bytes(url)
         except urllib.error.HTTPError as exc:
-            raise ValueError(f"The NLCD service refused this box (HTTP {exc.code}). NLCD impervious "
-                             "covers the conterminous US only; elsewhere use fetch_worldcover") from exc
-    raw = data
-    if not raw.startswith((b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")):
-        text = raw[:300].decode("utf-8", errors="replace")
+            raise ValueError(f"The NLCD service refused this box (HTTP {exc.code}). NLCD covers the "
+                             "conterminous US only; elsewhere use fetch_worldcover") from exc
+    if not data.startswith((b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")):
+        text = data[:300].decode("utf-8", errors="replace")
         raise ValueError(f"The NLCD service did not return a GeoTIFF (outside the lower 48 US?): {text}")
-    with MemoryFile(raw) as mem, mem.open() as src:
-        array = clean_impervious(src.read(1))
-        transform, crs = src.transform, src.crs
-    if not np.any(array != IMPERVIOUS_NODATA):
-        raise ValueError("NLCD impervious holds no data for this box (outside the lower 48 US?)")
-    return write_raster(out_path, array, transform, crs, IMPERVIOUS_NODATA, "uint8")
+    with MemoryFile(data) as mem, mem.open() as src:
+        return src.read(1), src.transform, src.crs
 
 
 # ------------------------------------------------------------------ water mask

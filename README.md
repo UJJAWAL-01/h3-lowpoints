@@ -38,7 +38,8 @@ Find closed depressions ("low points") in an elevation model and describe them o
 7. **Validates** against observations: do flood reports, claims or high-water marks fall in or
    near depressions more often than chance? Lift with block-bootstrap confidence intervals.
 8. **Compares** the runoff reaching each depression with what it holds: the rain that fills it,
-   counting overflow from upstream, and how full NOAA Atlas 14 design storms leave it
+   counting overflow from upstream, and how full NOAA Atlas 14 design storms leave it; and
+   whether mapped streams, canals or roads drain it
    ([susceptibility](https://ujjawal-01.github.io/h3-lowpoints/susceptibility)).
 
 ## Install

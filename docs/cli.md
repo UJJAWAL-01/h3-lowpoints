@@ -1,6 +1,6 @@
 # Command line
 
-Installing the package adds one command, `h3lowpoints`, with ten subcommands. Every option is
+Installing the package adds one command, `h3lowpoints`, with eleven subcommands. Every option is
 listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 
 | Command | Does |
@@ -11,12 +11,13 @@ listed here; `h3lowpoints <command> --help` prints the same in the terminal.
 | [`clip`](#clip) | Keep the part of a saved result inside a boundary (for example the US). |
 | [`validate`](#validate) | Do observations fall in or near depressions more often than chance? |
 | [`index`](#index) | How easily each depression fills: runoff, rain to fill, design storms. |
+| [`drainage`](#drainage) | Drained or landlocked: mapped channels and roads near each depression. |
 | [`map`](#map) | Make the interactive web map from a saved result. |
 | [`fetch-dem`](#fetch-dem) | Download elevation data for a box. |
 | [`fetch-landcover`](#fetch-landcover) | Download land cover for a box. |
 | [`rainfall`](#rainfall) | Design rainfall for a point in the US. |
 
-**Exit codes.** 0 on success. 1 when `verify`, `build`, `clip` or `index` found problems. 3 when `build` stopped at
+**Exit codes.** 0 on success. 1 when `verify`, `build`, `clip`, `index` or `drainage` found problems. 3 when `build` stopped at
 its `--hours` limit (run it again to continue). Any input error
 (a bad box, a missing file, a CRS that cannot be used, a missing optional package) prints
 `error: <explanation>` and exits with code 1. `h3lowpoints --version` prints the version.
@@ -186,6 +187,35 @@ verifies the folder. See [Susceptibility](susceptibility.md) for the method.
 h3lowpoints index houston --impervious imperv.tif --rain atlas14 --cache-dir atlas14
 ```
 
+## drainage
+
+```
+h3lowpoints drainage FOLDER [--streams FILE] [--canals FILE] [--roads FILE] [--nhd] [--tiger] [options]
+```
+
+Looks for signs that each depression is drained: a mapped stream or canal at its lowest point or
+across its cells, a road at its spill point. Adds the drainage columns to the folder's
+susceptibility table (keeping the index columns), records the settings in `meta.json`, prints
+how many are drained and landlocked, and verifies the folder. At least one source of lines is
+needed. See [Susceptibility](susceptibility.md#drained-or-landlocked).
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--streams FILE` | | Stream and river lines (vector file, any CRS). |
+| `--canals FILE` | | Canal, ditch, conduit and pipeline lines. |
+| `--roads FILE` | | Road lines. |
+| `--nhd` | | US: fetch streams (NHD types 460, 558) and canals (336, 420, 428) for the result's area from the NHD map service, instead of `--streams` and `--canals`. |
+| `--tiger` | | US: fetch the roads of the counties the result touches from Census TIGER/Line, instead of `--roads`. Needs `--cache-dir`. |
+| `--land-cover RASTER` | | Land cover classes, read at each lowest point (for example NLCD classes from `fetch-landcover`). |
+| `--near-m M` | `30` | A channel this close to the lowest point, or a road this close to the spill point, drains the depression. |
+| `--min-share F` | `0.5` | Or channels cross cells holding at least this share of its area. |
+| `--max-distance-m M` | `1000` | Distances beyond this are left empty. |
+| `--cache-dir DIR` | | Keep the downloaded county road files here. |
+
+```
+h3lowpoints drainage houston --nhd --tiger --cache-dir tiger --land-cover classes.tif
+```
+
 ## map
 
 ```
@@ -221,12 +251,12 @@ Prints the size of the raster written, for example
 ## fetch-landcover
 
 ```
-h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd] [--year Y]
+h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd|nlcd-landcover] [--year Y]
 ```
 
 `worldcover` (default): ESA WorldCover 2021 classes, 10 m, worldwide. `nlcd`: NLCD percent
 impervious surface, 30 m, lower 48 US states, for `--year` 2001, 2004, 2006, 2008, 2011, 2013,
-2016, 2019 or 2021 (default). See [Data sources](data-sources.md).
+2016, 2019 or 2021 (default). `nlcd-landcover`: NLCD land cover classes for the same years. See [Data sources](data-sources.md).
 
 ## rainfall
 

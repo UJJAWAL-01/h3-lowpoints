@@ -23,6 +23,17 @@
 - `susceptibility.cell_means`: the mean of any raster on each H3 cell, optionally only the cells
   inside a coarser parent.
 - `store.iter_file`: any `.csv` or `.parquet` table file in pieces.
+- **Drained or landlocked** (`drainage.drainage_flags`, `h3lowpoints drainage`): per depression,
+  the distance from its lowest point to the nearest mapped stream (`stream_m`) and canal, ditch,
+  conduit or pipeline (`canal_m`), the share of its area in H3 cells a channel crosses
+  (`channel_share`), the distance from its spill point to the nearest road (`spill_road_m`), its
+  land cover class (`land_cover`), and `drained`/`landlocked` by a stated rule. From any line
+  files; in the US `--nhd` and `--tiger` fetch them. The drainage columns join the susceptibility
+  table, and either group can be computed or redone without the other; `verify` checks them.
+- US readers: `sources.nhd` (NHD high-resolution flowlines from the map service or a state's
+  GeoPackage zip), `sources.roads` (Census TIGER/Line roads by county) and
+  `sources.landcover.fetch_land_cover` (NLCD land cover classes; `fetch-landcover --from
+  nlcd-landcover`).
 
 ## 0.3.0 (26 October 2026)
 

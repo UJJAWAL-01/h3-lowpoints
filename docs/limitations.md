@@ -40,6 +40,10 @@ It inherits every limit above, and adds its own:
   cannot see.
 - **Rainfall data.** NOAA Atlas 14 covers the US except Washington and Oregon; where its project
   areas meet, neighbouring grids differ by a few percent. Elsewhere, rain must be supplied.
+- **Drained or landlocked from maps.** Storm drains are mostly not mapped, so many city
+  depressions flagged landlocked are drained; and on 30 m data in a city, roads are so close
+  everywhere that a road at the spill point says little (see
+  [Susceptibility](susceptibility.md#limits)).
 - **Evidence against observations is not yet measured** (see
   [Susceptibility](susceptibility.md#the-table-and-its-checks)).
 
