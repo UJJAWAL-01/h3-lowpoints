@@ -23,6 +23,8 @@
 - `susceptibility.cell_means`: the mean of any raster on each H3 cell, optionally only the cells
   inside a coarser parent.
 - `store.iter_file`: any `.csv` or `.parquet` table file in pieces.
+- [Example maps](docs/example-maps.md): interactive previews of the index and the drainage flags
+  for three test areas (Houston, North Dakota prairie potholes, California Central Valley).
 - **Drained or landlocked** (`drainage.drainage_flags`, `h3lowpoints drainage`): per depression,
   the distance from its lowest point to the nearest mapped stream (`stream_m`) and canal, ditch,
   conduit or pipeline (`canal_m`), the share of its area in H3 cells a channel crosses
