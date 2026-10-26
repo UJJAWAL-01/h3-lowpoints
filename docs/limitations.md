@@ -31,9 +31,9 @@ It inherits every limit above, and adds its own:
 - **No drains, pipes, pumps or infiltration timing.** Engineered drainage can keep dry a
   depression the index says fills; this matters most in cities, where most street sags have
   inlets.
-- **One runoff coefficient per H3 cell** from imperviousness (Simple Method). It was made for
-  typical storms: in rare storms, fields and lawns shed more water than it assumes, so those
-  storms are underestimated there. Soils are not used.
+- **Curve numbers assume average soil moisture.** On frozen or saturated ground (spring
+  snowmelt on the prairies) more runs off; snowmelt itself is not modelled. Each catchment takes
+  one area-weighted curve number, and each H3 cell the mean of its pixels.
 - **Volumes, not timing.** A storm enters only through its total depth; how fast it falls and how
   long water stays are not modelled.
 - **Spill links from the terrain model**: water passes under roads through culverts the model
@@ -41,9 +41,9 @@ It inherits every limit above, and adds its own:
 - **Rainfall data.** NOAA Atlas 14 covers the US except Washington and Oregon; where its project
   areas meet, neighbouring grids differ by a few percent. Elsewhere, rain must be supplied.
 - **Drained or landlocked from maps.** Storm drains are mostly not mapped, so many city
-  depressions flagged landlocked are drained; and on 30 m data in a city, roads are so close
-  everywhere that a road at the spill point says little (see
-  [Susceptibility](susceptibility.md#limits)).
+  depressions flagged landlocked are drained. Only highways and ramps count at the spill point:
+  on 30 m data in a city any road is near almost everywhere (see
+  [Susceptibility](susceptibility.md#drained-or-landlocked)).
 - **Evidence against observations is not yet measured** (see
   [Susceptibility](susceptibility.md#the-table-and-its-checks)).
 

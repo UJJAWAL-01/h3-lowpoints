@@ -21,8 +21,8 @@ streams and canals and Census TIGER for roads, see `sources.nhd` and `sources.ro
   channel_share  share of the depression's area in H3 cells that a stream or canal line crosses
                  (needs details=True)
   spill_road_m   distance from the spill point to the nearest road (needs catchments=True)
-  drained        stream_m or canal_m at most near_m, channel_share at least min_share, or
-                 spill_road_m at most near_m
+  drained        stream_m or canal_m at most near_m, or spill_road_m at most near_m (and, if
+                 min_share is given, channel_share at least min_share)
   landlocked     not drained
 
 Distances beyond `max_distance_m`, or to lines not given, are NaN; a NaN never makes a depression
@@ -41,8 +41,10 @@ from .store import CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta,
 DRAINAGE_COLUMNS = ["land_cover", "stream_m", "canal_m", "channel_share", "spill_road_m",
                     "drained", "landlocked"]
 NEAR_M = 30.0                   # a line this close to the lowest or spill point drains it
-MIN_SHARE = 0.5                 # or channels cross cells holding this share of its area
 MAX_DISTANCE_M = 1000.0         # distances beyond this are not reported
+# highways and ramps (TIGER MTFCC primary road, secondary road, ramp): at a spill point they are
+# a sign of drainage far beyond chance; any road is not, in cities (docs/susceptibility.md)
+MAJOR_ROADS = ("S1100", "S1200", "S1630")
 
 
 def _geopandas():
@@ -155,7 +157,7 @@ def local_crs(lat, lon):
 
 
 def drainage_flags(result, *, streams=None, canals=None, roads=None, land_cover=None,
-                   near_m=NEAR_M, min_share=MIN_SHARE, max_distance_m=MAX_DISTANCE_M, crs=None,
+                   near_m=NEAR_M, min_share=None, max_distance_m=MAX_DISTANCE_M, crs=None,
                    rows=CHUNK_ROWS):
     """One row per depression: land cover, distances to mapped channels and roads, and whether
     it is drained or landlocked. See the module text and docs/susceptibility.md.
@@ -163,14 +165,15 @@ def drainage_flags(result, *, streams=None, canals=None, roads=None, land_cover=
     result          a `Result` or its folder
     streams, canals, roads   line files (any CRS), GeoDataFrames or GeoSeries; at least one
     land_cover      a raster of land cover classes (such as NLCD), read at each lowest point
-    near_m, min_share        the rule for `drained`
+    near_m, min_share        the rule for `drained` (min_share None: channel_share is reported
+                    but not used)
     max_distance_m  distances beyond this are NaN
     crs             projected CRS (metres) to measure in; default the UTM zone of the result
     """
     if streams is None and canals is None and roads is None:
         raise ValueError("give at least one of streams, canals or roads")
-    if near_m < 0 or not 0 < min_share <= 1 or max_distance_m < near_m:
-        raise ValueError("need near_m >= 0, 0 < min_share <= 1 and max_distance_m >= near_m")
+    if near_m < 0 or (min_share is not None and not 0 < min_share <= 1) or max_distance_m < near_m:
+        raise ValueError("need near_m >= 0, 0 < min_share <= 1 (or None) and max_distance_m >= near_m")
     import shapely
 
     deps, cell_chunks, meta = _tables(result, rows)
@@ -230,12 +233,15 @@ def drainage_flags(result, *, streams=None, canals=None, roads=None, land_cover=
     return out
 
 
-def drained_rule(table, near_m, min_share):
-    """The `drained` column from the distance and share columns (NaN never drains)."""
+def drained_rule(table, near_m, min_share=None):
+    """The `drained` column from the distance (and, with min_share, share) columns; NaN never
+    drains."""
     with np.errstate(invalid="ignore"):
-        return ((table["stream_m"] <= near_m) | (table["canal_m"] <= near_m)
-                | (table["channel_share"] >= min_share) | (table["spill_road_m"] <= near_m)
-                ).to_numpy(dtype=bool)
+        drained = ((table["stream_m"] <= near_m) | (table["canal_m"] <= near_m)
+                   | (table["spill_road_m"] <= near_m))
+        if min_share is not None:
+            drained |= table["channel_share"] >= min_share
+        return drained.to_numpy(dtype=bool)
 
 
 def _describe(source):

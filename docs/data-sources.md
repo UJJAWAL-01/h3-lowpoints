@@ -115,8 +115,8 @@ A trap found while testing: **the service labels 0 as "no data"**, but in this p
 "0% impervious" (a park, a field, a forest). Read naively, every unbuilt pixel would vanish. The
 library drops that label and treats only values above 100 as no data.
 
-It sets the runoff coefficient of the susceptibility index
-([Susceptibility](susceptibility.md#runoff)).
+It is the paved share of the curve numbers of the susceptibility index
+([Susceptibility](susceptibility.md#runoff-curve-numbers)).
 
 ## NLCD land cover
 
@@ -130,6 +130,28 @@ It sets the runoff coefficient of the susceptibility index
 
 The drainage flags read it at each lowest point (`land_cover`), so residential and farm
 depressions can be studied apart.
+
+## USDA soil survey (gNATSGO): hydrologic groups
+
+- **What:** the soil map unit of every 10 m pixel of the lower 48 states (the gridded National
+  Soil Survey Geographic Database of USDA NRCS), and each unit's hydrologic group (`hydgrpdcd`,
+  dominant condition): A (sand, gravel; water soaks in fast), B, C, D (clay, shallow soil, a high
+  water table; it sheds water), or a dual group A/D, B/D, C/D for wet soils (the first letter if
+  artificially drained). Some units have no group: urban land, water, pits, rock outcrop.
+- **Where:** the lower 48 states.
+- **Licence:** CC0 as published on Microsoft's Planetary Computer; USDA data are public domain.
+- **Format:** the July 2020 edition, as cloud-optimized GeoTIFF tiles of 16,384 × 16,384 pixels
+  (163.84 km) with overviews at 20 to 320 m, in the USGS version of Conus Albers, and the map-unit
+  table as Parquet (317,894 units, 12.5 MB). A read token is issued anonymously by the Planetary
+  Computer's public API, so no account is needed.
+- **Library:** `sources.soils.fetch_soil_groups`, `h3lowpoints fetch-landcover --from soil-groups`;
+  `runoff.fetch_curve_numbers` (`--from curve-numbers`) combines them with NLCD.
+
+The groups are read from the soil grid's 20 m overview onto 30 m pixels (each pixel takes the map
+unit at its centre, which the overview can shift by one 10 m pixel, far less than the precision
+of a soil map). Checked in October 2026 on three test boxes: Houston's soils are 84% group D
+(clays), North Dakota's mostly C, the Central Valley's a mix of A to D. The table lists one unit
+twice ("Water"), which is harmless and dropped.
 
 ## USGS National Hydrography Dataset (NHD)
 

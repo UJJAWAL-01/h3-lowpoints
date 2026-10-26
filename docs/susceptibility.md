@@ -2,9 +2,10 @@
 
 A depression fills when more rain runs into it than it can hold. This page describes how the
 library compares the two for every depression of a result: the runoff from its catchment, the
-rain depth that fills it, and, for design storms, how full each storm leaves it. The answer is a
-**screening index**, transparent term by term and needing no training data. It is still not a
-flood map ([Accuracy and limits](limitations.md#the-susceptibility-index)).
+rain depth that fills it, and, for design storms, how full each storm leaves it; and whether
+mapped streams, canals or highways drain it. The answer is a **screening index**, transparent
+term by term and needing no training data. It is still not a flood map
+([Accuracy and limits](limitations.md#the-susceptibility-index)).
 
 It needs a result computed with catchments (`catchments=True`, `--catchments`): each
 depression's catchment, its volume, and the depression it overflows into (see
@@ -13,50 +14,86 @@ depression's catchment, its volume, and the depression it overflows into (see
 ## Quick start
 
 ```
-h3lowpoints fetch-landcover --from nlcd --bbox -95.6 29.6 -95.2 29.9 --out imperv.tif
-h3lowpoints build --bbox -95.6 29.6 -95.2 29.9 --out houston --catchments --format parquet
-h3lowpoints index houston --impervious imperv.tif --rain atlas14 --cache-dir atlas14
+h3lowpoints build --bbox -95.6 29.6 -95.2 29.9 --out houston --catchments --details --format parquet
+h3lowpoints fetch-landcover --from curve-numbers --bbox -95.65 29.55 -95.15 29.95 --out cn.tif
+h3lowpoints index houston --curve-numbers cn.tif --rain atlas14 --cache-dir atlas14
+h3lowpoints fetch-landcover --from nlcd-landcover --bbox -95.65 29.55 -95.15 29.95 --out classes.tif
+h3lowpoints drainage houston --nhd --tiger --cache-dir tiger --land-cover classes.tif
 ```
 
 ```python
+from h3lowpoints.runoff import fetch_curve_numbers
 from h3lowpoints.susceptibility import susceptibility, write_susceptibility
 
-table = susceptibility("houston", impervious="imperv.tif", rain="atlas14", cache_dir="atlas14")
+fetch_curve_numbers((-95.65, 29.55, -95.15, 29.95), "cn.tif", cache_dir="soils")
+table = susceptibility("houston", curve_numbers="cn.tif", rain="atlas14", cache_dir="atlas14")
 write_susceptibility("houston", table)       # houston/susceptibility.parquet + meta.json
 table.sort_values("rain_to_fill_upstream_mm").head()   # the depressions that fill first
 ```
 
-Outside the US, give your own imperviousness raster (percent, any CRS) or one runoff coefficient
-(`runoff_coef=0.5`, `--runoff-coef 0.5`), and your own rain: one depth in millimetres, or storms
-by return period (`rain={10: 80.0, 100: 150.0}`, each a depth or a function of latitude and
-longitude giving millimetres).
+Give the curve numbers a box a little larger than the result's, so that catchments reaching past
+its edge are covered. Outside the US, give your own curve-number raster (any CRS) or one curve
+number (`curve_number=80`, `--curve-number 80`), and your own rain: one depth in millimetres, or
+storms by return period (`rain={10: 80.0, 100: 150.0}`, each a depth or a function of latitude
+and longitude giving millimetres).
 
-## Runoff
+## Runoff: curve numbers
 
-Of the rain falling on a catchment, a share runs off the surface and the rest soaks in or
-evaporates: the **runoff coefficient**. It is taken from how much of the ground is paved or
-built (imperviousness, percent):
+How much of a storm runs off is set by the **SCS curve number** (CN, 0 to 100) of the NRCS
+method *Urban Hydrology for Small Watersheds* (TR-55, 1986), the standard US method for design
+storms. For a storm of P mm on ground of curve number CN:
 
-> runoff coefficient = 0.05 + 0.009 × imperviousness
+> S = 25400 / CN − 254 (the most the ground can still hold, mm)
+> Q = (P − 0.2 S)² / (P + 0.8 S) when P is more than 0.2 S, else 0
 
-This is the **Simple Method** (Schueler 1987, *Controlling Urban Runoff*, Metropolitan Washington
-Council of Governments), widely used in US stormwater design: bare soil and vegetation shed 5%,
-fully paved ground 95%. One input, published, and easy to inspect.
+0.2 S is what the ground holds before any water runs off. A curve number of 98 (pavement) sheds
+almost every millimetre; 61 (lawn on loam) holds the first 32 mm and then sheds a growing share.
+Average soil moisture before the storm is assumed (TR-55's antecedent runoff condition II).
 
-The imperviousness of each H3 cell is the mean of the raster's pixels whose centre lies in the
-cell (`cell_means`); NLCD (30 m, lower 48 states) is the usual US source
-([Data sources](data-sources.md#nlcd-percent-impervious)). A depression's **runoff coefficient**
-is the area-weighted mean over the cells of its catchment, and its **runoff area** is
-`runoff_coef × catchment_area_m2`: a rain depth times the runoff area is the volume of water that
-reaches the depression from its own catchment.
+**Curve numbers in the US** (`runoff.fetch_curve_numbers`, `fetch-landcover --from
+curve-numbers`) come from three 30 m layers on one grid:
 
-Worked example: a depression holding 500 m³, with a catchment of 10,000 m² that is 30%
-impervious, has a runoff coefficient of 0.05 + 0.009 × 30 = 0.32 and a runoff area of 3,200 m².
+- **land cover**, NLCD classes ([Data sources](data-sources.md#nlcd-land-cover));
+- **imperviousness**, NLCD percent paved ([Data sources](data-sources.md#nlcd-percent-impervious));
+- **soil hydrologic group**, from the USDA soil survey gNATSGO
+  ([Data sources](data-sources.md#usda-soil-survey-gnatsgo-hydrologic-groups)): A (sand,
+  gravel; water soaks in fast) to D (clay, shallow soil, a high water table; it sheds water).
+
+Each pixel's curve number is TR-55's composite: its paved share at 98, the rest at the TR-55
+value for its land cover on its soil group (`runoff.CN_TABLE`):
+
+| NLCD class | TR-55 cover used for the unpaved ground | A | B | C | D |
+|---|---|---|---|---|---|
+| 21 to 24, developed | open space, good condition (lawns, parks) | 39 | 61 | 74 | 80 |
+| 31, barren | newly graded areas, no vegetation | 77 | 86 | 91 | 94 |
+| 41 to 43, forest | woods, fair condition | 36 | 60 | 73 | 79 |
+| 51, 52, shrub | brush-weed-grass mixture, fair condition | 35 | 56 | 70 | 77 |
+| 71 to 74, grassland; 81, pasture and hay | pasture, grassland or range, fair condition | 49 | 69 | 79 | 84 |
+| 82, cultivated crops | row crops, straight row, good condition | 67 | 78 | 85 | 89 |
+| 90, woody wetlands | woods, fair condition, on group D | 79 | 79 | 79 | 79 |
+| 95, emergent wetlands | pasture, fair condition, on group D | 84 | 84 | 84 | 84 |
+| 11, open water; 12, ice | as pavement | 98 | 98 | 98 | 98 |
+
+Choices made and why: soils of a dual group (A/D, B/D, C/D: wet soils, the first letter if
+artificially drained) are taken as **D**, since a wet soil in a depression is usually not
+drained; map units without a group (urban land, pits, rock outcrop) and places the survey does
+not cover are taken as D; wetlands as D whatever the map says, because their soils are
+saturated; natural covers in fair condition, as nothing says better or worse.
+
+Each H3 cell takes the mean curve number of the pixels whose centre lies in it (`cell_means`),
+and a depression's `curve_number` is the **area-weighted mean over its catchment's cells**, as
+TR-55 weights curve numbers over a watershed.
+
+Worked example: a depression holding 500 m³ with a catchment of 10,000 m² of suburban yards on
+clay loam (group C), 30% paved: CN = 0.3 × 98 + 0.7 × 74 = 81.2, so S = 58.8 mm and nothing runs
+off until 11.8 mm of rain has fallen. 100 mm of rain sheds 52.9 mm; 30 mm sheds 4.3 mm.
 
 ## Rain to fill
 
-- `rain_to_fill_mm`: the uniform rain depth that fills a depression from its **own catchment
-  alone**, `1000 × volume_m3 / runoff_area_m2`. In the example, 500 / 3,200 m = 156 mm.
+- `rain_to_fill_mm`: the uniform rain that fills a depression from its **own catchment alone**:
+  the storm whose runoff, spread over the catchment, equals its volume. With Q = volume /
+  catchment area, the runoff equation turned round gives P = 0.2 S + (Q + √(Q² + 4QS)) / 2.
+  In the example, Q = 50 mm and the rain to fill is 96.5 mm.
 - `rain_to_fill_upstream_mm`: the same, also counting the **overflow of the depressions upstream**
   (those whose `spill_to` chain leads to it) that fill first and pass the rest on. It is never
   larger than `rain_to_fill_mm`, and equal to it when nothing spills in.
@@ -65,16 +102,15 @@ Neither needs rainfall data, so both are available everywhere, including where n
 data exists. A small value means the depression fills in small storms.
 
 `rain_to_fill_upstream_mm` is found by trying uniform rain depths that step up by 1%, each with
-one pass down the spill links ([the cascade](#the-cascade)), between two bounds every answer lies
-within: the volume over the runoff area of the depression and everything upstream (all the
-upstream water arrives), and `rain_to_fill_mm` (none does). A depression's answer is
-interpolated between the last depth that left it short and the first that filled it, so it is
-exact to within 1%.
+one pass down the spill links ([the cascade](#the-cascade)), from the smallest initial abstraction
+(0.2 S) of any catchment to the largest own rain to fill. A depression's answer is interpolated
+between the last depth that left it short and the first that filled it; the water reaching it
+only grows with the rain, so the answer is exact to within 1%.
 
 ## Design storms
 
-With storms (`rain`), each depression's own runoff is the rain on each cell of its catchment
-times the cell's area and runoff coefficient, summed; overflow then passes down the spill links.
+With storms (`rain`), each depression's own runoff is the runoff of its catchment's mean rain on
+its curve number, times its catchment area; overflow then passes down the spill links.
 
 - `fill_ratio_<N>yr`: the water reaching the depression in the 24-hour storm expected once in N
   years (its own runoff plus the overflow passed on to it), over its volume. 1 or more: it fills
@@ -99,11 +135,11 @@ conserved: the runoff of all catchments equals the water stored plus the water l
 
 ## Missing inputs and coverage
 
-- Imperviousness must cover at least `min_coverage` (default 90%) of a catchment's area: the
-  catchment's mean is then taken over the covered part. Below that, the runoff columns and
-  everything computed from them are NaN.
-- Rain must cover at least `min_coverage` of a catchment's runoff; otherwise the storm columns
-  are NaN.
+- Curve numbers must cover at least `min_coverage` (default 90%) of a catchment's area: the
+  catchment's mean is then taken over the covered part. Below that, `curve_number` and
+  everything computed from it are NaN. The same holds for the optional `impervious_pct`.
+- Rain must cover at least `min_coverage` of a catchment's area; otherwise the storm columns are
+  NaN.
 - A NaN propagates downstream: a depression receiving overflow from one whose runoff is unknown
   has unknown storm columns and `rain_to_fill_upstream_mm`.
 - **Washington and Oregon** have no Atlas 14 estimates (checked in October 2026), so their storm
@@ -112,35 +148,48 @@ conserved: the runoff of all catchments equals the water stored plus the water l
 ## Drained or landlocked
 
 Many depressions in an elevation model are drained in reality: a canal, a ditch or a stream runs
-through them, or the rim they overflow at is a road embankment with a culvert under it that the
-model cannot see. **Landlocked** depressions, where the water has no way out but to soak in or
-evaporate, are the ones that matter for waterlogging in towns and on farms.
+through them, or the rim they overflow at is a highway embankment with a culvert under it that
+the model cannot see. **Landlocked** depressions, where the water has no way out but to soak in
+or evaporate, are the ones that matter for waterlogging in towns and on farms.
 `drainage.drainage_flags` (`h3lowpoints drainage`) looks for signs of drainage in mapped lines:
-
-```
-h3lowpoints fetch-landcover --from nlcd-landcover --bbox -95.6 29.6 -95.2 29.9 --out classes.tif
-h3lowpoints drainage houston --nhd --tiger --cache-dir tiger --land-cover classes.tif
-```
 
 - `stream_m`, `canal_m`: distance from the lowest point to the nearest mapped stream or river,
   and to the nearest canal, ditch, underground conduit or pipeline. In the US these come from the
   National Hydrography Dataset ([Data sources](data-sources.md#usgs-national-hydrography-dataset-nhd)):
   streams are feature types 460 and 558, canals 336, 420 and 428.
+- `spill_road_m`: distance from the spill point to the nearest road given. With `--tiger`, the
+  roads are highways and ramps only (Census TIGER/Line classes S1100 primary road, S1200
+  secondary road, S1630 ramp; `MAJOR_ROADS`); `--all-roads` takes every road. It needs
+  `catchments=True`.
 - `channel_share`: the share of the depression's area in H3 cells that a stream or canal line
-  crosses (lines are followed in steps of a third of a cell's edge). It needs a result computed
-  with `details=True`.
-- `spill_road_m`: distance from the spill point to the nearest road (Census TIGER/Line in the US).
-  It needs `catchments=True`.
+  crosses (lines are followed in steps of a third of a cell's edge). It needs `details=True`.
 - `land_cover`: the land cover class at the lowest point (NLCD classes in the US, 0 for no data),
   so residential and farm depressions can be picked out.
-- `drained`: a stream or canal within `near_m` (default 30 m) of the lowest point, channels
-  crossing cells that hold at least `min_share` (default half) of its area, or a road within
-  `near_m` of the spill point. `landlocked` is the opposite.
+- `drained`: a stream or canal within `near_m` (default 30 m) of the lowest point, or a road
+  within `near_m` of the spill point. `channel_share` is reported but counts only if a minimum
+  share is given (`min_share`, `--min-share`). `landlocked` is the opposite of `drained`.
+
+**How the rule was chosen.** Before any comparison with flood reports, each sign was measured
+against chance on three 1° test areas (built like the national layer): how often it occurs within
+30 m of the depressions, as a multiple of how often it occurs within 30 m of random points on
+land in the same area.
+
+| Sign within 30 m | Houston (city) | North Dakota (prairie potholes) | California (Central Valley) |
+|---|---|---|---|
+| a stream, at the lowest point | 6.3× | 2.4× | 6.4× |
+| a canal or ditch, at the lowest point | 3.4× | (almost none mapped) | 1.2× |
+| any road, at the spill point | 1.1× | 1.9× | 2.1× |
+| a highway or ramp, at the spill point | 2.0× | 3.0× | 6.6× |
+| channels across cells holding half its area | 2.6× | 1.25× | 2.1× |
+
+Streams and highways are telling everywhere; any road is not, in a city (in central Houston, 53%
+of random points lie within 30 m of a road, and spill points no more often); the channel share
+is weak where streams are few. The rule therefore keeps streams, canals and highways, and the
+shares drained were 36% (Houston), 6% (North Dakota) and 50% (Central Valley).
 
 Distances beyond `max_distance_m` (default 1 km) are left empty. A missing line file, or an
 empty distance, never makes a depression drained: `landlocked` means **no sign of drainage in
-the lines given**, not proof that there is none. The rule's default distances are not yet
-calibrated (see [Limits](#limits)).
+the lines given**, not proof that there is none.
 
 The drainage columns join the same susceptibility table as the index: computing either replaces
 only its own columns and settings, in any order.
@@ -149,17 +198,18 @@ only its own columns and settings, in any order.
 
 The columns are described in [Outputs](outputs.md#the-susceptibility-table), and the settings
 are recorded in `meta.json` (`susceptibility`). `verify` checks a saved table: every depression
-once; the coefficient, runoff area and rain to fill follow from their formulas;
-`rain_to_fill_upstream_mm` lies between its two bounds; and every storm with a fill ratio of 1 or
-more is no rarer than `fills_in_years`; the drainage distances lie in [0, `max_distance_m`],
-`channel_share` in [0, 1], `drained` follows the rule and `landlocked` is its opposite
-([Verification](verification.md)).
+once; curve numbers in (0, 100] and `rain_to_fill_mm` the inverse of the runoff equation;
+`rain_to_fill_upstream_mm` at most `rain_to_fill_mm` and at least the smallest initial
+abstraction upstream; every storm with a fill ratio of 1 or more no rarer than `fills_in_years`;
+the drainage distances in [0, `max_distance_m`], `channel_share` in [0, 1], `drained` following
+the rule and `landlocked` its opposite ([Verification](verification.md)).
 
-The test suite compares the cascade with a plain recursive version on random spill networks,
-checks that water is conserved, compares `rain_to_fill_upstream_mm` with a bisection that reruns
-the cascade for every depression, and checks two independent answers against each other: a
-uniform storm of depth D fills exactly the depressions whose `rain_to_fill_upstream_mm` is at
-most D (within the 1%).
+The test suite checks the runoff equation against TR-55 worked by hand and its inverse to
+machine precision, the curve numbers against the table, the cascade against a plain recursive
+version on random spill networks (water must be conserved), `rain_to_fill_upstream_mm` against a
+bisection that reruns the cascade for every depression, and two independent answers against each
+other: a uniform storm of depth D fills exactly the depressions whose `rain_to_fill_upstream_mm`
+is at most D (within the 1%).
 
 **Evidence against observations: not yet measured.** Whether depressions that fill in frequent
 storms are where flooding is reported is the next step of the [roadmap](roadmap.md), with the
@@ -167,13 +217,17 @@ storms are where flooding is reported is the next step of the [roadmap](roadmap.
 
 ## Limits
 
-- **No drains, pipes, pumps or infiltration timing.** Storm drains, culverts and pumps can empty
-  a depression the index says fills. The runoff coefficient stands for all losses to the ground.
-- **The Simple Method was made for typical storms.** In large storms, pervious ground sheds more
-  than 5%, so rare storms are underestimated on fields and lawns; methods using soils (such as
-  SCS curve numbers) are not part of this version.
-- **Averages per H3 cell.** A cell's imperviousness applies to every part of a catchment in that
+- **No drains, pipes, pumps or timing.** Storm drains, culverts and pumps can empty a depression
+  the index says fills. A storm enters only through its total depth.
+- **Average soil moisture.** Curve numbers assume average wetness before the storm. On frozen or
+  saturated ground (spring snowmelt on the prairies) more runs off, and on very dry ground less.
+  Snowmelt itself is not modelled.
+- **One curve number per catchment.** The catchment's area-weighted mean curve number is used for
+  all of it, as TR-55 does for small watersheds; where very different grounds share a catchment
+  (pavement draining onto sand), this underestimates small storms.
+- **Averages per H3 cell.** A cell's curve number applies to every part of a catchment in that
   cell, and rain is read at the cell's centre.
+- **The soil survey is the July 2020 edition** of gNATSGO, the one published openly as a grid.
 - **One pool per depression.** A depression fills as one pool: smaller pits inside it fill
   together with it (the fill curves describe its level, not separate sub-pits).
 - **Spill links come from the terrain model.** A culvert under a road the model shows as a dam
@@ -185,12 +239,6 @@ storms are where flooding is reported is the next step of the [roadmap](roadmap.
 - **Drainage flags are only as good as the maps.** Storm drains and sewers are mostly not
   mapped, so in cities many depressions flagged landlocked are drained by inlets. NHD maps
   ditches unevenly from county to county.
-- **Roads are everywhere in cities.** On 30 m data in Houston, 53% of random points lie within
-  30 m of some road, and spill points (48%) are no more often near a road than random points
-  are; highways and ramps alone come closer (5.1% of spill points within 30 m against 3.4% of
-  random points). Streams (19% of lowest points within 30 m against 2% of random points) and
-  canals (10% against 3%) are far more telling. The road rule is therefore to be calibrated on
-  test regions before it is used for a national layer.
 - **Atlas 14 project boundaries.** Where two of NOAA's project areas meet, both grids have
   values; they typically differ by about 5% (at most 41% in the 100-year 24-hour grids), and the
   mean is used.

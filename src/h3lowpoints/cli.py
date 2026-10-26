@@ -67,10 +67,14 @@ def build_parser():
     lc = sub.add_parser("fetch-landcover", help="download land cover for a box")
     _bbox_out(lc)
     lc.add_argument("--from", dest="dataset", default="worldcover",
-                    choices=["worldcover", "nlcd", "nlcd-landcover"],
+                    choices=["worldcover", "nlcd", "nlcd-landcover", "soil-groups", "curve-numbers"],
                     help="worldcover: global 10 m classes (default); nlcd: US 30 m percent "
-                         "impervious; nlcd-landcover: US 30 m land cover classes")
+                         "impervious; nlcd-landcover: US 30 m land cover classes; soil-groups: US "
+                         "soil hydrologic groups (gNATSGO); curve-numbers: US 30 m SCS curve "
+                         "numbers from NLCD and the soil groups")
     lc.add_argument("--year", type=int, default=2021, help="NLCD year (default 2021)")
+    lc.add_argument("--cache-dir", help="soil-groups and curve-numbers: keep the soil table here "
+                                        "(default: the output's folder)")
 
     b = sub.add_parser("build", help="analyze a US region of any size from USGS 3DEP (streams the tiles)")
     b.add_argument("--bbox", nargs=4, type=float, required=True,
@@ -141,11 +145,14 @@ def build_parser():
     ix = sub.add_parser("index", help="how easily each depression fills: runoff, rain to fill and "
                                       "design storms (needs a result made with --catchments)")
     ix.add_argument("results", help="folder written by 'analyze', 'build' or 'clip' with --catchments")
+    ix.add_argument("--curve-numbers",
+                    help="SCS curve numbers: a raster (US: 'fetch-landcover --from curve-numbers'), "
+                         "or a .csv/.parquet table of h3 and curve_number sorted by h3")
+    ix.add_argument("--curve-number", type=float,
+                    help="instead of --curve-numbers: one curve number (0 to 100) for all ground")
     ix.add_argument("--impervious",
-                    help="percent impervious: a raster (such as NLCD from 'fetch-landcover --from "
-                         "nlcd'), or a .csv/.parquet table of h3 and impervious_pct sorted by h3")
-    ix.add_argument("--runoff-coef", type=float,
-                    help="instead of --impervious: one runoff coefficient (0 to 1) for all ground")
+                    help="optional: percent paved (raster or table of h3 and impervious_pct), "
+                         "reported as impervious_pct")
     ix.add_argument("--rain",
                     help="design storms: 'atlas14' (US: 24-hour storms of 1 to 1000 years from NOAA "
                          "Atlas 14) or one uniform depth in mm; without it, only the rain-to-fill "
@@ -166,15 +173,19 @@ def build_parser():
                     help="US: fetch streams and canals from the USGS National Hydrography Dataset "
                          "for the result's area (instead of --streams and --canals)")
     dr.add_argument("--tiger", action="store_true",
-                    help="US: fetch roads from Census TIGER/Line for the result's area (instead of "
-                         "--roads; needs --cache-dir)")
+                    help="US: fetch highways and ramps (TIGER classes S1100, S1200, S1630) from "
+                         "Census TIGER/Line for the result's area (instead of --roads; needs "
+                         "--cache-dir)")
+    dr.add_argument("--all-roads", action="store_true",
+                    help="with --tiger: every road, not only highways and ramps")
     dr.add_argument("--land-cover", help="raster of land cover classes, read at each lowest point "
                                          "(for example from 'fetch-landcover')")
     dr.add_argument("--near-m", type=float, default=30.0,
                     help="a channel this close to the lowest point, or a road this close to the "
                          "spill point, drains the depression (default 30)")
-    dr.add_argument("--min-share", type=float, default=0.5,
-                    help="or channels cross cells holding at least this share of its area (default 0.5)")
+    dr.add_argument("--min-share", type=float,
+                    help="also count as drained when channels cross cells holding at least this "
+                         "share of its area (off by default)")
     dr.add_argument("--max-distance-m", type=float, default=1000.0,
                     help="distances beyond this are left empty (default 1000)")
     dr.add_argument("--cache-dir", help="keep downloaded road files here")
@@ -222,8 +233,17 @@ def _landcover(args):
         out = landcover.fetch_worldcover(bbox, args.out)
     elif args.dataset == "nlcd":
         out = landcover.fetch_impervious(bbox, args.out, year=args.year)
-    else:
+    elif args.dataset == "nlcd-landcover":
         out = landcover.fetch_land_cover(bbox, args.out, year=args.year)
+    elif args.dataset == "soil-groups":
+        from .sources.soils import fetch_soil_groups
+
+        out = fetch_soil_groups(bbox, args.out, cache_dir=args.cache_dir or Path(args.out).parent)
+    else:
+        from .runoff import fetch_curve_numbers
+
+        out = fetch_curve_numbers(bbox, args.out, cache_dir=args.cache_dir or Path(args.out).parent,
+                                  year=args.year)
     with rasterio.open(out) as src:
         print(f"{src.width} x {src.height} pixels written to {out}")
     return 0
@@ -421,8 +441,9 @@ def _index(args):
             rain = float(rain)
         except ValueError:
             raise ValueError(f"--rain must be 'atlas14' or a depth in mm, got {rain!r}") from None
-    table = susceptibility(args.results, impervious=args.impervious, runoff_coef=args.runoff_coef,
-                           rain=rain, min_coverage=args.min_coverage, cache_dir=args.cache_dir,
+    table = susceptibility(args.results, curve_numbers=args.curve_numbers,
+                           curve_number=args.curve_number, impervious=args.impervious, rain=rain,
+                           min_coverage=args.min_coverage, cache_dir=args.cache_dir,
                            workers=args.workers)
     path = write_susceptibility(args.results, table)
     n = len(table)
@@ -463,8 +484,12 @@ def _drainage(args):
             raise ValueError("--tiger needs --cache-dir (one road file per county is downloaded)")
         from .sources.roads import fetch_roads
 
+        from .drainage import MAJOR_ROADS
+
         roads = fetch_roads(bbox, cache_dir=args.cache_dir)
-        print(f"TIGER: {len(roads):,} road lines")
+        if not args.all_roads:
+            roads = roads[roads["MTFCC"].isin(MAJOR_ROADS)]
+        print(f"TIGER: {len(roads):,} {'road' if args.all_roads else 'highway and ramp'} lines")
     table = drainage_flags(args.results, streams=streams, canals=canals, roads=roads,
                            land_cover=args.land_cover, near_m=args.near_m,
                            min_share=args.min_share, max_distance_m=args.max_distance_m)

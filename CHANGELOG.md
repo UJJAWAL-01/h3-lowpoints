@@ -5,18 +5,24 @@
 ### Added
 - **Susceptibility: how easily each depression fills** (`susceptibility.susceptibility` and
   `write_susceptibility`; `h3lowpoints index`), for any result computed with catchments. Per
-  depression: the runoff coefficient of its catchment (Schueler's Simple Method,
-  0.05 + 0.009 x percent impervious, from any imperviousness raster or per-cell table, or one
-  coefficient), its runoff area, the rain that fills it from its own catchment
-  (`rain_to_fill_mm`) and with the overflow of the depressions upstream
+  depression: the SCS curve number of its catchment (`curve_number`, the area-weighted mean over
+  its H3 cells), the rain that fills it from its own catchment (`rain_to_fill_mm`, the exact
+  inverse of the SCS runoff equation) and with the overflow of the depressions upstream
   (`rain_to_fill_upstream_mm`, exact to within 1%), and, with design storms, the share of its
   volume each storm brings (`fill_ratio_2yr`, `fill_ratio_10yr`, `fill_ratio_100yr`) and the
   smallest return period whose storm fills it (`fills_in_years`). Overflow passes down the spill
   links (`hydro.cascade`), conserving water. Inputs covering too little of a catchment give NaN,
   passed on downstream. Saved as `susceptibility.csv` or `.parquet` with its settings in
   `meta.json`; read back by `read_result`, carried by `clip`, and checked by `verify` (nine new
-  damages caught). Checked against a plain recursive cascade, a bisection, and a uniform storm.
-  See [docs/susceptibility.md](docs/susceptibility.md).
+  damages caught). Checked against TR-55 worked by hand, a plain recursive cascade, a bisection,
+  and a uniform storm. See [docs/susceptibility.md](docs/susceptibility.md).
+- **Curve numbers** (`runoff`): the SCS runoff equation and its inverse, the TR-55 curve numbers
+  of NLCD land cover on each soil hydrologic group (`CN_TABLE`), composite with the paved share,
+  and `fetch_curve_numbers` (`fetch-landcover --from curve-numbers`), which builds them for any
+  box in the lower 48 states from NLCD and the USDA soil survey.
+- `sources.soils.fetch_soil_groups` (`fetch-landcover --from soil-groups`): soil hydrologic groups
+  from the USDA gNATSGO soil survey, read by parts from Microsoft's Planetary Computer without an
+  account, on NLCD's grid pixel for pixel.
 - `sources.rainfall.Atlas14Grids`: NOAA Atlas 14 depths for many points from NOAA's published
   grids (all seven project areas of the conterminous US, every duration and return period),
   with `atlas14_grid_url` and `read_ascii_grid`. It matches the point service to within 1%.
@@ -29,8 +35,12 @@
   the distance from its lowest point to the nearest mapped stream (`stream_m`) and canal, ditch,
   conduit or pipeline (`canal_m`), the share of its area in H3 cells a channel crosses
   (`channel_share`), the distance from its spill point to the nearest road (`spill_road_m`), its
-  land cover class (`land_cover`), and `drained`/`landlocked` by a stated rule. From any line
-  files; in the US `--nhd` and `--tiger` fetch them. The drainage columns join the susceptibility
+  land cover class (`land_cover`), and `drained`/`landlocked`: a stream or canal within 30 m of
+  the lowest point, or a highway or ramp within 30 m of the spill point. The rule was chosen by
+  measuring each sign against chance on three test areas before any validation; any road, and
+  the channel share, were left out of it as uninformative in cities and in the prairie
+  potholes. From any line files; in the US `--nhd` and `--tiger` (highways and ramps; `--all-roads`
+  for every road) fetch them. The drainage columns join the susceptibility
   table, and either group can be computed or redone without the other; `verify` checks them.
 - US readers: `sources.nhd` (NHD high-resolution flowlines from the map service or a state's
   GeoPackage, unpacked once beside its zip), `sources.roads` (Census TIGER/Line roads by county) and

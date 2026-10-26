@@ -96,15 +96,16 @@ def cascade(order, target, own, volume):
 
 
 @njit(cache=True)
-def _rain_to_fill(order, target, runoff_area, volume, low, high, step):
+def _rain_to_fill(order, target, area, retention, volume, low, high, step):
     n = len(order)
     found = np.full(n, np.nan)
     before = np.zeros(n)                            # inflow at the previous rain depth
     inflow = np.empty(n)
     rain_before, rain = 0.0, low
     while True:
-        for i in range(n):
-            inflow[i] = rain * runoff_area[i]
+        for i in range(n):                          # each catchment's SCS runoff, m3
+            excess = rain - 0.2 * retention[i]
+            inflow[i] = area[i] * excess * excess / (excess + retention[i]) / 1000.0 if excess > 0 else 0.0
         for i in order:
             extra = inflow[i] - volume[i]
             j = target[i]
@@ -112,8 +113,8 @@ def _rain_to_fill(order, target, runoff_area, volume, low, high, step):
                 inflow[j] += extra
         for i in range(n):
             if np.isnan(found[i]) and inflow[i] >= volume[i]:
-                # filled between the two depths: inflow is linear in between unless a depression
-                # upstream filled there too, so interpolating stays within the bracket
+                # filled between the two depths; inflow grows with the rain in between, so
+                # interpolating stays within the bracket
                 share = (volume[i] - before[i]) / (inflow[i] - before[i])
                 found[i] = rain_before + share * (rain - rain_before)
         if rain >= high:
@@ -125,31 +126,55 @@ def _rain_to_fill(order, target, runoff_area, volume, low, high, step):
     return found
 
 
-def rain_to_fill_upstream(order, target, runoff_area, volume, rel=0.01):
-    """The uniform rain depth (m) that fills each depression, counting the overflow of every
+@njit(cache=True)
+def _upstream_min(order, target, values):
+    out = values.copy()
+    for i in order:
+        j = target[i]
+        if j >= 0 and out[i] < out[j]:
+            out[j] = out[i]
+    return out
+
+
+def upstream_min(order, target, values):
+    """For each depression, the smallest of `values` over it and every depression upstream."""
+    return _upstream_min(order, target, np.asarray(values, dtype=np.float64))
+
+
+def rain_to_fill_upstream(order, target, area, curve_number, volume, rel=0.01):
+    """The uniform rain (mm) that fills each depression, counting the overflow of every
     depression upstream that fills first. Exact to within a factor 1 + `rel`.
 
-    runoff_area  each depression's catchment area times its runoff coefficient, m2: the rain
-                 depth times it is the catchment's own runoff
-    volume       each depression's volume when full, m3
+    area          each depression's catchment area, m2
+    curve_number  its catchment's SCS curve number (`runoff`)
+    volume        its volume when full, m3
 
-    The answer lies between volume / (runoff area of it and everything upstream) (all upstream
-    water arrives) and volume / its own runoff area (none does). Rain depths stepping by 1 + rel
-    across that range are tried in turn, each with one pass down the cascade; a depression's
-    answer is interpolated between the last depth that left it short and the first that filled
-    it. Depressions with an unknown (NaN) or zero runoff area get NaN, and so does everything
-    downstream of them.
+    No catchment sheds water before the rain passes its initial abstraction (0.2 S), and the
+    answer is at most the rain that fills a depression from its own catchment. Rain depths
+    stepping by 1 + rel from the smallest initial abstraction to the largest such own rain are
+    tried in turn, each with one pass down the cascade; a depression's answer is interpolated
+    between the last depth that left it short and the first that filled it. Depressions that
+    nothing spills into get their own rain exactly. Depressions with an unknown (NaN) area or
+    curve number get NaN, and so does everything downstream of them.
     """
-    runoff_area = np.asarray(runoff_area, dtype=np.float64)
+    from ..runoff import rain_for_runoff_mm, retention_mm
+
+    area = np.asarray(area, dtype=np.float64)
+    cn = np.asarray(curve_number, dtype=np.float64)
     volume = np.asarray(volume, dtype=np.float64)
-    known = np.isfinite(runoff_area) & (runoff_area > 0) & np.isfinite(volume) & (volume > 0)
+    known = (np.isfinite(area) & (area > 0) & np.isfinite(cn) & (cn > 0) & (cn <= 100)
+             & np.isfinite(volume) & (volume > 0))
     tainted, _ = cascade(order, target, np.where(known, 0.0, np.nan), np.zeros(len(volume)))
     known &= ~np.isnan(tainted)
-    area = np.where(known, runoff_area, 0.0)
     if not known.any():
         return np.full(len(area), np.nan)
-    upstream, _ = cascade(order, target, area, np.zeros(len(area)))   # area of it and all upstream
-    low = float(np.min(volume[known] / upstream[known])) / (1 + rel)
-    high = float(np.max(volume[known] / area[known])) * (1 + rel)
-    found = _rain_to_fill(order, target, area, np.where(known, volume, np.inf), low, high, 1 + rel)
-    return np.where(known, found, np.nan)
+    retention = np.where(known, retention_mm(np.where(known, cn, 100.0)), 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        own = rain_for_runoff_mm(1000.0 * volume / area, np.where(known, cn, 100.0))
+    low = max(float(np.min(0.2 * retention[known])), 1e-3) / (1 + rel)
+    high = float(np.max(own[known])) * (1 + rel)
+    found = _rain_to_fill(order, target, np.where(known, area, 0.0), retention,
+                          np.where(known, volume, np.inf), low, high, 1 + rel)
+    fed = np.zeros(len(area), dtype=bool)
+    fed[target[target >= 0]] = True
+    return np.where(known, np.where(fed, np.minimum(found, own), own), np.nan)

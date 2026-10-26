@@ -68,8 +68,8 @@ Each step is finished, tested and documented before the next starts.
 3. **Physical susceptibility index.** For each depression, compare the water it could receive
    with the storage it has:
    - its contributing catchment, from flow routing on the filled surface;
-   - runoff = design rainfall (Atlas 14) × catchment area × a runoff coefficient from land cover
-     and imperviousness (NLCD, WorldCover);
+   - runoff = the SCS curve-number runoff of the design rainfall (Atlas 14) on the catchment,
+     with curve numbers from land cover, imperviousness (NLCD) and soil (USDA gNATSGO);
    - storage = the depression's volume;
    - the fill ratio, runoff / storage, is the index.
 

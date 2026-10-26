@@ -111,6 +111,11 @@ def test_channel_share_is_the_area_share_in_crossed_cells(result):
     got = flags.set_index("id")["channel_share"]
     assert np.allclose(got.loc[expected.index], expected)
     assert (got.iloc[:5] > 0).all()
+    # the share counts towards `drained` only when a minimum share is given (rule B leaves it out)
+    assert flags.attrs["settings"]["drainage"]["min_share"] is None
+    wide = drainage_flags(result, streams=streams, crs=CRS, min_share=0.01)
+    assert wide["drained"].sum() > flags["drained"].sum()
+    assert (wide["drained"] == (flags["drained"] | (flags["channel_share"] >= 0.01))).all()
     plain = analyze_array(smooth(5, (150, 150), sigma=3.0, trend=2.0), UTM, CRS, res=11,
                           min_depth=0.05, catchments=True)
     assert drainage_flags(plain, streams=streams, crs=CRS)["channel_share"].isna().all()
@@ -148,7 +153,7 @@ def test_index_and_drainage_share_one_table_in_either_order(result, tmp_path, fm
     folder = result.save(tmp_path / "r", format=fmt)
     x, y = points_utm(result)
     flags = drainage_flags(folder, streams=lines_through(x, y, 4), crs=CRS)
-    index = susceptibility(folder, runoff_coef=0.4, rain={2: 20.0, 10: 40.0, 100: 80.0})
+    index = susceptibility(folder, curve_number=85.0, rain={2: 20.0, 10: 40.0, 100: 80.0})
     write_susceptibility(folder, flags)
     write_susceptibility(folder, index)
     a = read_result(folder)
@@ -157,10 +162,10 @@ def test_index_and_drainage_share_one_table_in_either_order(result, tmp_path, fm
     assert a.meta["susceptibility"]["rain"] == "given per storm"
     assert check_saved(folder) == []
     # redoing the index without storms drops the old storm columns, keeps the drainage ones
-    write_susceptibility(folder, susceptibility(folder, runoff_coef=0.5))
+    write_susceptibility(folder, susceptibility(folder, curve_number=70.0))
     b = read_result(folder).susceptibility
     assert "fills_in_years" not in b and b["drained"].equals(a.susceptibility["drained"])
-    assert (b["runoff_coef"] == 0.5).all()
+    assert (b["curve_number"] == 70.0).all()
     assert check_saved(folder) == []
     # and the other way round
     folder2 = result.save(tmp_path / "r2", format=fmt)

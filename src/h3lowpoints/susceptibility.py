@@ -1,31 +1,31 @@
 """How easily each depression fills: the rain reaching it compared with the water it can hold.
 
     from h3lowpoints.susceptibility import susceptibility, write_susceptibility
-    table = susceptibility("results", impervious="imperv.tif", rain="atlas14")
+    table = susceptibility("results", curve_numbers="cn.tif", rain="atlas14")
     write_susceptibility("results", table)          # susceptibility.<csv|parquet> + meta.json
 
-    h3lowpoints index results --impervious imperv.tif --rain atlas14
+    h3lowpoints index results --curve-numbers cn.tif --rain atlas14
 
 Needs a result computed with catchments=True: each depression's catchment (the ground whose rain
 ends up in it), its volume, and the depression it overflows into (`spill_to`).
 
-- Runoff. Of the rain on a catchment, a share runs off: the runoff coefficient. From an
-  imperviousness raster (percent paved or built, such as NLCD), each H3 cell's coefficient is
-  0.05 + 0.009 x its mean imperviousness (Schueler's Simple Method); or one coefficient is given
-  for everything. A depression's runoff area is its catchment area times the catchment's mean
-  coefficient: the rain depth times it is the runoff.
-- Rain to fill. `rain_to_fill_mm` is the uniform rain depth that fills a depression from its own
-  catchment alone (volume / runoff area). `rain_to_fill_upstream_mm` also counts the overflow of
-  the depressions upstream that fill first: it is never larger.
-- Storms. With design storms (NOAA Atlas 14, or depths given), each depression's own runoff comes
-  from the rain on each cell of its catchment, and overflow passes down the spill links
-  (`hydro.cascade`). `fill_ratio_<N>yr` is the water reaching it over its volume (1 or more: it
-  fills), and `fills_in_years` the smallest return period whose storm fills it (inf: none does).
+- Runoff. How much of a storm runs off is set by the SCS curve number (`runoff`): from a raster of
+  curve numbers (in the US `runoff.fetch_curve_numbers` makes one from NLCD land cover and
+  imperviousness and USDA soil groups), each H3 cell takes the mean of its pixels, and a
+  depression's `curve_number` is the area-weighted mean over its catchment's cells, as NRCS
+  weights curve numbers over a watershed; or one curve number is given for everything.
+- Rain to fill. `rain_to_fill_mm` is the uniform rain that fills a depression from its own
+  catchment alone: the storm whose runoff, spread over the catchment, equals its volume.
+  `rain_to_fill_upstream_mm` also counts the overflow of the depressions upstream that fill
+  first: it is never larger.
+- Storms. With design storms (NOAA Atlas 14, or depths given), each depression's own runoff is
+  that of the catchment's mean rain, and overflow passes down the spill links (`hydro.cascade`).
+  `fill_ratio_<N>yr` is the water reaching it over its volume (1 or more: it fills), and
+  `fills_in_years` the smallest return period whose storm fills it (inf: none does).
 
-Where an input does not cover enough of a catchment (`min_coverage`, by area for imperviousness,
-by runoff for rain), the columns that need it are NaN, and so are the storm columns of every
-depression downstream. Nothing here knows about drains, pipes or soils beyond the coefficient;
-see docs/susceptibility.md for the method, its evidence and its limits.
+Where an input does not cover enough of a catchment (`min_coverage`, by area), the columns that
+need it are NaN, and so are those of every depression downstream that depend on it. Nothing here
+knows about drains or pipes; see docs/susceptibility.md for the method, its evidence and limits.
 """
 from pathlib import Path
 
@@ -36,31 +36,24 @@ import pandas as pd
 
 from .hydro.cascade import cascade, rain_to_fill_upstream, spill_order
 from .pipeline import Result, _package_version
+from .runoff import RULE, rain_for_runoff_mm, runoff_mm
 from .store import (CHUNK_ROWS, ids_to_int, iter_file, iter_table, missing_files, read_meta,
                     table_path, write_meta, write_table)
 
-SIMPLE_METHOD = (0.05, 0.009)  # runoff coefficient = 0.05 + 0.009 x impervious percent
-RUNOFF_RULE = "Schueler's Simple Method: runoff coefficient = 0.05 + 0.009 x impervious percent"
-BASE_COLUMNS = ["id", "impervious_pct", "runoff_coef", "runoff_area_m2", "rain_to_fill_mm",
+BASE_COLUMNS = ["id", "impervious_pct", "curve_number", "rain_to_fill_mm",
                 "rain_to_fill_upstream_mm"]
 RATIO_YEARS = (2, 10, 100)
 UPSTREAM_REL = 0.01           # rain_to_fill_upstream_mm is exact to within this share
 RASTER_SUFFIXES = (".tif", ".tiff", ".vrt", ".img")
 
 
-def runoff_coefficient(impervious_pct):
-    """Share of the rain that runs off, from the percent of the ground that is impervious."""
-    base, slope = SIMPLE_METHOD
-    return base + slope * np.asarray(impervious_pct, dtype=float)
-
-
 def cell_means(raster, res, *, parent=None, rows=1024, workers=1):
     """Mean of a raster's values on each H3 cell at resolution `res`.
 
-    Each pixel belongs to the cell containing its centre; pixels with no data are left out.
-    `parent` (an H3 cell, coarser than `res`) keeps only the cells inside it, so a large area can
-    be done in pieces whose cells are complete. Returns a table sorted by cell: `h3`, `mean` and
-    `n_pixels`.
+    Each pixel belongs to the cell containing its centre; pixels with no data (or NaN) are left
+    out. `parent` (an H3 cell, coarser than `res`) keeps only the cells inside it, so a large area
+    can be done in pieces whose cells are complete. Returns a table sorted by cell: `h3`, `mean`
+    and `n_pixels`.
     """
     import rasterio
     from rasterio.windows import Window
@@ -73,7 +66,8 @@ def cell_means(raster, res, *, parent=None, rows=1024, workers=1):
         for r0 in range(0, src.height, rows):
             n = min(rows, src.height - r0)
             band = src.read(1, window=Window(0, r0, src.width, n), masked=True)
-            rr, cc = np.nonzero(~np.ma.getmaskarray(band))
+            valid = ~np.ma.getmaskarray(band) & np.isfinite(band.data)
+            rr, cc = np.nonzero(valid)
             if len(rr) == 0:
                 continue
             lon, lat = lonlat(src.crs, *pixel_centers(src.transform, rr + r0, cc))
@@ -143,23 +137,23 @@ class _Streamed:
         return _InMemory(self.keys, self.values).lookup(cells)
 
 
-def _impervious_source(impervious, res, rows, workers):
-    """(lookup, description) for the `impervious` argument of `susceptibility`."""
-    if isinstance(impervious, pd.DataFrame):
-        table = impervious
+def _cell_source(source, column, res, rows, workers):
+    """(lookup, description) for a per-cell input: a raster, a table file or a DataFrame."""
+    if isinstance(source, pd.DataFrame):
+        table = source
     else:
-        path = Path(impervious)
+        path = Path(source)
         if path.suffix.lower() in RASTER_SUFFIXES:
-            table = cell_means(path, res, workers=workers).rename(columns={"mean": "impervious_pct"})
-            return (_InMemory(ids_to_int(list(table["h3"])), table["impervious_pct"].to_numpy(float)),
+            table = cell_means(path, res, workers=workers).rename(columns={"mean": column})
+            return (_InMemory(ids_to_int(list(table["h3"])), table[column].to_numpy(float)),
                     f"raster {path.name}, mean per H3 cell")
         if path.suffix.lower() in (".csv", ".parquet"):
-            return _Streamed(path, "impervious_pct", rows), f"per-cell table {path.name}"
-        raise ValueError(f"impervious must be a raster ({', '.join(RASTER_SUFFIXES)}), a .csv or "
-                         f".parquet table of h3 and impervious_pct, or a DataFrame; got {impervious}")
-    if not {"h3", "impervious_pct"} <= set(table.columns):
-        raise ValueError("a per-cell imperviousness table needs the columns h3 and impervious_pct")
-    return (_InMemory(ids_to_int(list(table["h3"])), table["impervious_pct"].to_numpy(dtype=float)),
+            return _Streamed(path, column, rows), f"per-cell table {path.name}"
+        raise ValueError(f"{column}: give a raster ({', '.join(RASTER_SUFFIXES)}), a .csv or "
+                         f".parquet table of h3 and {column}, or a DataFrame; got {source}")
+    if not {"h3", column} <= set(table.columns):
+        raise ValueError(f"a per-cell table needs the columns h3 and {column}")
+    return (_InMemory(ids_to_int(list(table["h3"])), table[column].to_numpy(dtype=float)),
             "per-cell table")
 
 
@@ -210,36 +204,43 @@ def _tables(result, rows):
     return deps, (lambda: iter_table(folder, "catchments", rows)), read_meta(folder)
 
 
-def susceptibility(result, *, impervious=None, runoff_coef=None, rain=None, ratio_years=RATIO_YEARS,
-                   min_coverage=0.9, cache_dir=None, rows=CHUNK_ROWS, workers=1):
-    """One row per depression: its runoff, the rain that fills it and, with storms, how full they
-    leave it. See the module text and docs/susceptibility.md.
+def susceptibility(result, *, curve_numbers=None, curve_number=None, impervious=None, rain=None,
+                   ratio_years=RATIO_YEARS, min_coverage=0.9, cache_dir=None, rows=CHUNK_ROWS,
+                   workers=1):
+    """One row per depression: its curve number, the rain that fills it and, with storms, how
+    full they leave it. See the module text and docs/susceptibility.md.
 
-    result        a `Result` computed with catchments=True, or its folder
-    impervious    percent impervious (0-100): a raster in any CRS (its mean per H3 cell is used),
-                  a .csv or .parquet table with columns h3 and impervious_pct at the result's
-                  resolution (a file is read in pieces and must be sorted by h3), or a DataFrame
-    runoff_coef   instead of `impervious`: one runoff coefficient (0 to 1) for all ground
-    rain          None (no storms), "atlas14" (24-hour storms of 1 to 1000 years from NOAA
-                  Atlas 14 grids, US only), a depth in mm (one uniform storm, column
-                  `fill_ratio`), or a dict {return period in years: mm or function(lat, lon) -> mm}
-    ratio_years   the return periods given a `fill_ratio_<N>yr` column (all storms count for
-                  `fills_in_years`)
-    min_coverage  share of a catchment an input must cover for the columns that need it
-    cache_dir     keep downloaded rainfall grids here
-    rows          rows of the catchment table read at a time
-    workers       processes for labelling raster pixels with H3 cells
+    result         a `Result` computed with catchments=True, or its folder
+    curve_numbers  SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the
+                   US see `runoff.fetch_curve_numbers`), a .csv or .parquet table with columns h3
+                   and curve_number at the result's resolution (read in pieces; sorted by h3),
+                   or a DataFrame
+    curve_number   instead of `curve_numbers`: one curve number (0 to 100) for all ground
+    impervious     optional percent paved, in the same forms (column impervious_pct): reported as
+                   `impervious_pct` only (the curve numbers already account for it)
+    rain           None (no storms), "atlas14" (24-hour storms of 1 to 1000 years from NOAA
+                   Atlas 14 grids, US only), a depth in mm (one uniform storm, column
+                   `fill_ratio`), or a dict {return period in years: mm or function(lat, lon) -> mm}
+    ratio_years    the return periods given a `fill_ratio_<N>yr` column (all storms count for
+                   `fills_in_years`)
+    min_coverage   share of a catchment's area an input must cover for the columns that need it
+    cache_dir      keep downloaded rainfall grids here
+    rows           rows of the catchment table read at a time
+    workers        processes for labelling raster pixels with H3 cells
     """
-    if (impervious is None) == (runoff_coef is None):
-        raise ValueError("give either impervious (a raster or per-cell table) or runoff_coef")
-    if runoff_coef is not None and not 0 < runoff_coef <= 1:
-        raise ValueError("runoff_coef must be in (0, 1]")
+    if (curve_numbers is None) == (curve_number is None):
+        raise ValueError("give either curve_numbers (a raster or per-cell table) or curve_number")
+    if curve_number is not None and not 0 < curve_number <= 100:
+        raise ValueError("curve_number must be in (0, 100]")
     if not 0 < min_coverage <= 1:
         raise ValueError("min_coverage must be in (0, 1]")
     deps, catchment_chunks, meta = _tables(result, rows)
     res = meta["params"]["res"]
-    lookup, imp_text = (_impervious_source(impervious, res, rows, workers) if impervious is not None
-                        else (None, None))
+    sources = {}
+    if curve_numbers is not None:
+        sources["curve_number"] = _cell_source(curve_numbers, "curve_number", res, rows, workers)
+    if impervious is not None:
+        sources["impervious_pct"] = _cell_source(impervious, "impervious_pct", res, rows, workers)
     keys, samplers, rain_text = _storms(rain, cache_dir)
     n, n_storms = len(deps), len(keys)
     ids = deps["id"].to_numpy(dtype=np.int64)
@@ -247,8 +248,9 @@ def susceptibility(result, *, impervious=None, runoff_coef=None, rain=None, rati
     volume = deps["volume_m3"].to_numpy(dtype=float)
     catch = deps["catchment_area_m2"].to_numpy(dtype=float)
 
-    area_imp, sum_imp = np.zeros(n), np.zeros(n)               # impervious data: area and a x I
-    weight, weighted = np.zeros((n, n_storms)), np.zeros((n, n_storms))   # sum a x C, a x C x P
+    covered = {name: np.zeros(n) for name in sources}         # area where the input is known
+    summed = {name: np.zeros(n) for name in sources}          # area x value there
+    rain_area, rain_sum = np.zeros((n, n_storms)), np.zeros((n, n_storms))
     for chunk in catchment_chunks():
         if len(chunk) == 0:
             continue
@@ -256,14 +258,6 @@ def susceptibility(result, *, impervious=None, runoff_coef=None, rain=None, rati
         hit = ids[by_id][at] == chunk["id"].to_numpy() if n else np.zeros(len(chunk), bool)
         pos, area = by_id[at[hit]], chunk["area_m2"].to_numpy(dtype=float)[hit]
         cells, inverse = np.unique(ids_to_int(list(chunk["h3"][hit])), return_inverse=True)
-        if lookup is not None:
-            imp = lookup.lookup(cells)[inverse] if len(cells) else np.zeros(0)
-            known = ~np.isnan(imp)
-            coef = np.where(known, runoff_coefficient(np.where(known, imp, 0.0)), np.nan)
-        else:
-            known = np.ones(len(area), dtype=bool)
-            imp, coef = np.full(len(area), np.nan), np.full(len(area), float(runoff_coef))
-        rain_cells = _rain_on(cells, samplers) if n_storms else None
         u, inv = np.unique(pos, return_inverse=True)
 
         def add(target, values, col=None):
@@ -272,35 +266,35 @@ def susceptibility(result, *, impervious=None, runoff_coef=None, rain=None, rati
                 target[u] += sums
             else:
                 target[u, col] += sums
-        if lookup is not None:
-            add(area_imp, np.where(known, area, 0.0))
-            add(sum_imp, np.where(known, area * np.nan_to_num(imp), 0.0))
-        for s in range(n_storms):
-            p = rain_cells[s][inverse]
-            ok = known & ~np.isnan(p)
-            add(weight, np.where(ok, area * np.nan_to_num(coef), 0.0), s)
-            add(weighted, np.where(ok, area * np.nan_to_num(coef) * np.nan_to_num(p), 0.0), s)
+        for name, (lookup, _) in sources.items():
+            value = lookup.lookup(cells)[inverse] if len(cells) else np.zeros(0)
+            known = ~np.isnan(value)
+            add(covered[name], np.where(known, area, 0.0))
+            add(summed[name], np.where(known, area * np.nan_to_num(value), 0.0))
+        if n_storms:
+            rain_cells = _rain_on(cells, samplers)
+            for s in range(n_storms):
+                p = rain_cells[s][inverse]
+                known = ~np.isnan(p)
+                add(rain_area, np.where(known, area, 0.0), s)
+                add(rain_sum, np.where(known, area * np.nan_to_num(p), 0.0), s)
 
     with np.errstate(invalid="ignore", divide="ignore"):
-        if lookup is not None:
-            enough = area_imp >= min_coverage * catch
-            imp_pct = np.where(enough, sum_imp / area_imp, np.nan)
-            coef = runoff_coefficient(imp_pct)
-            known_weight = SIMPLE_METHOD[0] * area_imp + SIMPLE_METHOD[1] * sum_imp   # sum a x C
-        else:
-            imp_pct, coef = np.full(n, np.nan), np.full(n, float(runoff_coef))
-            known_weight = coef * catch
-        runoff_area = coef * catch
-        out = pd.DataFrame({"id": ids, "impervious_pct": imp_pct, "runoff_coef": coef,
-                            "runoff_area_m2": runoff_area,
-                            "rain_to_fill_mm": 1000.0 * volume / runoff_area})
+        def mean(name):
+            enough = covered[name] >= min_coverage * catch
+            return np.where(enough, summed[name] / covered[name], np.nan)
+        cn = mean("curve_number") if curve_numbers is not None else np.full(n, float(curve_number))
+        imp = mean("impervious_pct") if impervious is not None else np.full(n, np.nan)
+        out = pd.DataFrame({"id": ids, "impervious_pct": imp, "curve_number": cn,
+                            "rain_to_fill_mm": rain_for_runoff_mm(1000.0 * volume / catch, cn)})
         order, target = spill_order(ids, deps["spill_to"].to_numpy())
-        out["rain_to_fill_upstream_mm"] = 1000.0 * rain_to_fill_upstream(
-            order, target, runoff_area, volume, UPSTREAM_REL)
+        out["rain_to_fill_upstream_mm"] = rain_to_fill_upstream(order, target, catch, cn, volume,
+                                                                UPSTREAM_REL)
         if n_storms:
-            covered = weight >= min_coverage * known_weight[:, None]
-            mean_rain = np.where(covered, weighted / weight, np.nan)          # mm
-            own = runoff_area[:, None] * mean_rain / 1000.0                   # m3
+            enough = rain_area >= min_coverage * catch[:, None]
+            mean_rain = np.where(enough, rain_sum / rain_area, np.nan)                 # mm
+            own = catch[:, None] * runoff_mm(mean_rain, cn[:, None]) / 1000.0           # m3
+            own = np.where(np.isnan(mean_rain) | np.isnan(cn)[:, None], np.nan, own)
             inflow, _ = cascade(order, target, own, volume)
             ratio = inflow / volume[:, None]
             if keys == [None]:
@@ -316,8 +310,10 @@ def susceptibility(result, *, impervious=None, runoff_coef=None, rain=None, rati
                 unknown = np.isnan(ratio).any(axis=1) & ~fills.any(axis=1)
                 out["fills_in_years"] = np.where(unknown, np.nan, first)
     out.attrs["settings"] = {
-        "runoff": RUNOFF_RULE if lookup is not None else f"one runoff coefficient, {runoff_coef:g}",
-        "impervious": imp_text, "rain": rain_text,
+        "runoff": RULE if curve_numbers is not None else f"SCS runoff, one curve number, {curve_number:g}",
+        "curve_numbers": sources["curve_number"][1] if curve_numbers is not None else None,
+        "impervious": sources["impervious_pct"][1] if impervious is not None else None,
+        "rain": rain_text,
         "years": [k for k in keys if k is not None], "ratio_years": [y for y in ratio_years if y in keys],
         "min_coverage": min_coverage, "upstream_rel": UPSTREAM_REL,
         "package_version": _package_version()}
@@ -360,7 +356,7 @@ def write_susceptibility(folder, table):
 
         old = read_table(folder, "susceptibility")
         keep = [c for c in old.columns if c != "id"
-                and not (new_index and _is_index_column(c))
+                and not (new_index and (_is_index_column(c) or c in ("runoff_coef", "runoff_area_m2")))
                 and not (new_drainage and c in DRAINAGE_COLUMNS)]
         if keep:
             if len(old) != len(table) or set(old["id"]) != set(table["id"]):

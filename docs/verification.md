@@ -22,7 +22,7 @@ result is wrong (or was damaged after it was written).
 | `meta.json`'s depression count matches the table. | Tables and metadata from different runs. |
 | With details: `water_level_m - ground_m` is `max_depth_m`; `0 < width_m <= length_m`; `orientation_deg` in [0, 180); flooded areas and volumes never grow as the water drops and each volume fits in the depth left times its area; the depression × cell table adds up to each depression's area, volume and fill curve, its deepest row is the depression's depth, and it names only listed depressions. | Levels, shapes or fill curves computed wrongly, or tables out of step. |
 | With catchments: every catchment is at least as large as its depression; the catchment table adds up to `catchment_area_m2` and names only listed depressions; `spill_to` names a listed depression or 0, never the depression itself; following `spill_to` always ends; spill points are finite and in range. | Water counted twice or lost, overflow running in a loop, tables out of step. |
-| With a susceptibility table: every depression appears once; `impervious_pct` lies in [0, 100] and `runoff_coef` in (0, 1], and with the Simple Method `runoff_coef` is `0.05 + 0.009 × impervious_pct`; `runoff_area_m2` is `runoff_coef × catchment_area_m2`; `rain_to_fill_mm` is `1000 × volume_m3 / runoff_area_m2`; `rain_to_fill_upstream_mm` is at most `rain_to_fill_mm` and at least what all the water from upstream would allow (not checked after a clip, which drops upstream depressions); fill ratios are not negative, and a storm with a fill ratio of 1 or more is no rarer than `fills_in_years`. With drainage columns: distances lie in [0, `max_distance_m`], `channel_share` in [0, 1], `land_cover` is not negative, `drained` follows from the distances, the share and the rule in `meta.json`, and `landlocked` is its opposite. | Runoff, rain to fill, storm or drainage columns computed wrongly, or a table from another result. |
+| With a susceptibility table: every depression appears once; `impervious_pct` lies in [0, 100] and `curve_number` in (0, 100]; `rain_to_fill_mm` is the storm whose SCS runoff over the catchment equals the volume; `rain_to_fill_upstream_mm` is at most `rain_to_fill_mm` and at least the smallest initial abstraction (0.2 S) of it and every catchment upstream (not checked after a clip, which drops upstream depressions); fill ratios are not negative, and a storm with a fill ratio of 1 or more is no rarer than `fills_in_years`. With drainage columns: distances lie in [0, `max_distance_m`], `channel_share` in [0, 1], `land_cover` is not negative, `drained` follows from the distances, the share and the rule in `meta.json`, and `landlocked` is its opposite. | Runoff, rain to fill, storm or drainage columns computed wrongly, or a table from another result. |
 
 ```
 h3lowpoints verify results_folder     # "all invariants hold" (exit 0), or the problems (exit 1)
@@ -50,9 +50,9 @@ cell table that no longer adds up, a wrong deepest row, rows for an unknown depr
 Catchments get six more damages (a catchment table that no longer adds up, a catchment smaller
 than its depression, a depression spilling into itself, spills forming a loop, a spill to an
 unknown depression, catchment rows for an unknown depression), each of which must be caught.
-A susceptibility table gets nine (a wrong coefficient, runoff area, rain to fill or
-imperviousness, an upstream rain larger than the own one or far too small, a missing or repeated
-row, a `fills_in_years` rarer than a storm that fills), and the drainage columns five (a flipped
+A susceptibility table gets nine (a curve number out of range or shifted, a wrong rain to fill
+or imperviousness, an upstream rain larger than the own one or far too small, a missing or
+repeated row, a `fills_in_years` rarer than a storm that fills), and the drainage columns five (a flipped
 `drained`, a `landlocked` equal to `drained`, a negative distance, a distance beyond the limit, a
 share above 1), each of which must be caught.
 
@@ -94,8 +94,11 @@ compares:
 | Pixel areas | An independent ellipsoid computation. |
 | Coverage | Assigning every pixel to its H3 cell by brute force, on projected, degree, feet, polar and antimeridian grids. |
 | Mosaics | The source tiles, pixel by pixel. |
+| SCS runoff | TR-55 worked by hand (CN 80, 5 inches of rain: 2.89 inches), and its inverse to machine precision. |
+| Curve numbers | The TR-55 table, class by class and group by group, and the composite with pavement. |
+| Soil groups | Fake soil tiles in gNATSGO's layout: every pixel more than 10 m from a soil boundary takes exactly its map unit's group. |
 | The spill cascade | A plain recursive version on random spill networks; water must be conserved, and a cascade passing on all the water instead of the overflow must disagree. |
-| `rain_to_fill_upstream_mm` | A bisection rerunning the plain cascade for each depression (within 1%); and a uniform storm of depth D must fill exactly the depressions whose value is at most D. |
+| `rain_to_fill_upstream_mm` | A bisection rerunning the plain cascade with SCS runoff for each depression (within 1%); and a uniform storm of depth D must fill exactly the depressions whose value is at most D. |
 | Imperviousness per H3 cell | Assigning every pixel to its cell one by one. |
 | Atlas 14 grids | NOAA's point service at the same place (network test). |
 | Drainage distances | shapely's distance from each point to each line set. |

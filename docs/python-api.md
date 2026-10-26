@@ -197,24 +197,25 @@ longitude/latitude or a vector file. `seed` may be a number or a numpy `Generato
 See [Susceptibility](susceptibility.md) for the method and [Outputs](outputs.md#the-susceptibility-table)
 for the columns.
 
-### `susceptibility.susceptibility(result, *, impervious=None, runoff_coef=None, rain=None, ratio_years=(2, 10, 100), min_coverage=0.9, cache_dir=None, rows=500000, workers=1)`
+### `susceptibility.susceptibility(result, *, curve_numbers=None, curve_number=None, impervious=None, rain=None, ratio_years=(2, 10, 100), min_coverage=0.9, cache_dir=None, rows=500000, workers=1)`
 
-One row per depression: its runoff, the rain that fills it and, with storms, how full they leave
-it. Returns a DataFrame whose `attrs["settings"]` hold the settings for `meta.json`.
+One row per depression: its curve number, the rain that fills it and, with storms, how full they
+leave it. Returns a DataFrame whose `attrs["settings"]` hold the settings for `meta.json`.
 
 | Parameter | Meaning |
 |---|---|
 | `result` | A `Result` computed with `catchments=True`, or its folder (the catchment table is read `rows` at a time). |
-| `impervious` | Percent impervious (0 to 100): a raster in any CRS (its mean per H3 cell is used), a `.csv` or `.parquet` table with columns `h3` and `impervious_pct` at the result's resolution (read in pieces; must be sorted by `h3`), or a DataFrame with those columns. |
-| `runoff_coef` | Instead of `impervious`: one runoff coefficient in (0, 1]. Exactly one of the two is required. |
+| `curve_numbers` | SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the US, `runoff.fetch_curve_numbers`), a `.csv` or `.parquet` table with columns `h3` and `curve_number` at the result's resolution (read in pieces; must be sorted by `h3`), or a DataFrame with those columns. |
+| `curve_number` | Instead of `curve_numbers`: one curve number in (0, 100]. Exactly one of the two is required. |
+| `impervious` | Optional percent paved, in the same forms (column `impervious_pct`), reported as `impervious_pct`. |
 | `rain` | `None` (no storms), `"atlas14"` (24-hour storms of 1 to 1000 years from NOAA Atlas 14 grids), a depth in mm (one uniform storm, column `fill_ratio`), or a dict `{return period in years: depth in mm or function(lat, lon) -> mm}`. |
 | `ratio_years` | The return periods given a `fill_ratio_<N>yr` column; all storms count for `fills_in_years`. |
-| `min_coverage` | Share of a catchment an input must cover (by area for imperviousness, by runoff for rain). |
+| `min_coverage` | Share of a catchment's area an input must cover. |
 | `cache_dir` | Keep downloaded rainfall grids here. |
 | `workers` | Processes for labelling raster pixels with H3 cells. |
 
-Raises `ValueError` for a result without catchments, for neither or both of `impervious` and
-`runoff_coef`, and for unusable settings.
+Raises `ValueError` for a result without catchments, for neither or both of `curve_numbers` and
+`curve_number`, and for unusable settings.
 
 ### `susceptibility.write_susceptibility(folder, table)`
 
@@ -230,9 +231,24 @@ containing its centre; no-data pixels are left out), as a table sorted by cell: 
 `n_pixels`. `parent` (a coarser H3 cell) keeps only the cells inside it, so a large area can be
 done in pieces whose cells are complete. The raster is read `rows` rows at a time.
 
-### `susceptibility.runoff_coefficient(impervious_pct)`
+### `runoff.curve_numbers(land_cover, impervious, groups)`
 
-`0.05 + 0.009 × impervious_pct`: the Simple Method's share of rain that runs off.
+The composite SCS curve number of each pixel from arrays on one grid: NLCD land cover classes,
+percent paved (values above 100 count as 0) and soil group codes of `sources.soils`. NaN where the
+land cover is unknown. The values are in `runoff.CN_TABLE`
+([Susceptibility](susceptibility.md#runoff-curve-numbers)).
+
+### `runoff.runoff_mm(rain_mm, cn)`, `runoff.rain_for_runoff_mm(runoff, cn)`, `runoff.retention_mm(cn)`
+
+The SCS runoff equation and its exact inverse, in millimetres, and S, the most the ground can
+still hold.
+
+### `runoff.fetch_curve_numbers(bbox, out_path, *, cache_dir, year=2021)`
+
+Curve numbers (float32, NaN for no data) for a box in the lower 48 US states, on NLCD's 30 m
+grid, from NLCD land cover and imperviousness of `year` and the gNATSGO soil groups. The three
+inputs are kept beside the output (`*_land_cover.tif`, `*_impervious.tif`, `*_soil_groups.tif`);
+the soil survey's map-unit table is kept in `cache_dir`.
 
 ### `hydro.cascade.spill_order(ids, spill_to)`
 
@@ -246,12 +262,17 @@ The water reaching each depression (m³), given each one's own runoff (`own`, on
 storm, or 1-d for one storm) and its `volume`. Returns `(inflow, leaving)`, `leaving` being the
 water that left the table. NaN in `own` makes everything downstream NaN.
 
-### `hydro.cascade.rain_to_fill_upstream(order, target, runoff_area, volume, rel=0.01)`
+### `hydro.cascade.rain_to_fill_upstream(order, target, area, curve_number, volume, rel=0.01)`
 
-The uniform rain depth (m) that fills each depression, counting the overflow of the depressions
-upstream that fill first, exact to within a factor `1 + rel`.
+The uniform rain (mm) that fills each depression from its catchment `area` (m²) of the given
+`curve_number`, counting the overflow of the depressions upstream that fill first, exact to
+within a factor `1 + rel`; exactly the own rain where nothing spills in.
 
-### `drainage.drainage_flags(result, *, streams=None, canals=None, roads=None, land_cover=None, near_m=30.0, min_share=0.5, max_distance_m=1000.0, crs=None, rows=500000)`
+### `hydro.cascade.upstream_min(order, target, values)`
+
+For each depression, the smallest of `values` over it and every depression upstream.
+
+### `drainage.drainage_flags(result, *, streams=None, canals=None, roads=None, land_cover=None, near_m=30.0, min_share=None, max_distance_m=1000.0, crs=None, rows=500000)`
 
 One row per depression: `land_cover`, `stream_m`, `canal_m`, `channel_share`, `spill_road_m`,
 `drained`, `landlocked` ([Susceptibility](susceptibility.md#drained-or-landlocked)). Returns a
@@ -263,7 +284,7 @@ Needs the `sources` extra.
 | `result` | A `Result` or its folder. `channel_share` needs `details=True`, `spill_road_m` needs `catchments=True`. |
 | `streams`, `canals`, `roads` | Lines: a vector file (any CRS), a GeoDataFrame or a GeoSeries. At least one is required. |
 | `land_cover` | A raster of land cover classes, read at each lowest point. |
-| `near_m`, `min_share` | The rule for `drained`. |
+| `near_m`, `min_share` | The rule for `drained`; with `min_share` None (the default) `channel_share` is reported but not used. In the US pass highways and ramps as `roads` (`drainage.MAJOR_ROADS`, the TIGER classes S1100, S1200, S1630). |
 | `max_distance_m` | Distances beyond this are NaN. |
 | `crs` | Projected CRS, in metres, to measure in; by default the UTM zone of the result's centre. |
 
@@ -378,6 +399,16 @@ A state's NHD high-resolution flowlines, from its GeoPackage zip (downloaded onc
 as named on The National Map ("Texas", "District of Columbia"); `bbox` and `ftypes` read only
 part of it. `sources.nhd.remove_unpacked(state, *, cache_dir)` deletes the unpacked GeoPackage
 (the zip is kept) and returns the bytes freed.
+
+### `sources.soils.fetch_soil_groups(bbox, out_path, *, cache_dir, like=None, resolution=30.0, get=read_bytes, opener=None)`
+
+Soil hydrologic group codes (`sources.soils.GROUPS`: 1 A, 2 B, 3 C, 4 D, 5 A/D, 6 B/D, 7 C/D,
+8 a map unit without a group, 0 no data) for a box, from the USDA gNATSGO soil survey (July 2020
+edition, read from Microsoft's Planetary Computer without an account). The grid is NAD83 / Conus
+Albers at `resolution` metres with pixel edges where NLCD's are; `like` (a raster path) takes
+that raster's grid exactly, which is how to combine the groups with an NLCD download pixel for
+pixel. The map-unit table (12.5 MB) is kept in `cache_dir`. `sources.soils.group_table`,
+`tiles` and `to_groups` are its parts.
 
 ### `sources.roads.fetch_roads(bbox, out_path=None, *, cache_dir, year=2024, get=read_bytes)`
 

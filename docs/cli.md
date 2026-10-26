@@ -166,7 +166,7 @@ h3lowpoints validate us48_30m_water --observations reports.csv --controls addres
 ## index
 
 ```
-h3lowpoints index FOLDER (--impervious FILE | --runoff-coef C) [--rain atlas14|MM] [options]
+h3lowpoints index FOLDER (--curve-numbers FILE | --curve-number CN) [--rain atlas14|MM] [options]
 ```
 
 Compares the rain reaching each depression with what it holds, for a result made with
@@ -176,15 +176,16 @@ verifies the folder. See [Susceptibility](susceptibility.md) for the method.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--impervious FILE` | | Percent impervious: a raster in any CRS (its mean per H3 cell is used; for example NLCD, which `fetch-landcover` downloads), or a `.csv`/`.parquet` table with columns `h3` and `impervious_pct` at the result's resolution, sorted by `h3`. |
-| `--runoff-coef C` | | Instead of `--impervious`: one runoff coefficient (0 to 1) for all ground. |
+| `--curve-numbers FILE` | | SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the US, the `fetch-landcover` command makes one: see its `curve-numbers` source), or a `.csv`/`.parquet` table with columns `h3` and `curve_number` at the result's resolution, sorted by `h3`. |
+| `--curve-number CN` | | Instead of `--curve-numbers`: one curve number (0 to 100) for all ground. |
+| `--impervious FILE` | | Optional: percent paved, as a raster or a table of `h3` and `impervious_pct`, reported as `impervious_pct` (the curve numbers already account for it). |
 | `--rain atlas14\|MM` | | `atlas14`: 24-hour storms of 1 to 1000 years from NOAA Atlas 14 (US; only the grids of the project areas the result lies in are downloaded, about 10 to 40 MB each). A number: one uniform storm of that many millimetres. Without it, only the rain-to-fill columns. |
 | `--min-coverage F` | `0.9` | Share of a catchment an input must cover; below it the columns needing that input are NaN. |
 | `--cache-dir DIR` | | Keep the downloaded rainfall grids here and reuse them. |
 | `--workers N` | `1` | Label raster pixels with H3 cells in this many processes. |
 
 ```
-h3lowpoints index houston --impervious imperv.tif --rain atlas14 --cache-dir atlas14
+h3lowpoints index houston --curve-numbers cn.tif --rain atlas14 --cache-dir atlas14
 ```
 
 ## drainage
@@ -193,8 +194,8 @@ h3lowpoints index houston --impervious imperv.tif --rain atlas14 --cache-dir atl
 h3lowpoints drainage FOLDER [--streams FILE] [--canals FILE] [--roads FILE] [--nhd] [--tiger] [options]
 ```
 
-Looks for signs that each depression is drained: a mapped stream or canal at its lowest point or
-across its cells, a road at its spill point. Adds the drainage columns to the folder's
+Looks for signs that each depression is drained: a mapped stream or canal at its lowest point,
+a highway or ramp at its spill point. Adds the drainage columns to the folder's
 susceptibility table (keeping the index columns), records the settings in `meta.json`, prints
 how many are drained and landlocked, and verifies the folder. At least one source of lines is
 needed. See [Susceptibility](susceptibility.md#drained-or-landlocked).
@@ -205,10 +206,11 @@ needed. See [Susceptibility](susceptibility.md#drained-or-landlocked).
 | `--canals FILE` | | Canal, ditch, conduit and pipeline lines. |
 | `--roads FILE` | | Road lines. |
 | `--nhd` | | US: fetch streams (NHD types 460, 558) and canals (336, 420, 428) for the result's area from the NHD map service, instead of `--streams` and `--canals`. |
-| `--tiger` | | US: fetch the roads of the counties the result touches from Census TIGER/Line, instead of `--roads`. Needs `--cache-dir`. |
+| `--tiger` | | US: fetch the highways and ramps (classes S1100, S1200, S1630) of the counties the result touches from Census TIGER/Line, instead of `--roads`. Needs `--cache-dir`. |
+| `--all-roads` | | With `--tiger`: every road, not only highways and ramps. |
 | `--land-cover RASTER` | | Land cover classes, read at each lowest point (for example NLCD classes from `fetch-landcover`). |
 | `--near-m M` | `30` | A channel this close to the lowest point, or a road this close to the spill point, drains the depression. |
-| `--min-share F` | `0.5` | Or channels cross cells holding at least this share of its area. |
+| `--min-share F` | off | Also count as drained when channels cross cells holding at least this share of its area. |
 | `--max-distance-m M` | `1000` | Distances beyond this are left empty. |
 | `--cache-dir DIR` | | Keep the downloaded county road files here. |
 
@@ -251,12 +253,16 @@ Prints the size of the raster written, for example
 ## fetch-landcover
 
 ```
-h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd|nlcd-landcover] [--year Y]
+h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd|nlcd-landcover|soil-groups|curve-numbers] [--year Y] [--cache-dir DIR]
 ```
 
 `worldcover` (default): ESA WorldCover 2021 classes, 10 m, worldwide. `nlcd`: NLCD percent
 impervious surface, 30 m, lower 48 US states, for `--year` 2001, 2004, 2006, 2008, 2011, 2013,
-2016, 2019 or 2021 (default). `nlcd-landcover`: NLCD land cover classes for the same years. See [Data sources](data-sources.md).
+2016, 2019 or 2021 (default). `nlcd-landcover`: NLCD land cover classes for the same years.
+`soil-groups`: soil hydrologic groups from the USDA soil survey (gNATSGO), on a 30 m grid.
+`curve-numbers`: SCS curve numbers on NLCD's 30 m grid from NLCD land cover, imperviousness and
+the soil groups, with the three inputs kept beside the output. Both keep the soil survey's
+map-unit table in `--cache-dir` (default: the output's folder). See [Data sources](data-sources.md).
 
 ## rainfall
 

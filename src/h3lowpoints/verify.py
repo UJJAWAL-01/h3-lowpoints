@@ -252,8 +252,9 @@ def _check_susceptibility(s, ids, chunks, meta):
     """Invariants of the susceptibility table: the index columns (`susceptibility`) and the
     drainage columns (`drainage.drainage_flags`), each when present."""
     from .drainage import drained_rule
-    from .hydro.cascade import cascade, spill_order
-    from .susceptibility import RUNOFF_RULE, UPSTREAM_REL, runoff_coefficient
+    from .hydro.cascade import spill_order, upstream_min
+    from .runoff import rain_for_runoff_mm, retention_mm
+    from .susceptibility import UPSTREAM_REL
 
     problems = []
     add = problems.append
@@ -268,10 +269,9 @@ def _check_susceptibility(s, ids, chunks, meta):
     n = len(ids)
     order = np.argsort(ids)
     seen = np.zeros(n, dtype=bool)
-    runoff_area, upstream_mm = np.full(n, np.nan), np.full(n, np.nan)
+    curve, upstream_mm = np.full(n, np.nan), np.full(n, np.nan)
     flags = set()
     has_index = False
-    simple = settings.get("runoff") == RUNOFF_RULE
     for c in chunks:
         if len(c) == 0:
             continue
@@ -285,24 +285,21 @@ def _check_susceptibility(s, ids, chunks, meta):
         if seen[pos].any() or len(np.unique(pos)) != len(pos):
             flags.add("twice")
         seen[pos] = True
-        if "runoff_coef" in c:
+        if "curve_number" in c:
             has_index = True
             if not routing:
                 flags.add("no routing")
                 continue
-            imp, coef = c["impervious_pct"].to_numpy(dtype=float), c["runoff_coef"].to_numpy(dtype=float)
-            area, fill = c["runoff_area_m2"].to_numpy(dtype=float), c["rain_to_fill_mm"].to_numpy(dtype=float)
+            imp, cn = c["impervious_pct"].to_numpy(dtype=float), c["curve_number"].to_numpy(dtype=float)
+            fill = c["rain_to_fill_mm"].to_numpy(dtype=float)
             up = c["rain_to_fill_upstream_mm"].to_numpy(dtype=float)
-            with np.errstate(invalid="ignore"):
+            with np.errstate(invalid="ignore", divide="ignore"):
                 if ((imp < 0) | (imp > 100)).any():
                     flags.add("impervious range")
-                if ((coef <= 0) | (coef > 1)).any():
-                    flags.add("coef range")
-                if simple and not np.allclose(coef, runoff_coefficient(imp), rtol=1e-9, equal_nan=True):
-                    flags.add("simple method")
-                if not np.allclose(area, coef * catch[pos], rtol=REL, equal_nan=True):
-                    flags.add("runoff area")
-                if not np.allclose(fill, 1000.0 * volume[pos] / area, rtol=REL, equal_nan=True):
+                if ((cn <= 0) | (cn > 100)).any():
+                    flags.add("curve number range")
+                expected = rain_for_runoff_mm(1000.0 * volume[pos] / catch[pos], cn)
+                if not np.allclose(fill, expected, rtol=REL, equal_nan=True):
                     flags.add("rain to fill")
                 if (up > fill * (1 + 1e-9)).any() or (np.isfinite(up) & ~np.isfinite(fill)).any():
                     flags.add("upstream more")
@@ -315,7 +312,7 @@ def _check_susceptibility(s, ids, chunks, meta):
                         years = float(col[len("fill_ratio_"):-len("yr")])
                         if ((c[col].to_numpy(dtype=float) >= 1) & ~(fills <= years)).any():
                             flags.add("fills in years")
-            runoff_area[pos], upstream_mm[pos] = area, up
+            curve[pos], upstream_mm[pos] = cn, up
         if "drained" in c:
             if not drainage:
                 flags.add("no drainage settings")
@@ -332,7 +329,7 @@ def _check_susceptibility(s, ids, chunks, meta):
             if (c["land_cover"].to_numpy() < 0).any():
                 flags.add("land cover")
             drained = c["drained"].to_numpy(dtype=bool)
-            if (drained != drained_rule(c, drainage["near_m"], drainage["min_share"])).any():
+            if (drained != drained_rule(c, drainage["near_m"], drainage.get("min_share"))).any():
                 flags.add("drained rule")
             if (c["landlocked"].to_numpy(dtype=bool) == drained).any():
                 flags.add("landlocked")
@@ -341,10 +338,9 @@ def _check_susceptibility(s, ids, chunks, meta):
             ("twice", "a depression appears more than once in the susceptibility table"),
             ("no routing", "susceptibility index columns in a result computed without catchments"),
             ("impervious range", "impervious_pct outside [0, 100]"),
-            ("coef range", "runoff_coef outside (0, 1]"),
-            ("simple method", "runoff_coef is not 0.05 + 0.009 x impervious_pct"),
-            ("runoff area", "runoff_area_m2 is not runoff_coef x catchment_area_m2"),
-            ("rain to fill", "rain_to_fill_mm is not 1000 x volume_m3 / runoff_area_m2"),
+            ("curve number range", "curve_number outside (0, 100]"),
+            ("rain to fill", "rain_to_fill_mm is not the storm whose SCS runoff over the catchment "
+                             "fills the volume"),
             ("upstream more", "rain_to_fill_upstream_mm is larger than rain_to_fill_mm"),
             ("ratio range", "a fill ratio is negative"),
             ("fills in years", "a storm with a fill ratio of 1 or more is rarer than fills_in_years"),
@@ -364,13 +360,12 @@ def _check_susceptibility(s, ids, chunks, meta):
         spill, target = spill_order(ids, to)
     except ValueError:
         return problems                          # reported by the routing checks
-    # all the water from upstream can at most add the runoff of everything upstream
-    total, _ = cascade(spill, target, np.where(np.isfinite(runoff_area), runoff_area, 0.0),
-                       np.zeros(n))
+    # no catchment sheds water before the rain passes its initial abstraction, 0.2 S
     with np.errstate(invalid="ignore", divide="ignore"):
-        low = 1000.0 * volume / total / (1 + UPSTREAM_REL)
+        abstraction = np.where(np.isfinite(curve), 0.2 * retention_mm(curve), np.inf)
+        low = upstream_min(spill, target, abstraction) / (1 + UPSTREAM_REL)
         if (upstream_mm < low * (1 - 1e-9)).any():
-            add("rain_to_fill_upstream_mm is below what even all the water from upstream allows")
+            add("rain_to_fill_upstream_mm is below the rain any catchment upstream needs to shed water")
     return problems
 
 

@@ -37,6 +37,10 @@ depth deep; used by `drain_at_core`.
 **CRS (coordinate reference system).** What a raster's coordinates mean: metres or feet on a
 map projection, or degrees of longitude and latitude.
 
+**Curve number (CN).** A number from 0 to 100 that sets how much of a storm runs off a piece of
+ground in the NRCS (SCS) method: 98 for pavement, about 30 to 90 for vegetated ground depending on
+its cover and soil. See [Susceptibility](susceptibility.md#runoff-curve-numbers).
+
 **Depressed share.** A cell's depressed area divided by its covered area.
 
 **Depth.** At a pixel: the filled level minus the ground height. Of a depression: the depth at
@@ -68,6 +72,10 @@ upstream) divided by its volume; 1 or more means it fills. See
 [Susceptibility](susceptibility.md#design-storms).
 
 **Footprint.** Where a raster holds valid data; used to measure coverage of any H3 cell.
+
+**Hydrologic soil group.** NRCS's class of how easily water soaks into a soil when wet: A
+(sand, gravel) to D (clay, shallow soil, a high water table). Dual groups such as C/D are wet
+soils, C if artificially drained.
 
 **Imperviousness.** The percent of the ground that is paved or built, so water cannot soak in.
 NLCD gives it for every 30 m pixel of the lower 48 US states.
@@ -134,9 +142,8 @@ means at most k steps away. One step is about 131 m at resolution 10.
 **Roll-up.** Computing a coarser cell table from a finer one: maximum of depths, sums of areas,
 volumes and counts.
 
-**Runoff coefficient.** The share of the rain on the ground that runs off its surface rather than
-soaking in; here `0.05 + 0.009 × imperviousness` (the Simple Method). See
-[Susceptibility](susceptibility.md#runoff).
+**Runoff.** The part of the rain that flows over the ground rather than soaking in; here from
+the SCS curve number method. See [Susceptibility](susceptibility.md#runoff-curve-numbers).
 
 **Spill point.** The lowest point of a depression's rim, where it overflows when full. With
 `catchments=True` it is reported (`spill_lat`, `spill_lon`), with the depression the overflow

@@ -20,12 +20,19 @@ switch the basemap to satellite to compare with the ground.
 | [California Central Valley](examples/canals.html) | -120.6 to -119.6, 36.4° to 37.4° N | 7,557 | Irrigated farmland crossed by canals and streams, half of it drained. |
 
 The maps open in any browser; they need an internet connection for the map library and the
-basemap. Each is one file of 2 to 6 MB.
+basemap. Each is one file of 2.4 to 6.2 MB.
 
-> **Preview, 26 October 2026: not a flood map.** These maps use the first version of the
-> runoff calculation (the Simple Method, 0.05 + 0.009 × percent paved), which treats fields and
-> lawns as shedding only 5% of the rain. That is why almost every North Dakota pothole shows as
-> never filling, although such basins fill in most springs. The next step replaces it with SCS
-> curve numbers from soil and land cover, and the maps will be remade. Storm drains and pipes
-> are not mapped, so some city depressions shown as landlocked are drained. See
-> [Accuracy and limits](limitations.md#the-susceptibility-index).
+How often the landlocked and drained depressions together fill, in the 24-hour storms of NOAA
+Atlas 14 (counting overflow from upstream):
+
+| Area | Median curve number | Fill in a 2-year storm | 10-year | 100-year | Not even the 1000-year | Drained |
+|---|---|---|---|---|---|---|
+| Houston | 86 | 75% | 90% | 97% | 0.8% | 36% |
+| North Dakota potholes | 76 | 10% | 26% | 57% | 21% | 6% |
+| California Central Valley | 78 | 36% | 51% | 67% | 22% | 50% |
+
+> **Preview, 26 October 2026: not a flood map.** Runoff comes from SCS curve numbers (NLCD land
+> cover and paving, USDA soil groups) with average soil moisture before the storm; snowmelt and
+> frozen ground, which fill the prairie potholes most springs, are not modelled. Storm drains and
+> pipes are not mapped, so some city depressions shown as landlocked are drained. See
+> [Susceptibility](susceptibility.md) and [Accuracy and limits](limitations.md#the-susceptibility-index).

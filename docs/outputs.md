@@ -208,10 +208,9 @@ columns and keeps the other's. The method is in [Susceptibility](susceptibility.
 | Column | Type | Unit | Meaning |
 |---|---|---|---|
 | `id` | integer | | The depression. |
-| `impervious_pct` | float | % | Mean imperviousness of its catchment (area-weighted over the catchment's H3 cells). NaN when one runoff coefficient was given, or when the imperviousness data covers less than `min_coverage` of the catchment. |
-| `runoff_coef` | float | 0 to 1 | Share of the rain on its catchment that runs off: `0.05 + 0.009 × impervious_pct` (Simple Method), or the one coefficient given. |
-| `runoff_area_m2` | float | m² | `runoff_coef × catchment_area_m2`: rain depth times this is the catchment's runoff. |
-| `rain_to_fill_mm` | float | mm | Uniform rain that fills it from its own catchment alone: `1000 × volume_m3 / runoff_area_m2`. |
+| `impervious_pct` | float | % | Mean percent paved of its catchment (area-weighted over its H3 cells); NaN unless imperviousness was given, or where it covers less than `min_coverage` of the catchment. |
+| `curve_number` | float | 0 to 100 | SCS curve number of its catchment: the area-weighted mean over the catchment's H3 cells, or the one curve number given; NaN where the curve numbers cover less than `min_coverage` of the catchment. |
+| `rain_to_fill_mm` | float | mm | Uniform rain that fills it from its own catchment alone: the storm whose SCS runoff, spread over `catchment_area_m2`, equals `volume_m3`. |
 | `rain_to_fill_upstream_mm` | float | mm | The same, counting the overflow of the depressions upstream that fill first; never larger than `rain_to_fill_mm`. Exact to within 1%. |
 | `fill_ratio_2yr`, `fill_ratio_10yr`, `fill_ratio_100yr` | float | | Only with storms by return period (`--rain atlas14`): water reaching it in the 24-hour storm expected once in 2, 10 or 100 years (own runoff plus overflow from upstream), over its volume. 1 or more: it fills. Other return periods give `fill_ratio_<N>yr` (`ratio_years`). |
 | `fills_in_years` | float | years | Only with storms by return period: the smallest return period whose storm fills it; `inf` when none does. |
@@ -220,8 +219,8 @@ columns and keeps the other's. The method is in [Susceptibility](susceptibility.
 | `stream_m` | float | m | Only with drainage flags: distance from the lowest point to the nearest stream or river line; NaN beyond `max_distance_m` or without stream lines. |
 | `canal_m` | float | m | The same for canal, ditch, conduit and pipeline lines. |
 | `channel_share` | float | 0 to 1 | Share of the depression's area in H3 cells a stream or canal line crosses; NaN without `details=True` or without channel lines. |
-| `spill_road_m` | float | m | Distance from the spill point to the nearest road; NaN beyond `max_distance_m` or without roads. |
-| `drained` | boolean | | `stream_m` or `canal_m` at most `near_m`, `channel_share` at least `min_share`, or `spill_road_m` at most `near_m`. |
+| `spill_road_m` | float | m | Distance from the spill point to the nearest road given (with `--tiger`, highways and ramps only); NaN beyond `max_distance_m` or without roads. |
+| `drained` | boolean | | `stream_m` or `canal_m` at most `near_m`, or `spill_road_m` at most `near_m` (and `channel_share` at least `min_share`, when a minimum share was given). |
 | `landlocked` | boolean | | Not `drained`: no sign of drainage in the lines given. |
 
 NaN means unknown: an input does not cover enough of the catchment, or the depression receives
@@ -251,7 +250,7 @@ depression table. A clipped result keeps the rows of the depressions it keeps.
 | `tiling` | Tiled runs only: `tile` (tile size in pixels), `n_tiles`, `n_border_cells` and `n_crossings` (the size of the graph joining the tiles; see [Large regions](large-regions.md)). |
 | `output` | Saved results: `format` (`csv` or `parquet`) and `n_cells` (rows in the cell table). |
 | `clip` | Clipped results only: `boundary`, the membership `rule`, and `depressions_before` and `cells_before` (the counts before clipping). |
-| `susceptibility` | Results with a susceptibility table only: `runoff` (the rule for the runoff coefficient), `impervious` (its source, or `null`), `rain` (the storms' source, or `null`), `years` (the storms' return periods), `ratio_years`, `min_coverage`, `upstream_rel` (the precision of `rain_to_fill_upstream_mm`), `package_version`, and `clipped_after` (true when the result was clipped after the table was made); with drainage flags, `drainage`: the sources of `streams`, `canals`, `roads` and `land_cover`, `near_m`, `min_share`, `max_distance_m`, the `crs` distances were measured in, whether `channel_share` was measured, and `package_version`. |
+| `susceptibility` | Results with a susceptibility table only: `runoff` (the runoff rule), `curve_numbers` and `impervious` (their sources, or `null`), `rain` (the storms' source, or `null`), `years` (the storms' return periods), `ratio_years`, `min_coverage`, `upstream_rel` (the precision of `rain_to_fill_upstream_mm`), `package_version`, and `clipped_after` (true when the result was clipped after the table was made); with drainage flags, `drainage`: the sources of `streams`, `canals`, `roads` and `land_cover`, `near_m`, `min_share`, `max_distance_m`, the `crs` distances were measured in, whether `channel_share` was measured, and `package_version`. |
 | `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis (of the last part, for a run made in parts); with `--water-mask`, also `water_mask`, the rule that made the mask. |
 
 Example (from `examples/quickstart.py`):
