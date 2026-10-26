@@ -80,11 +80,15 @@ def state_url(state):
 
 
 def state_flowlines(state, *, cache_dir, bbox=None, ftypes=None):
-    """A state's NHD high-resolution flowlines, read straight from its downloaded zip.
+    """A state's NHD high-resolution flowlines, from its download.
 
-    The zip (up to 3.5 GB) is downloaded once into `cache_dir`. `bbox` (lon/lat) reads only the
-    lines intersecting it; `ftypes` only those feature types. Returns a GeoDataFrame in WGS 84
-    with `ftype`, `fcode` and line geometry (heights and measures dropped).
+    The zip (up to 3.5 GB) is downloaded once into `cache_dir`, and its GeoPackage unpacked once
+    beside it (1.7 to 2.6 times the zip's size; delete it with `remove_unpacked` when done): a
+    compressed zip cannot be read by parts, so reading a box straight from it decompresses the
+    file from the start for every lookup (more than 20 minutes for Texas without finishing).
+    `bbox` (lon/lat) reads only the lines intersecting it, through the GeoPackage's spatial
+    index; `ftypes` only those feature types. Returns a GeoDataFrame in WGS 84 with `ftype`,
+    `fcode` and line geometry (heights and measures dropped).
     """
     gpd = _geopandas()
     import warnings
@@ -96,7 +100,7 @@ def state_flowlines(state, *, cache_dir, bbox=None, ftypes=None):
     if local is None:
         raise ValueError(f"NHD has no download for {state!r} (names are as on The National Map, "
                          "such as 'Texas' or 'District of Columbia')")
-    path = f"/vsizip/{local}/{_gpkg_name(local)}"
+    path = unpack(local)
     where = None if ftypes is None else f"ftype IN ({', '.join(str(int(f)) for f in ftypes)})"
     # the layer is in NAD83 (EPSG:4269), within a few metres of WGS 84, so a lon/lat box filters it
     with warnings.catch_warnings():              # NHD lines carry measures, which are dropped
@@ -109,11 +113,33 @@ def state_flowlines(state, *, cache_dir, bbox=None, ftypes=None):
     return gpd.GeoDataFrame(lines[["ftype", "fcode", "geometry"]], crs=4326)
 
 
-def _gpkg_name(zip_path):
+def unpack(zip_path):
+    """The GeoPackage of a state zip, unpacked once beside it (an unfinished unpacking is never
+    taken for a finished one). Returns its path."""
+    import shutil
     import zipfile
+    from pathlib import Path
 
+    zip_path = Path(zip_path)
     with zipfile.ZipFile(zip_path) as z:
         names = [n for n in z.namelist() if n.lower().endswith(".gpkg")]
-    if len(names) != 1:
-        raise ValueError(f"expected one GeoPackage in {zip_path}, found {names}")
-    return names[0]
+        if len(names) != 1:
+            raise ValueError(f"expected one GeoPackage in {zip_path}, found {names}")
+        target = zip_path.with_name(Path(names[0]).name)
+        if not target.exists():
+            partial = target.with_name(target.name + ".part")
+            with z.open(names[0]) as src, open(partial, "wb") as dst:
+                shutil.copyfileobj(src, dst, 1 << 24)
+            partial.replace(target)
+    return str(target)
+
+
+def remove_unpacked(state, *, cache_dir):
+    """Delete a state's unpacked GeoPackage (the zip is kept). Returns the bytes freed."""
+    from pathlib import Path
+
+    zip_path = Path(cache_dir) / state_url(state).rsplit("/", 1)[-1]
+    target = zip_path.with_suffix(".gpkg")
+    size = target.stat().st_size if target.exists() else 0
+    target.unlink(missing_ok=True)
+    return size

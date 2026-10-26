@@ -31,7 +31,7 @@
   files; in the US `--nhd` and `--tiger` fetch them. The drainage columns join the susceptibility
   table, and either group can be computed or redone without the other; `verify` checks them.
 - US readers: `sources.nhd` (NHD high-resolution flowlines from the map service or a state's
-  GeoPackage zip), `sources.roads` (Census TIGER/Line roads by county) and
+  GeoPackage, unpacked once beside its zip), `sources.roads` (Census TIGER/Line roads by county) and
   `sources.landcover.fetch_land_cover` (NLCD land cover classes; `fetch-landcover --from
   nlcd-landcover`).
 

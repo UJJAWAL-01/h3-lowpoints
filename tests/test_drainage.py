@@ -253,6 +253,10 @@ def test_state_flowlines_reads_the_zip_with_filters(tmp_path):
     some = nhd.state_flowlines("Test", cache_dir=cache, ftypes=nhd.CANAL_FTYPES,
                                bbox=(-77.5, 38.5, -74.5, 39.5))
     assert sorted(some["ftype"]) == [336, 428]
+    unpacked = cache / "NHD_H_Test_State_GPKG.gpkg"            # unpacked once, beside the zip
+    assert unpacked.exists() and not list(cache.glob("*.part"))
+    assert nhd.remove_unpacked("Test", cache_dir=cache) > 0 and not unpacked.exists()
+    assert (cache / "NHD_H_Test_State_GPKG.zip").exists()
 
 
 def test_roads_from_counties(tmp_path):

@@ -373,9 +373,11 @@ WGS 84 with `ftype`, `fcode` and lines. `sources.nhd.STREAM_FTYPES` (460, 558) a
 
 ### `sources.nhd.state_flowlines(state, *, cache_dir, bbox=None, ftypes=None)`
 
-A state's NHD high-resolution flowlines, read straight from its GeoPackage zip (downloaded once
-into `cache_dir`; up to 3.5 GB). `state` as named on The National Map ("Texas", "District of
-Columbia"); `bbox` and `ftypes` read only part of it.
+A state's NHD high-resolution flowlines, from its GeoPackage zip (downloaded once into
+`cache_dir`; up to 3.5 GB), unpacked once beside it and read through its spatial index. `state`
+as named on The National Map ("Texas", "District of Columbia"); `bbox` and `ftypes` read only
+part of it. `sources.nhd.remove_unpacked(state, *, cache_dir)` deletes the unpacked GeoPackage
+(the zip is kept) and returns the bytes freed.
 
 ### `sources.roads.fetch_roads(bbox, out_path=None, *, cache_dir, year=2024, get=read_bytes)`
 

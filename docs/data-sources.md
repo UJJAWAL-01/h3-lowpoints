@@ -144,7 +144,13 @@ depressions can be studied apart.
   (3 MB to 3.5 GB; about 45 GB for the lower 48 states and DC), in NAD83. A state's file covers
   whole river basins that cross its border, so neighbouring files overlap.
 - **Library:** `sources.nhd.fetch_flowlines` (a box, from the service), `state_flowlines` (a state,
-  read straight from its zip, by box and feature type), `h3lowpoints drainage --nhd`.
+  by box and feature type), `h3lowpoints drainage --nhd`.
+
+A state's GeoPackage is unpacked once beside its zip (1.7 to 2.6 times the zip's size: Texas
+6.4 GB) and read through its spatial index: Texas unpacked and read for a 1° box in about a
+minute. Reading it straight from the zip is not workable, because a compressed zip cannot be
+read by parts: every lookup decompresses the file from its start again (Texas ran for more than
+20 minutes without finishing). `remove_unpacked` deletes the unpacked file when done.
 
 Checked in October 2026: for a box in Washington, DC the service and the state file gave the
 same 430 lines (165.0 km). The service can be slow (single requests took 1 to 4 minutes, some
