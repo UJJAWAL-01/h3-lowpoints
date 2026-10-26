@@ -220,7 +220,7 @@ every row of the depressions it keeps.
 | `tiling` | Tiled runs only: `tile` (tile size in pixels), `n_tiles`, `n_border_cells` and `n_crossings` (the size of the graph joining the tiles; see [Large regions](large-regions.md)). |
 | `output` | Saved results: `format` (`csv` or `parquet`) and `n_cells` (rows in the cell table). |
 | `clip` | Clipped results only: `boundary`, the membership `rule`, and `depressions_before` and `cells_before` (the counts before clipping). |
-| `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis. |
+| `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis (of the last part, for a run made in parts); with `--water-mask`, also `water_mask`, the rule that made the mask. |
 
 Example (from `examples/quickstart.py`):
 

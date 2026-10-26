@@ -180,7 +180,8 @@ used:
 
 ## Worked example: New York City street flooding
 
-An example of the method on public data, run against the published national dataset. It is
+An example of the method on public data, run against the published national dataset (version
+0.1; version 0.2 has the same depressions in New York, so the results hold for it). It is
 an illustration of how to use and read the tool, not a study of New York: nothing was tuned to
 the city, and every setting below was fixed before any result was seen.
 

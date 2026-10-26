@@ -282,9 +282,9 @@ def _build(args):
     result.meta["build"] = {"dataset": args.dataset, "bbox": list(args.bbox),
                             "seconds": {k: round(v, 1) for k, v in timings.items()}}
     if mask is not None:
-        result.meta["build"]["water_mask"] = (
-            "ESA WorldCover 2021 v200, class 80 (permanent water bodies): a pixel is water when at "
-            "least 5 of 9 evenly spaced points in it are; file water.vrt")
+        from .sources.landcover import WATER_RULE
+
+        result.meta["build"]["water_mask"] = f"{WATER_RULE}; file water.vrt"
     write_meta(out, result.meta)
     problems = check_saved(out)
     if args.spot_check:

@@ -134,6 +134,10 @@ def fetch_impervious(bbox, out_path, *, year=2021, max_area_km2=20_000.0, data=N
 
 WATER_CLASS = 80          # WorldCover "permanent water bodies"
 SAMPLES = 3               # each elevation pixel is sampled at SAMPLES x SAMPLES evenly spaced points
+# how a result's meta.json describes the mask
+WATER_RULE = ("ESA WorldCover 2021 v200: a pixel is water when at least 5 of 9 evenly spaced points "
+              "in it are class 80 (permanent water bodies), or when at least 5 fall where WorldCover "
+              "has no data and the pixel's elevation is at or below 0 m (open sea)")
 
 
 def worldcover_vrt(bbox, path, *, source=None, cache_dir=None, workers=8):

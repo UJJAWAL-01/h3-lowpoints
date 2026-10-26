@@ -159,8 +159,9 @@ minimum for the lower 48 at resolution 10. A hierarchical version of the method 
 
 ### With open water masked
 
-This run, clipped to the lower 48 states, is published as an open dataset:
-[doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773).
+This run, clipped to the lower 48 states, was published as version 0.1 of the open dataset:
+[doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773). Version 0.2 replaces
+it ([below](#with-catchments-and-details)).
 
 Measured on 20 and 21 October 2026: the same box and settings with `--water-mask`, after the
 improvements that came out of the first run (one outlet node per tile, validity records for
@@ -186,6 +187,33 @@ half of the cells. The largest depressions are now dry closed basins of the dese
 basin whose lowest part holds a permanent lake (the Great Salt Lake basin, for instance) now
 drains into that lake instead of counting as one depression: the right reading when the question
 is where water ponds on land.
+
+### With catchments and details
+
+Measured on 25 October 2026: the same box with `--water-mask --catchments --details --workers 4`
+(and the open sea in the water mask, [Data sources](data-sources.md#water-mask-from-esa-worldcover)).
+Run in seven parts; before the last one the run was stopped on purpose, at 1,109 of 1,122 tiles of
+pass 2, to free disk space before the final step, then resumed with the same command.
+
+| | |
+|---|---|
+| Depressions | 12,122,323 (182 touching the edge of the data) |
+| H3 cells (resolution 10) | 39,124,305 |
+| Border graph | 12.4 million nodes, 60.4 million crossings |
+| Time | 12.2 hours: water mask 1.5, pass 1 3.4, border solve a few minutes, pass 2 5.9, final step 1.4 |
+| Extra memory at peak | 11.7 GB (border solve); 8.3 GB while the tables are assembled; 10.3 GB for the verification at the end |
+| Disk at peak | 26.2 GB (saved tiles, spill files and the tables being written, in the final step) |
+| Results (Parquet) | 9.9 GB: 5.15 GB catchments, 1.81 GB depression × cell, 1.46 GB depressions, 1.42 GB cells |
+| Internet traffic | about 112 GB |
+| Verification | all invariants, including those of catchments and details; 3 spot checks |
+
+The catchments, spill links, levels, shape and fill curves add about 3.3 hours to the run and
+five times the output. The depressions are those of the water-masked run above, apart from two causes.
+USGS updated nine 3DEP tiles in Washington on 21 October 2026, between the two runs; and the sums
+of a depression's tile pieces are added in another order, which changes the last digits
+(at most 1 part in 10¹²) of a few hundred depressions' area or volume. Masking the open sea
+changed routing, not depressions. Clipped to the lower 48 states, this is version 0.2 of the
+national dataset: [doi.org/10.5281/zenodo.23669497](https://doi.org/10.5281/zenodo.23669497).
 
 ## Running in parts
 

@@ -4,7 +4,7 @@
 [![Tests](https://github.com/UJJAWAL-01/h3-lowpoints/actions/workflows/ci.yml/badge.svg)](https://github.com/UJJAWAL-01/h3-lowpoints/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-online-blue)](https://ujjawal-01.github.io/h3-lowpoints/)
 [![Software DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23552522-blue)](https://doi.org/10.5281/zenodo.23552522)
-[![Dataset DOI](https://img.shields.io/badge/dataset-10.5281%2Fzenodo.23552773-blue)](https://doi.org/10.5281/zenodo.23552773)
+[![Dataset DOI](https://img.shields.io/badge/dataset-10.5281%2Fzenodo.23669497-blue)](https://doi.org/10.5281/zenodo.23669497)
 
 Find closed depressions ("low points") in an elevation model and describe them on
 [H3](https://h3geo.org) hexagon cells at any resolution, ready for maps, 3D views and analysis.
@@ -50,9 +50,11 @@ pip install "h3-lowpoints[viz,sources,parquet]"   # + notebook maps, drain/build
 ## National dataset
 
 Every closed depression on land in the lower 48 US states, from USGS 3DEP 30 m with open water
-masked: 10.6 million depressions and 34 million H3 resolution-10 cells, as Parquet, with a
-description of methods, columns and limits. Open data (CC BY 4.0) on Zenodo:
-[doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773).
+masked: 10.6 million depressions and 34 million H3 resolution-10 cells, with each depression's
+catchment, spill link, levels, shape and fill curve, as Parquet, with a description of methods,
+columns and limits. Open data (CC BY 4.0) on Zenodo, version 0.2:
+[doi.org/10.5281/zenodo.23669497](https://doi.org/10.5281/zenodo.23669497) (version 0.1, without catchments and fill curves:
+[doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773)).
 
 ## Quick start
 

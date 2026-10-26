@@ -142,7 +142,8 @@ def test_build_with_a_water_mask(tmp_path, monkeypatch, capsys):
     assert not near(masked.depressions).any()                    # ... until it is open water
     assert len(masked.depressions) == len(plain.depressions) - 1     # the other pits are unchanged
     assert (tmp_path / "masked" / "water.vrt").exists()
-    assert "WorldCover" in json.loads((tmp_path / "masked" / "meta.json").read_text())["build"]["water_mask"]
+    rule = json.loads((tmp_path / "masked" / "meta.json").read_text())["build"]["water_mask"]
+    assert "WorldCover" in rule and "open sea" in rule and "0 m" in rule
     with rasterio.open(tmp_path / "masked" / "water.vrt") as m, \
             rasterio.open(tmp_path / "masked" / "dem.vrt") as d:
         assert m.transform == d.transform and m.shape == d.shape and m.read(1).any()

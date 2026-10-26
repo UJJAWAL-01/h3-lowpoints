@@ -14,7 +14,8 @@ running a GIS desktop application.
 > map**. See [Accuracy and limits](limitations.md).
 
 **National dataset:** every closed depression on land in the lower 48 US states (USGS 3DEP
-30 m, open water masked), on H3, is published as open data: [doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773).
+30 m, open water masked), on H3, with catchments, spill links and fill curves, is published as
+open data: [doi.org/10.5281/zenodo.23669497](https://doi.org/10.5281/zenodo.23669497).
 
 ## Where to start
 

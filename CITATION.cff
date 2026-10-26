@@ -15,15 +15,15 @@ identifiers:
     value: "10.5281/zenodo.23552973"
     description: "Version 0.1.1"
 license: Apache-2.0
-version: "0.2.0"
+version: "0.3.0"
 references:
   - type: dataset
     title: "Closed depressions on land, lower 48 US states, on H3 (USGS 3DEP 30 m)"
     authors:
       - family-names: "Patel"
         given-names: "Ujjawal"
-    doi: "10.5281/zenodo.23552773"
-    version: "0.1"
+    doi: "10.5281/zenodo.23669497"
+    version: "0.2"
 keywords:
   - H3
   - DEM

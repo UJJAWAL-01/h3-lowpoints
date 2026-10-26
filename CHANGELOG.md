@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (26 October 2026)
 
 ### Changed
 - **The water mask also masks the open sea**: pixels where ESA WorldCover has no data and the
@@ -15,8 +15,16 @@
   cannot continue a run started with another.
 - Disk-backed runs compress their saved tiles and temporary per-cell files: on 1° test boxes with
   catchments and details, the disk needed at peak fell by half.
+- `meta.json` of a `build` with `--water-mask` states the whole rule of the mask, open sea
+  included.
 
 ### Added
+- **National dataset, version 0.2** ([doi.org/10.5281/zenodo.23669497](https://doi.org/10.5281/zenodo.23669497)): the lower 48 states with catchments, spill
+  links, levels, shape, fill curves and the depression × cell table; 10,570,791 depressions. Made
+  in 12.2 hours on a laptop ([docs/large-regions.md](docs/large-regions.md#with-catchments-and-details)).
+  Against version 0.1, 99.6% of the depressions are identical; the others lie where USGS updated
+  nine 3DEP tiles in Washington on 21 October 2026, apart from last-digit differences in the sums
+  of a few hundred.
 - **Catchments and spill links** (`catchments=True` in `analyze`, `analyze_array` and
   `analyze_tiled`; `--catchments` for `analyze` and `build`): where rain on every pixel ends up,
   by exact rules that do not depend on processing order (steepest descent on the ground, flats

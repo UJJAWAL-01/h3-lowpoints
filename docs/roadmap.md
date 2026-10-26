@@ -6,7 +6,7 @@ products it builds (a national depression layer, and later a susceptibility laye
 3DEP). Everything is meant to cost nothing to run or to host: results are published as open
 data files and static web pages.
 
-Each step is finished, tested and documented before the next starts. Nothing is released yet.
+Each step is finished, tested and documented before the next starts.
 
 ## Done
 
@@ -45,12 +45,24 @@ Each step is finished, tested and documented before the next starts. Nothing is 
   depth class, with spatial block-bootstrap intervals. Works on any result, including the
   national dataset, for any region; never tuned to one city.
 
+**Where the water goes, and how each depression fills** (0.3.0)
+
+- Catchments and spill links (`catchments=True`): the area draining into each depression, by exact
+  rules, and where each depression overflows to ([Definition](definition.md#catchments-and-spill)).
+- Levels, shape and fill curves (`details=True`): ground and water levels, length, width and
+  orientation, the flooded area and volume at six levels below full, and a depression × cell table
+  ([Definition](definition.md#levels-shape-and-fill-curve)).
+- Both exact in tiles, verified, and computed for the whole national dataset (version 0.2).
+
 ## Next
 
-1. **National US layer.** Published 21 October 2026 as open data (CC BY 4.0):
+1. **National US layer.** Version 0.1 published 21 October 2026 as open data (CC BY 4.0):
    [doi.org/10.5281/zenodo.23552773](https://doi.org/10.5281/zenodo.23552773). 10,573,090 depressions and 34,046,636 resolution-10 cells from
    3DEP 30 m with open water masked, clipped to the lower 48 states
-   ([Large regions](large-regions.md)).
+   ([Large regions](large-regions.md)). Version 0.2 (October 2026,
+   [doi.org/10.5281/zenodo.23669497](https://doi.org/10.5281/zenodo.23669497)) adds the catchments, spill links, levels, shape, fill curves and
+   depression × cell table: 10,570,791 depressions
+   ([Large regions](large-regions.md#with-catchments-and-details)).
 2. **General validation tools.** Done in 0.2.0 (see above), with a worked example on New York
    City street-flooding reports ([Validation](validation.md#worked-example-new-york-city-street-flooding)).
 3. **Physical susceptibility index.** For each depression, compare the water it could receive
@@ -61,6 +73,10 @@ Each step is finished, tested and documented before the next starts. Nothing is 
    - storage = the depression's volume;
    - the fill ratio, runoff / storage, is the index.
 
+   Alongside it, a flag separating depressions that are drained (canals, ditches and streams that
+   carry the water away) from those that are landlocked, where water has no way out: the case that
+   matters for waterlogging in residential and farm land. The catchments, fill curves and spill
+   links both need are in version 0.2 of the national dataset, so they need no new national run.
    Every term can be inspected, and the index needs no training labels. It will be validated with
    the tools of step 2 and documented with its evidence and its limits.
 4. **Machine learning, only if it earns its place.** Train on the step 3 features, judge it by
@@ -70,9 +86,13 @@ Each step is finished, tested and documented before the next starts. Nothing is 
 5. **The explorer web app.** A website in the spirit of h3geo.org, in a black-and-white design,
    that runs entirely in the visitor's browser (no server, no cost): try the analysis on a small
    box, browse the national layer at every resolution, view depressions flat, as wells below the
-   ground or as columns, and read this documentation.
+   ground or as columns, and read this documentation. A rain simulator: choose an area, a rainfall
+   depth and a duration, and see which depressions fill, which overflow and where the water goes,
+   from the fill curves and spill links.
 6. **Release 0.1.** Done 21 October 2026: the library on PyPI (`pip install h3-lowpoints`), the
-   documentation on GitHub Pages, the national dataset on Zenodo. The explorer app follows.
+   documentation on GitHub Pages, the national dataset on Zenodo. 0.2.0 added validation, 0.3.0
+   catchments, levels and fill curves with version 0.2 of the national dataset. The explorer app
+   follows.
 
 ## Also planned
 
