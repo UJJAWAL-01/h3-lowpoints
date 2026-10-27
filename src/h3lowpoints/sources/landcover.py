@@ -21,8 +21,11 @@ import rasterio
 from rasterio.io import MemoryFile
 from rasterio.warp import transform_bounds
 
+from . import _common
 from ._common import (bbox_area_km2, check_bbox, degree_tiles, gdal_env, mosaic, read_bytes,
                       remote, snap_outwards, url_exists, write_raster)
+
+HTML_RETRY_DELAYS = (5, 15, 45, 120)       # seconds before asking again after an HTML error page
 
 WORLDCOVER = "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map"
 WORLDCOVER_CLASSES = {
@@ -153,11 +156,20 @@ def _nlcd(bbox, url, max_area_km2, data):
     if area > max_area_km2:
         raise ValueError(f"bbox is about {area:,.0f} km2 (limit {max_area_km2:,.0f}); fetch it in pieces")
     if data is None:
-        try:
-            data = read_bytes(url)
-        except urllib.error.HTTPError as exc:
-            raise ValueError(f"The NLCD service refused this box (HTTP {exc.code}). NLCD covers the "
-                             "conterminous US only; elsewhere use fetch_worldcover") from exc
+        # Outside its coverage the service answers with a GeoTIFF of no data or an XML exception
+        # (HTTP 404). An HTML page is its web server failing for a moment (seen in October 2026
+        # under eight parallel requests): asked again later, it sends the GeoTIFF.
+        for wait in (*HTML_RETRY_DELAYS, None):
+            try:
+                data = read_bytes(url)
+            except urllib.error.HTTPError as exc:
+                raise ValueError(f"The NLCD service refused this box (HTTP {exc.code}). NLCD covers the "
+                                 "conterminous US only; elsewhere use fetch_worldcover") from exc
+            if not data.lstrip()[:20].lower().startswith((b"<!doctype html", b"<html")):
+                break
+            if wait is None:
+                raise OSError(f"The NLCD service kept answering with an error page: {data[:200]!r}")
+            _common._sleep(wait)
     if not data.startswith((b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")):
         text = data[:300].decode("utf-8", errors="replace")
         raise ValueError(f"The NLCD service did not return a GeoTIFF (outside the lower 48 US?): {text}")

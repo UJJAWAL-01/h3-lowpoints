@@ -459,3 +459,25 @@ def test_gdal_block_cache_is_256_megabytes():
 
     with _common.gdal_env():
         assert get_gdal_config("GDAL_CACHEMAX") == 256 * 1024 * 1024
+
+
+def test_nlcd_error_pages_are_retried_and_never_taken_for_no_data(monkeypatch, tmp_path):
+    """An HTML page from the NLCD service is its web server failing for a moment: asked again, it
+    answers. If it keeps failing, that is an error, never "no data here"."""
+    arr = np.full((4, 5), 20, dtype="uint8")
+    with rasterio.MemoryFile() as mem:
+        with mem.open(driver="GTiff", height=4, width=5, count=1, dtype="uint8", crs="EPSG:5070",
+                      transform=from_origin(0, 120, 30, 30), nodata=255) as dst:
+            dst.write(arr, 1)
+        tiff = mem.read()
+    page = b'<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"><html><title>502</title></html>'
+    answers, waits = [page, page, tiff], []
+    monkeypatch.setattr(landcover, "read_bytes", lambda url: answers.pop(0))
+    monkeypatch.setattr(_common, "_sleep", waits.append)
+    out = landcover.fetch_impervious((-95.4, 29.7, -95.3, 29.8), tmp_path / "i.tif")
+    with rasterio.open(out) as src:
+        assert (src.read(1) == 20).all()
+    assert waits == [5, 15]
+    monkeypatch.setattr(landcover, "read_bytes", lambda url: page)
+    with pytest.raises(OSError, match="error page"):
+        landcover.fetch_land_cover((-95.4, 29.7, -95.3, 29.8), tmp_path / "l.tif")

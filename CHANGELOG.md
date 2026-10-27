@@ -53,6 +53,10 @@
   the 256 the readers set meant 256 bytes, not 256 MB, and GDAL fetched the same blocks again and
   again. Every remote read through the readers was affected (3DEP, WorldCover, the soil survey);
   results were never wrong, only slow: a soil read now takes 3 s instead of 12 to 15 s.
+- An HTML error page from the NLCD service (its web server failing for a moment) was reported as
+  "no data for this box". It is now asked again after 5, 15, 45 and 120 s, and if it keeps
+  failing, raised as an `OSError`; only the service's real answers outside its coverage (a
+  GeoTIFF of no data, an XML exception) mean no data.
 
 ## 0.3.0 (26 October 2026)
 
