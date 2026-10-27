@@ -24,7 +24,8 @@ import numpy as np
 import pandas as pd
 
 from .pipeline import Result, _package_version, deeper_than_wide
-from .store import CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta, write_table
+from .store import (CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta, table_path,
+                    write_table)
 
 DEPTH_CLASSES = (0.5, 1.0, 2.0)
 POINT_COLUMNS = ["point_id", "kind", "lon", "lat", "h3", "rings", "depth_m", "block"]
@@ -130,17 +131,19 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
     depth_classes  edges, in metres, of the depth classes for `by_depth`
     classes        a label for each depression, for `by_class` and `class_ratios`: a Series
                    indexed by depression id, a dict, a DataFrame or a .csv/.parquet file with
-                   `id` and `class` columns. Each labelled depression claims the depressed cells
-                   within its equivalent radius, sqrt(area / pi), of its lowest point (rounded to
-                   whole rings); where claims overlap, the depression holding the most water wins.
-                   Depressed ground nobody claims is "unclassified"
+                   `id` and `class` columns. Each depressed cell takes the class of the labelled
+                   depression holding the most water in it, from the result's depression x cell
+                   table (made with `details`). Without that table, each labelled depression
+                   claims the depressed cells within its equivalent radius, sqrt(area / pi), of
+                   its lowest point (rounded to whole rings), and where claims overlap the one
+                   holding the most water wins. Depressed ground nobody claims is "unclassified"
     class_order    the classes in order (default: sorted): ties between equally near and deep
                    ground go to the earlier class, and ratios are of each class over each later one
     block_res      H3 resolution of the bootstrap blocks (coarser than or equal to the result's)
     n_boot, ci     bootstrap samples and confidence level of the percentile intervals
     exclude_suspect  leave out the ground around depressions flagged `deeper_than_wide`
     """
-    meta, cells_src, deps_src, where = _source(result, rows)
+    meta, cells_src, deps_src, parts_src, where = _source(result, rows)
     res = meta["params"]["res"]
     _check_settings(res, max_rings, depth_classes, block_res, n_boot, ci)
     labels, order = (None, None) if classes is None else _labels(classes, class_order)
@@ -188,7 +191,9 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
     dep_cells, dep_depth = _depression_cells(cells_src(), needed, shift)
     spacing = h3.average_hexagon_edge_length(res, "m") * math.sqrt(3)
     dep_code, claimed = None, None
-    if labels is not None:
+    if labels is not None and parts_src is not None:
+        dep_code, claimed = _cell_claims(parts_src(), labels, dep_cells, order)
+    elif labels is not None:
         # a depression claims ground around its lowest point, which may lie one coarse cell away
         around = _parents(needed << shift, coarse)
         around = np.unique(np.fromiter(itertools.chain.from_iterable(
@@ -291,10 +296,7 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
         "rings": _records(rings), "depth_classes_m": [float(e) for e in edges],
         "by_depth": _records(by_depth),
         **({} if labels is None else {
-            "classes": {"order": list(order), "depressions_labelled": int(len(labels)), **claimed,
-                        "rule": "each labelled depression claims the depressed cells within "
-                                "round(sqrt(area_m2 / pi) / ring_spacing_m) rings of its lowest "
-                                "point; overlaps go to the most volume_m3 (then the lower id)"},
+            "classes": {"order": list(order), "depressions_labelled": int(len(labels)), **claimed},
             "by_class": _records(by_class), "class_ratios": _records(class_ratios)}),
         "bootstrap": {"block_res": block_res, "n_blocks": n_blocks, "n_blocks_with_observations":
                       obs_blocks, "n_boot": n_boot, "ci": ci, "seed": seed,
@@ -411,8 +413,9 @@ def _source(result, rows):
     """(meta, cell chunks, depression chunks, description) of a result in memory or on disk."""
     if isinstance(result, Result):
         if result.cells is not None:
+            parts = result.depression_cells
             return (result.meta, lambda: [result.cells], lambda classes=False: [result.depressions],
-                    "in memory")
+                    None if parts is None else (lambda: [parts]), "in memory")
         result = result.path
     folder = Path(result)
     missing = missing_files(folder)
@@ -423,9 +426,13 @@ def _source(result, rows):
         columns = (["id", "h3_lowpoint", "area_m2", "volume_m3"] if classes else
                    ["h3_lowpoint", "max_depth_m", "area_m2", "deeper_than_wide"])
         return iter_table(folder, "depressions", rows, columns=columns)
+    parts = None
+    if table_path(folder, "depression_cells") is not None:
+        def parts():
+            return iter_table(folder, "depression_cells", rows, columns=["id", "h3", "volume_m3"])
     return (read_meta(folder),
             lambda: iter_table(folder, "cells", rows, columns=["h3", "max_depth_m"]),
-            depressions, str(folder))
+            depressions, parts, str(folder))
 
 
 def _check_settings(res, max_rings, depth_classes, block_res, n_boot, ci):
@@ -477,13 +484,12 @@ def _parents(cells, res):
 
 def _claims(chunks, labels, around, coarse, spacing, dep_cells, order):
     """The position in `order` of each depressed cell's class (len(order) when unclaimed), and
-    counts for the report.
+    counts for the report, for results without the depression x cell table.
 
     Each labelled depression whose lowest point lies in one of the coarse cells `around` claims
     the cells within round(sqrt(area / pi) / spacing) rings of its lowest point's cell; a cell
     claimed more than once goes to the depression with the most volume, then the lower id.
     """
-    code_of = {name: i for i, name in enumerate(order)}
     n_classes = len(order)
     cells, volume, ids, codes = [], [], [], []
     for chunk in chunks:
@@ -504,19 +510,57 @@ def _claims(chunks, labels, around, coarse, spacing, dep_cells, order):
         volume.append(np.repeat(sub["volume_m3"].to_numpy(float), sizes))
         ids.append(np.repeat(sub["id"].to_numpy(np.int64), sizes))
         codes.append(np.repeat(labels.loc[sub["id"].to_numpy()].to_numpy(), sizes))
-    code = np.full(len(dep_cells), n_classes, dtype=np.int64)
-    if cells:
-        cells, volume, ids = np.concatenate(cells), np.concatenate(volume), np.concatenate(ids)
-        names = np.concatenate(codes)
-        order = np.lexsort((ids, -np.nan_to_num(volume, nan=-np.inf), cells))
-        cells, names = cells[order], names[order]
-        first = np.r_[True, cells[1:] != cells[:-1]]
-        cells, names = cells[first], names[first]
-        pos = np.minimum(np.searchsorted(cells, dep_cells), len(cells) - 1)
-        hit = cells[pos] == dep_cells
-        code[hit] = [code_of[n] for n in names[pos[hit]]]
-    return code, {"depressed_cells_claimed": int((code < n_classes).sum()),
+    code = _strongest(cells, volume, ids, codes, dep_cells, order)
+    return code, {"assignment": "equivalent radius",
+                  "rule": "each labelled depression claims the depressed cells within "
+                          "round(sqrt(area_m2 / pi) / ring_spacing_m) rings of its lowest point; "
+                          "overlaps go to the most volume_m3 (then the lower id)",
+                  "depressed_cells_claimed": int((code < n_classes).sum()),
                   "depressed_cells_unclassified": int((code == n_classes).sum())}
+
+
+def _cell_claims(chunks, labels, dep_cells, order):
+    """Like `_claims`, exactly, from the depression x cell table: each depressed cell takes the
+    class of the labelled depression holding the most water in it (then the lower id)."""
+    cells, volume, ids, codes = [], [], [], []
+    for chunk in chunks:
+        if not len(chunk):
+            continue
+        h = ids_to_int(list(chunk["h3"]))
+        keep = _isin(h, dep_cells) & chunk["id"].isin(labels.index).to_numpy()
+        if not keep.any():
+            continue
+        sub = chunk[keep]
+        cells.append(h[keep])
+        volume.append(sub["volume_m3"].to_numpy(float))
+        ids.append(sub["id"].to_numpy(np.int64))
+        codes.append(labels.loc[sub["id"].to_numpy()].to_numpy())
+    code = _strongest(cells, volume, ids, codes, dep_cells, order)
+    return code, {"assignment": "depression_cells",
+                  "rule": "each depressed cell takes the class of the labelled depression holding "
+                          "the most water in it (volume_m3 of the depression_cells table, then "
+                          "the lower id)",
+                  "depressed_cells_claimed": int((code < len(order)).sum()),
+                  "depressed_cells_unclassified": int((code == len(order)).sum())}
+
+
+def _strongest(cells, volume, ids, names, dep_cells, order):
+    """Per depressed cell, the position in `order` of the class of the claim with the most
+    volume, then the lower id (len(order) when unclaimed). Inputs are lists of arrays."""
+    code = np.full(len(dep_cells), len(order), dtype=np.int64)
+    if not cells:
+        return code
+    code_of = {name: i for i, name in enumerate(order)}
+    cells, volume, ids = np.concatenate(cells), np.concatenate(volume), np.concatenate(ids)
+    names = np.concatenate(names)
+    by = np.lexsort((ids, -np.nan_to_num(volume, nan=-np.inf), cells))
+    cells, names = cells[by], names[by]
+    first = np.r_[True, cells[1:] != cells[:-1]]
+    cells, names = cells[first], names[first]
+    pos = np.minimum(np.searchsorted(cells, dep_cells), len(cells) - 1)
+    hit = cells[pos] == dep_cells
+    code[hit] = [code_of[n] for n in names[pos[hit]]]
+    return code
 
 
 def _ratios(order, lift, boot, k, tail):

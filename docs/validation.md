@@ -143,17 +143,25 @@ v = validate("us48_30m_v3", "reports.csv", controls="addresses.csv", boundary="c
 print(v.class_ratios.query("k == 0"))
 ```
 
-**Which ground belongs to which depression.** The cell table does not record which depression a
-cell belongs to, so a fixed rule assigns it: each labelled depression claims the depressed cells
-within its equivalent radius, √(area / π), of its lowest point, rounded to whole rings (only the
-lowest point's cell when that radius is under half a ring spacing, which at resolution 10 is
-every depression under about 13,500 m²). Where claims overlap, the depression holding the most
-water (`volume_m3`, then the lower `id`) wins. Depressed cells that no labelled depression claims
-form the class `unclassified`: ground of depressions left out of `classes`, or the far parts of
-long, irregular ones. The report counts the cells claimed and the cells left unclassified. A
-depression's ground is a disc here, not its true outline, so the classes of a big, irregular
-depression's edges are approximate; at 0 rings, where the comparison matters most, a point's
-class is the class of the depression its own cell belongs to.
+**Which ground belongs to which depression.** A result made with `details` (`--details`; the
+national dataset has it) holds the depression x cell table, `depression_cells`, which records
+how much of each depression lies in each cell. Each depressed cell then takes the class of the
+labelled depression holding the most water in that cell (its `volume_m3` there, then the lower
+`id`). This is exact.
+
+Without that table, a fixed approximation is used: each labelled depression claims the depressed
+cells within its equivalent radius, √(area / π), of its lowest point, rounded to whole rings
+(only the lowest point's cell when that radius is under half a ring spacing, which at resolution
+10 is every depression under about 13,500 m²), and where claims overlap the depression holding
+the most water overall wins. A depression's ground is a disc here, not its true outline, and a
+small depression that straddles a cell border only claims the cell of its lowest point, so many
+depressed cells stay unclaimed: in a check on New York City, 4,393 of the 10,326 depressed cells
+near the points (43%), against 1 with the exact assignment. Prefer results with
+`depression_cells`.
+
+Depressed cells that no labelled depression claims form the class `unclassified` (ground of
+depressions left out of `classes`, and with the approximation, ground it misses). The report
+says which assignment was used and counts the cells claimed and left unclassified.
 
 **The class of a point** is the class of its nearest depressed ground (the deepest of the
 nearest cells, as for `by_depth`; equal depths go to the earlier class in `class_order`).
@@ -191,7 +199,7 @@ lowest point's cell (at least one ring). This is an approximation for the same r
 | `excluded` | `deeper_than_wide` depressions and the cells left out around them (`null` when kept). |
 | `rings` | One entry per k: `k`, `distance_m`, `obs_within`, `controls_within`, `obs_share`, `control_share`, `lift`, `lift_low`, `lift_high`. |
 | `by_depth` | The same per `depth_class` and k. |
-| `classes` | With `classes` only: `order`, `depressions_labelled`, `depressed_cells_claimed`, `depressed_cells_unclassified` (near the points), and the `rule` that assigned ground to depressions. |
+| `classes` | With `classes` only: `order`, `depressions_labelled`, `assignment` (`depression_cells` or `equivalent radius`) and its `rule`, `depressed_cells_claimed` and `depressed_cells_unclassified` (near the points). |
 | `by_class` | With `classes` only: the ring entries per `class` and k. |
 | `class_ratios` | With `classes` only: one entry per pair and k: `class_a`, `class_b`, `k`, `ratio`, `ratio_low`, `ratio_high`, `undefined_share`. |
 | `bootstrap` | `block_res`, `n_blocks`, `n_blocks_with_observations`, `n_boot`, `ci`, `seed`, and `undefined_share`: per k, the share of samples where the lift could not be computed (no control near depressed ground). |

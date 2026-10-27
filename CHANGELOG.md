@@ -33,11 +33,12 @@
 - **Comparing classes of depressions in `validate`** (`classes`, `class_order`; `--classes`,
   `--class-order`): with a label for each depression (how often it fills, landlocked or drained,
   anything), the lift for each class of the nearest depressed ground (`by_class`) and the ratio
-  of each pair of classes' lifts with block-bootstrap intervals (`class_ratios`). Ground is
-  assigned to depressions by a fixed rule (each claims the cells within its equivalent radius
-  of its lowest point; overlaps go to the one holding the most water). Checked by hand-worked
-  claims, ties and ratios, a planted effect, and intervals covering a ratio of 1 when there is no
-  effect. See [docs/validation.md](docs/validation.md#comparing-classes-of-depressions).
+  of each pair of classes' lifts with block-bootstrap intervals (`class_ratios`). Each depressed
+  cell takes the class of the depression holding the most water in it, exactly, from the
+  `depression_cells` table; results without that table use an approximation (each depression
+  claims the cells within its equivalent radius of its lowest point). Checked by hand-worked
+  assignments, ties and ratios, a planted effect, and intervals covering a ratio of 1 when there
+  is no effect. See [docs/validation.md](docs/validation.md#comparing-classes-of-depressions).
 - [Example maps](docs/example-maps.md): interactive previews of the index and the drainage flags
   for three test areas (Houston, North Dakota prairie potholes, California Central Valley).
 - **Drained or landlocked** (`drainage.drainage_flags`, `h3lowpoints drainage`): per depression,

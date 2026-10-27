@@ -161,7 +161,7 @@ How much more often `observations` fall in or near depressed ground than `contro
 | `boundary` | The area studied: a shapely geometry in longitude/latitude or a vector file. Points outside it are left out. Without it, a `build` result's box is used if recorded. |
 | `max_rings` | Largest distance, in H3 rings of the result's resolution. |
 | `depth_classes` | Edges in metres of the depth classes of `by_depth`. |
-| `classes` | A label for each depression: a Series indexed by depression `id`, a dict, or a DataFrame or `.csv`/`.parquet` file with `id` and `class` columns. Adds `by_class` and `class_ratios` ([Comparing classes](validation.md#comparing-classes-of-depressions)). Needs the depressions' `volume_m3`. |
+| `classes` | A label for each depression: a Series indexed by depression `id`, a dict, or a DataFrame or `.csv`/`.parquet` file with `id` and `class` columns. Adds `by_class` and `class_ratios` ([Comparing classes](validation.md#comparing-classes-of-depressions)). Ground is assigned exactly from the result's `depression_cells` table when it has one, otherwise approximately from the depressions' `area_m2` and `volume_m3`. |
 | `class_order` | The classes in order (default sorted): ties go to the earlier class, and each class is compared with each later one. `"unclassified"` is reserved. |
 | `block_res`, `n_boot`, `ci`, `seed` | Bootstrap blocks (H3 resolution, not finer than the result's), samples, confidence level and seed. |
 | `exclude_suspect` | Leave out the ground around depressions flagged `deeper_than_wide`. |

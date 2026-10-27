@@ -403,6 +403,33 @@ def test_claims_by_hand_overlaps_unclaimed_ground_and_ties():
         assert v.points["class"].iloc[0] == want and v.points["rings"].iloc[0] == 1
 
 
+def test_with_the_depression_cell_table_ground_is_assigned_exactly(tmp_path):
+    o = h3i.latlng_to_cell(30.5, -97.5, RES)
+    x = h3i.grid_ring(o, 1)[0]                     # shared: big holds 5 m3 here, small 8 m3
+    y = h3i.grid_ring(o, 3)[0]                     # big's, far beyond its equivalent radius
+    z = h3i.grid_ring(o, 6)[0]                     # depressed, but in no labelled depression
+    depths = {o: 1.0, x: 1.0, y: 1.0, z: 1.0}
+    deps = [(o, area_for(1), 1000.0), (x, area_for(0), 10.0)]
+    parts = pd.DataFrame({"id": [1, 1, 1, 2], "h3": [h3.int_to_str(c) for c in (o, x, y, x)],
+                          "area_m2": 100.0, "volume_m3": [987.0, 5.0, 8.0, 8.0],
+                          "max_depth_m": 1.0})
+    res = classed_result(deps, depths)
+    res.depression_cells = parts
+    pts = [centre(c) for c in (o, x, y, z)]
+    v = quiet(res, pts, pts, n_boot=0, max_rings=0, classes={1: "big", 2: "small"})
+    assert v.points["class"].iloc[:4].tolist() == ["big", "small", "big", "unclassified"]
+    assert v.report["classes"]["assignment"] == "depression_cells"
+    assert v.report["classes"]["depressed_cells_claimed"] == 3
+    without = quiet(classed_result(deps, depths), pts, pts, n_boot=0, max_rings=0,
+                    classes={1: "big", 2: "small"})                    # the radius rule differs
+    assert without.points["class"].iloc[:4].tolist() == ["big", "big", "unclassified", "unclassified"]
+    assert without.report["classes"]["assignment"] == "equivalent radius"
+    folder = res.save(tmp_path / "r", format="parquet")
+    back = quiet(folder, pts, pts, n_boot=0, max_rings=0, classes={1: "big", 2: "small"}, rows=2)
+    pd.testing.assert_frame_equal(v.points, back.points)
+    assert back.report["classes"] == v.report["classes"]
+
+
 def test_class_ratio_worked_by_hand():
     o = h3i.latlng_to_cell(30.5, -97.5, RES)
     a, b = o, h3i.grid_ring(o, 5)[0]
