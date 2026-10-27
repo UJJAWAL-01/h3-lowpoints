@@ -1,6 +1,16 @@
 # Example maps
 
-Three interactive maps of 1° test areas, made while building the
+**[The lower 48 states](examples/us48.html)** (1.4 MB): all 10,570,791 depressions of the national
+dataset, summarised on 30,756 H3 cells of about 250 km² by where their lowest point lies. Colour
+shows, for each cell, the landlocked depressions that fill in the 24-hour storm expected once in
+10 years (or, from the menu, the water they hold, the share of all depressions that fill in that
+storm, the number of depressions, or the median curve number of their catchments); hover for
+the numbers. Washington and Oregon are dark grey for storm measures: NOAA Atlas 14 has no
+estimates there. Highways were measured at the spill points in 12 of the 49 states (the Census
+server refused the downloads for the rest), so elsewhere `drained` rests on streams and canals.
+
+Three more maps, of 1° test areas, show every depression on its own cells. They were made while
+building the
 [susceptibility index](susceptibility.md). They preview what the explorer web app will show:
 every depression at least 0.5 m deep on 30 m USGS 3DEP terrain, drawn on its H3 cells.
 
