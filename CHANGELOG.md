@@ -60,6 +60,8 @@
 - A Census TIGER/Line download answered with a web page ("Request Rejected", the server
   limiting a client) was kept as the county's zip and failed to open. `county_roads` now checks
   the file is a zip, deletes it if not and raises an `OSError`, so the download can be tried again.
+- `state_flowlines` drops the heights of NHD lines before reprojecting them, halving its memory:
+  Oregon's lines (158 million vertices) did not fit when reprojected in 3D at once.
 
 ## 0.3.0 (26 October 2026)
 

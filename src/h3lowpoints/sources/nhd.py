@@ -108,8 +108,10 @@ def state_flowlines(state, *, cache_dir, bbox=None, ftypes=None):
         lines = pyogrio.read_dataframe(path, layer="NHDFlowline", columns=["ftype", "fcode"],
                                        bbox=None if bbox is None else tuple(check_bbox(bbox)),
                                        where=where)
-    lines = lines.to_crs(4326) if lines.crs is not None else lines.set_crs(4326)
+    # heights dropped before reprojecting: half the memory (Oregon's lines hold 158 million
+    # vertices; for whole large states read the box in pieces)
     lines["geometry"] = shapely.force_2d(lines.geometry.values)
+    lines = lines.to_crs(4326) if lines.crs is not None else lines.set_crs(4326)
     return gpd.GeoDataFrame(lines[["ftype", "fcode", "geometry"]], crs=4326)
 
 
