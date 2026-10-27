@@ -3,5 +3,7 @@ Copyright 2026 Ujjawal Patel
 
 Licensed under the Apache License, Version 2.0 (see LICENSE).
 
-Data fetched with this software keeps its own licence: USGS 3DEP, NLCD and NOAA Atlas 14 are
-public domain; Copernicus GLO-30 and ESA WorldCover require attribution (see docs/data-sources.md).
+Data fetched with this software keeps its own licence: USGS 3DEP, USGS NHD, NLCD, NOAA Atlas 14,
+US Census TIGER/Line and the USDA gNATSGO soil survey are public domain (gNATSGO is read from
+Microsoft's Planetary Computer, which publishes it as CC0); Copernicus GLO-30 and ESA WorldCover
+require attribution (see docs/data-sources.md).

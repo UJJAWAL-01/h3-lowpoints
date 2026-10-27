@@ -31,3 +31,13 @@ def test_rejects_a_dem_without_a_crs(tmp_path):
         dst.write(np.zeros((10, 10), dtype="float32"), 1)
     with pytest.raises(SystemExit):
         main(["analyze", str(p), "--out", str(tmp_path / "out")])
+
+
+def test_python_dash_m_runs_the_command():
+    import subprocess
+    import sys
+
+    done = subprocess.run([sys.executable, "-m", "h3lowpoints", "--help"], capture_output=True,
+                          text=True, timeout=120)
+    assert done.returncode == 0
+    assert "validate" in done.stdout and "index" in done.stdout

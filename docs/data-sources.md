@@ -121,7 +121,7 @@ It is the paved share of the curve numbers of the susceptibility index
 ## NLCD land cover
 
 - **What:** the National Land Cover Database's class of each 30 m pixel: open water (11),
-  developed land of four intensities (21 to 24), barren land (31), forests (41 to 43), shrubland
+  perennial ice and snow (12), developed land of four intensities (21 to 24), barren land (31), forests (41 to 43), shrubland
   (51, 52), grassland (71 to 74), pasture and hay (81), cultivated crops (82), wetlands (90, 95);
   in `NLCD_CLASSES`.
 - **Where, licence, format:** as NLCD impervious above. Years 2001 to 2021.

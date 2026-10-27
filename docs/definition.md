@@ -260,6 +260,7 @@ supply a mask if open water should not count.
 ## What it cannot tell you
 
 A depression is a feature of the elevation model. It does not know whether water collects there,
-whether a culvert the DEM misses drains it, or whether it is a pond. The planned susceptibility
-layer (see [roadmap.md](roadmap.md)) is the step towards that question. The full list of limits
-is in [Accuracy and limits](limitations.md).
+whether a culvert the DEM misses drains it, or whether it is a pond. The
+[susceptibility layer](susceptibility.md) is the step towards that question (which storm fills
+it, and whether a mapped stream, canal or highway drains it). The full list of limits is in
+[Accuracy and limits](limitations.md).

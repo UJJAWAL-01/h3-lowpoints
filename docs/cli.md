@@ -1,7 +1,8 @@
 # Command line
 
 Installing the package adds one command, `h3lowpoints`, with eleven subcommands. Every option is
-listed here; `h3lowpoints <command> --help` prints the same in the terminal.
+listed here; `h3lowpoints <command> --help` prints the same in the terminal. `python -m h3lowpoints`
+runs the same command (useful where the scripts folder is not on the PATH).
 
 | Command | Does |
 |---|---|

@@ -3,7 +3,7 @@
 The library is meant to be used on places nobody has checked by hand, so its checks must work
 anywhere, with no reference answer. There are three layers: invariants any user can run on any
 result, spot checks on the user's own data, and oracle tests in the test suite. A fourth layer,
-validation against observed flooding, is planned (see the end of this page).
+validation against observed flooding, has its own page: [Validation](validation.md).
 
 ## 1. Invariants: `check_result`, `h3lowpoints verify`
 
@@ -126,6 +126,7 @@ around Texas (1.8 billion pixels, 1.75 million depressions) passes every invaria
 
 These checks show that the library computes what it says it computes. They do not show that a
 depression floods. That needs observations, such as flood reports or high-water marks, and is the
-job of the planned validation tools: any set of observed locations, from anywhere, scored against
-the depressions with the same metrics and compared with random placements. See the
-[Roadmap](roadmap.md) and [Accuracy and limits](limitations.md).
+job of the validation tools: any set of observed locations, from anywhere, scored against the
+depressions and compared with control points, with a worked example and a study of the
+susceptibility layer in New York City and Houston. See [Validation](validation.md) and
+[Accuracy and limits](limitations.md).

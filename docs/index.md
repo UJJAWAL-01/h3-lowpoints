@@ -78,6 +78,27 @@ cell with the deepest depth, the area and volume held, the number of lowest poin
 of the cell the data covered. Coarser H3 resolutions are exact roll-ups of the finest one, so the
 same result can be viewed from a street to a continent.
 
+## How it compares with existing data
+
+Other national maps of US depressions exist, and may suit some uses better:
+
+- **National Surface Depressions** (Qiusheng Wu, on [Source Cooperative](https://source.coop/giswqs/depressions)):
+  depression outlines for the lower 48 states from the 10 m 3DEP model, by the level-set method
+  that also describes depressions nested in larger ones (Wu et al. 2019, *JAWRA* 55(2), 354–368,
+  [doi.org/10.1111/1752-1688.12689](https://doi.org/10.1111/1752-1688.12689)), with area, volume
+  and depth, and a separate set outside floodplains. Finer than the 30 m used here; prefer it
+  when you need outlines.
+- **Closed depression density in karst regions of the conterminous US** (USGS,
+  [catalog.data.gov](https://catalog.data.gov/dataset/closed-depression-density-in-karst-regions-of-the-conterminous-united-states-features-and-)):
+  closed depressions in karst, for sinkhole studies.
+
+What this project adds: a library that runs on any elevation model anywhere; results on H3
+cells, exact at every resolution; each depression's catchment and the depression it spills into;
+fill curves; for the US, which storm fills each depression (counting overflow from upstream) and
+whether a mapped stream, canal or highway drains it; and tools to test all of it against
+observations, with a published test. We did not find another open dataset that combines these;
+if you know of one, please open an issue.
+
 ## Citing and licence
 
 Code is Apache-2.0. If you use the library in published work, cite it with its DOI,

@@ -200,5 +200,6 @@ drains the model cannot see (culverts, pipes), pumps, or whether a depression is
 A road underpass, a quarry, a sinkhole and a reservoir are all depressions. Much of the
 Netherlands lies below sea level behind dikes and is pumped dry: it appears as large depressions
 and does not flood. Use the results as a map of where water *could* collect if nothing removed
-it, and as an input to further analysis. The planned susceptibility layer
-([Roadmap](roadmap.md)) is the step towards asking where water actually collects.
+it, and as an input to further analysis. The [susceptibility layer](susceptibility.md) is the
+step towards asking where water actually collects: which storm fills each depression, and
+whether it has a mapped way out.

@@ -58,6 +58,7 @@
   nlcd-landcover`).
 
 ### Fixed
+- `python -m h3lowpoints` did nothing; it now runs the `h3lowpoints` command.
 - **Remote reads had almost no block cache.** rasterio hands `GDAL_CACHEMAX` to GDAL in bytes, so
   the 256 the readers set meant 256 bytes, not 256 MB, and GDAL fetched the same blocks again and
   again. Every remote read through the readers was affected (3DEP, WorldCover, the soil survey);
