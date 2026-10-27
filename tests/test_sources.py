@@ -451,3 +451,11 @@ def test_live_rainfall():
     assert t.attrs["units"] == "mm" and 250 < t.loc["24-hr", 100] < 400        # Austin, 100-year day
     with pytest.raises(ValueError, match="Washington and Oregon"):
         rainfall.design_rainfall(47.61, -122.33)                               # Seattle
+
+
+def test_gdal_block_cache_is_256_megabytes():
+    """rasterio hands GDAL_CACHEMAX to GDAL in bytes: 256 alone would be a 256-byte cache."""
+    from rasterio._env import get_gdal_config
+
+    with _common.gdal_env():
+        assert get_gdal_config("GDAL_CACHEMAX") == 256 * 1024 * 1024

@@ -105,12 +105,13 @@ class _InMemory:
 
 
 class _Streamed:
-    """Per-cell values read from a file sorted by cell, as the catchment table (also sorted by
-    cell) is read: only the rows between the cells asked for so far are held."""
+    """Per-cell values read from files sorted by cell (one file, or a folder of parts read in name
+    order), as the catchment table (also sorted by cell) is read: only the rows between the cells
+    asked for so far are held."""
 
-    def __init__(self, path, column, rows):
-        self.chunks = iter_file(path, rows, columns=["h3", column])
-        self.path, self.column = path, column
+    def __init__(self, paths, column, rows):
+        self.chunks = (chunk for path in paths for chunk in iter_file(path, rows, columns=["h3", column]))
+        self.path, self.column = paths[0].parent if len(paths) > 1 else paths[0], column
         self.keys, self.values = np.zeros(0, dtype=np.uint64), np.zeros(0)
         self.done, self.last = False, None
 
@@ -148,9 +149,15 @@ def _cell_source(source, column, res, rows, workers):
             return (_InMemory(ids_to_int(list(table["h3"])), table[column].to_numpy(float)),
                     f"raster {path.name}, mean per H3 cell")
         if path.suffix.lower() in (".csv", ".parquet"):
-            return _Streamed(path, column, rows), f"per-cell table {path.name}"
+            return _Streamed([path], column, rows), f"per-cell table {path.name}"
+        if path.is_dir():
+            parts = sorted(f for f in path.iterdir() if f.suffix.lower() in (".csv", ".parquet"))
+            if not parts:
+                raise ValueError(f"{path} holds no .csv or .parquet files")
+            return _Streamed(parts, column, rows), f"per-cell tables in {path.name} ({len(parts)} parts)"
         raise ValueError(f"{column}: give a raster ({', '.join(RASTER_SUFFIXES)}), a .csv or "
-                         f".parquet table of h3 and {column}, or a DataFrame; got {source}")
+                         f".parquet table of h3 and {column}, a folder of such tables, or a "
+                         f"DataFrame; got {source}")
     if not {"h3", column} <= set(table.columns):
         raise ValueError(f"a per-cell table needs the columns h3 and {column}")
     return (_InMemory(ids_to_int(list(table["h3"])), table[column].to_numpy(dtype=float)),
@@ -213,8 +220,9 @@ def susceptibility(result, *, curve_numbers=None, curve_number=None, impervious=
     result         a `Result` computed with catchments=True, or its folder
     curve_numbers  SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the
                    US see `runoff.fetch_curve_numbers`), a .csv or .parquet table with columns h3
-                   and curve_number at the result's resolution (read in pieces; sorted by h3),
-                   or a DataFrame
+                   and curve_number at the result's resolution (read in pieces; sorted by h3), a
+                   folder of such tables whose names sort in the order of their cells, or a
+                   DataFrame
     curve_number   instead of `curve_numbers`: one curve number (0 to 100) for all ground
     impervious     optional percent paved, in the same forms (column impervious_pct): reported as
                    `impervious_pct` only (the curve numbers already account for it)

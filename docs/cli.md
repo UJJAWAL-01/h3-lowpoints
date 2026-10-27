@@ -176,7 +176,7 @@ verifies the folder. See [Susceptibility](susceptibility.md) for the method.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--curve-numbers FILE` | | SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the US, the `fetch-landcover` command makes one: see its `curve-numbers` source), or a `.csv`/`.parquet` table with columns `h3` and `curve_number` at the result's resolution, sorted by `h3`. |
+| `--curve-numbers FILE` | | SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the US, the `fetch-landcover` command makes one: see its `curve-numbers` source), or a `.csv`/`.parquet` table with columns `h3` and `curve_number` at the result's resolution, sorted by `h3`, or a folder of such tables whose names sort in the order of their cells. |
 | `--curve-number CN` | | Instead of `--curve-numbers`: one curve number (0 to 100) for all ground. |
 | `--impervious FILE` | | Optional: percent paved, as a raster or a table of `h3` and `impervious_pct`, reported as `impervious_pct` (the curve numbers already account for it). |
 | `--rain atlas14\|MM` | | `atlas14`: 24-hour storms of 1 to 1000 years from NOAA Atlas 14 (US; only the grids of the project areas the result lies in are downloaded, about 10 to 40 MB each). A number: one uniform storm of that many millimetres. Without it, only the rain-to-fill columns. |

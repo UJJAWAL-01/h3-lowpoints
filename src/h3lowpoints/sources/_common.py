@@ -114,8 +114,9 @@ def remote(url):
     return url if not url.startswith(("http://", "https://")) else "/vsicurl/" + url
 
 
-# GDAL's block cache defaults to 5% of the machine's memory (over 1 GB on many laptops). The
-# readers and the tiled analysis read each window once, so a small cache costs nothing.
+# GDAL's block cache defaults to 5% of the machine's memory (over 1 GB on many laptops); 256 MB
+# holds every block a read needs. rasterio passes GDAL_CACHEMAX to GDAL in bytes: given as 256 it
+# meant 256 bytes, so blocks were fetched again and again (a soil read took 15 s instead of 2 s).
 GDAL_CACHE_MB = 256
 # A failed remote read is retried with a delay that starts at 1 s and at least doubles: ten retries ride out
 # at least 17 minutes of lost connection, which matters in a streamed run of many hours. Missing files
@@ -127,7 +128,7 @@ HTTP_RETRIES = 10
 def gdal_env():
     with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY=str(HTTP_RETRIES),
                       GDAL_HTTP_RETRY_DELAY="1", CPL_VSIL_CURL_ALLOWED_EXTENSIONS=".tif",
-                      GDAL_HTTP_USERAGENT=USER_AGENT, GDAL_CACHEMAX=GDAL_CACHE_MB):
+                      GDAL_HTTP_USERAGENT=USER_AGENT, GDAL_CACHEMAX=GDAL_CACHE_MB * 1024 * 1024):
         yield
 
 

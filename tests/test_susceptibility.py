@@ -243,6 +243,15 @@ def test_raster_table_and_file_give_the_same_answer(result, tmp_path, fmt):
     c = susceptibility(result, curve_numbers=file, impervious=imp, rain=50.0, rows=37)  # streamed
     pd.testing.assert_frame_equal(a, b)
     pd.testing.assert_frame_equal(a, c)
+    # a folder of parts, each sorted, named in the order of their cells, read as one table
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    ordered = table.sort_values("h3").reset_index(drop=True)
+    for k, rows in enumerate(np.array_split(np.arange(len(ordered)), 4)):
+        piece, f = ordered.iloc[rows], parts / f"part{k}.{fmt}"
+        piece.to_csv(f, index=False) if fmt == "csv" else piece.to_parquet(f, index=False)
+    d = susceptibility(result, curve_numbers=parts, impervious=imp, rain=50.0, rows=29)
+    pd.testing.assert_frame_equal(a, d)
     known = a["curve_number"].notna()
     assert known.mean() > 0.5 and a["curve_number"][known].between(40, 98).all()
     assert a["impervious_pct"].notna().mean() > 0.5

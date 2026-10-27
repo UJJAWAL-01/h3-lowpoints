@@ -726,4 +726,4 @@ def test_tiled_reads_with_a_capped_gdal_cache(tmp_path, monkeypatch):
     rng = np.random.default_rng(3)
     p = write_dem(tmp_path / "d.tif", ndimage.gaussian_filter(rng.random((60, 70)) * 30, 2))
     analyze_tiled(p, tile=25, res=12)
-    assert seen and set(seen) == {GDAL_CACHE_MB}
+    assert seen and set(seen) == {GDAL_CACHE_MB * 1024 * 1024}      # rasterio takes it in bytes

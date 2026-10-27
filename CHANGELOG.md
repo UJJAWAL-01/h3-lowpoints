@@ -19,7 +19,8 @@
 - **Curve numbers** (`runoff`): the SCS runoff equation and its inverse, the TR-55 curve numbers
   of NLCD land cover on each soil hydrologic group (`CN_TABLE`), composite with the paved share,
   and `fetch_curve_numbers` (`fetch-landcover --from curve-numbers`), which builds them for any
-  box in the lower 48 states from NLCD and the USDA soil survey.
+  box in the lower 48 states from NLCD and the USDA soil survey. Per-cell inputs may also be a
+  folder of tables, read one after the other in name order.
 - `sources.soils.fetch_soil_groups` (`fetch-landcover --from soil-groups`): soil hydrologic groups
   from the USDA gNATSGO soil survey, read by parts from Microsoft's Planetary Computer without an
   account, on NLCD's grid pixel for pixel.
@@ -46,6 +47,12 @@
   GeoPackage, unpacked once beside its zip), `sources.roads` (Census TIGER/Line roads by county) and
   `sources.landcover.fetch_land_cover` (NLCD land cover classes; `fetch-landcover --from
   nlcd-landcover`).
+
+### Fixed
+- **Remote reads had almost no block cache.** rasterio hands `GDAL_CACHEMAX` to GDAL in bytes, so
+  the 256 the readers set meant 256 bytes, not 256 MB, and GDAL fetched the same blocks again and
+  again. Every remote read through the readers was affected (3DEP, WorldCover, the soil survey);
+  results were never wrong, only slow: a soil read now takes 3 s instead of 12 to 15 s.
 
 ## 0.3.0 (26 October 2026)
 

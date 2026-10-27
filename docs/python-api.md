@@ -205,7 +205,7 @@ leave it. Returns a DataFrame whose `attrs["settings"]` hold the settings for `m
 | Parameter | Meaning |
 |---|---|
 | `result` | A `Result` computed with `catchments=True`, or its folder (the catchment table is read `rows` at a time). |
-| `curve_numbers` | SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the US, `runoff.fetch_curve_numbers`), a `.csv` or `.parquet` table with columns `h3` and `curve_number` at the result's resolution (read in pieces; must be sorted by `h3`), or a DataFrame with those columns. |
+| `curve_numbers` | SCS curve numbers: a raster in any CRS (its mean per H3 cell is used; in the US, `runoff.fetch_curve_numbers`), a `.csv` or `.parquet` table with columns `h3` and `curve_number` at the result's resolution (read in pieces; must be sorted by `h3`), a folder of such tables whose names sort in the order of their cells (read one after the other, as for a national run done in regions), or a DataFrame with those columns. |
 | `curve_number` | Instead of `curve_numbers`: one curve number in (0, 100]. Exactly one of the two is required. |
 | `impervious` | Optional percent paved, in the same forms (column `impervious_pct`), reported as `impervious_pct`. |
 | `rain` | `None` (no storms), `"atlas14"` (24-hour storms of 1 to 1000 years from NOAA Atlas 14 grids), a depth in mm (one uniform storm, column `fill_ratio`), or a dict `{return period in years: depth in mm or function(lat, lon) -> mm}`. |
@@ -288,10 +288,12 @@ Needs the `sources` extra.
 | `max_distance_m` | Distances beyond this are NaN. |
 | `crs` | Projected CRS, in metres, to measure in; by default the UTM zone of the result's centre. |
 
-### `drainage.cells_along(lines, crs, res, step=None)`
+### `drainage.cells_along(lines, crs, res, step=None, batch=2000000)`
 
-The H3 cells (as integers) at resolution `res` that lines in projected `crs` pass through, found
-by points every `step` metres along them (default a third of the cells' edge).
+The H3 cells (as sorted unique integers) at resolution `res` that lines in projected `crs` pass
+through, found by points every `step` metres along them (default a third of the cells' edge),
+about `batch` points at a time so that a state's millions of lines fit in memory.
+`drainage.in_sorted(values, sorted_values)` tells which values are in such a sorted array.
 
 ## Verification: `h3lowpoints.verify`
 

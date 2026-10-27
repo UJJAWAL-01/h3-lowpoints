@@ -83,6 +83,7 @@ def test_cells_along_finds_every_cell_a_line_really_crosses():
     lines = np.array([LineString([(500000, 3349000), (501500, 3349700)]),
                       LineString([(500300, 3348200), (500320, 3349900), (501000, 3349950)])])
     found = set(cells_along(lines, CRS, res).tolist())
+    assert found == set(cells_along(lines, CRS, res, batch=7).tolist())     # in small batches
     step = h3.average_hexagon_edge_length(res, unit="m") / 3
     to_utm = Transformer.from_crs(4326, CRS, always_xy=True)
     near = set()

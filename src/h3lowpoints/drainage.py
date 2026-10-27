@@ -85,9 +85,11 @@ def _nearest(points, lines, max_distance):
     return out
 
 
-def cells_along(lines, crs, res, step=None):
+def cells_along(lines, crs, res, step=None, batch=2_000_000):
     """H3 cells at resolution `res` that lines (in projected `crs`, metres) pass through, found
-    by points every `step` metres along them (default a third of the cells' edge)."""
+    by points every `step` metres along them (default a third of the cells' edge). Lines are
+    followed about `batch` points at a time, so a state's millions of lines fit in memory.
+    Returns the cells as sorted unique integers."""
     import shapely
     from pyproj import Transformer
 
@@ -95,16 +97,33 @@ def cells_along(lines, crs, res, step=None):
 
     if lines is None or len(lines) == 0:
         return np.zeros(0, dtype=np.uint64)
+    lines = np.asarray(lines)
     step = step or h3.average_hexagon_edge_length(res, unit="m") / 3
+    to_lonlat = Transformer.from_crs(crs, 4326, always_xy=True)
     length = shapely.length(lines)
     n = np.maximum(np.ceil(length / step).astype(np.int64) + 1, 2)
-    which = np.repeat(np.arange(len(lines)), n)
-    first = np.repeat(np.cumsum(n) - n, n)
-    along = (np.arange(n.sum()) - first) / (n[which] - 1) * length[which]
-    pts = shapely.line_interpolate_point(lines[which], along)
-    x, y = shapely.get_x(pts), shapely.get_y(pts)
-    lon, lat = Transformer.from_crs(crs, 4326, always_xy=True).transform(x, y)
-    return np.unique(h3_ids(lat, lon, res))
+    ends = np.cumsum(n)
+    found, start = [], 0
+    while start < len(lines):
+        stop = max(start + 1, int(np.searchsorted(ends, (ends[start - 1] if start else 0) + batch)))
+        stop = min(stop, len(lines))
+        k = n[start:stop]
+        which = np.repeat(np.arange(start, stop), k)
+        first = np.repeat(np.cumsum(k) - k, k)
+        along = (np.arange(k.sum()) - first) / (n[which] - 1) * length[which]
+        pts = shapely.line_interpolate_point(lines[which], along)
+        lon, lat = to_lonlat.transform(shapely.get_x(pts), shapely.get_y(pts))
+        found.append(np.unique(h3_ids(lat, lon, res)))
+        start = stop
+    return np.unique(np.concatenate(found))
+
+
+def in_sorted(values, sorted_values):
+    """Whether each of `values` is in the sorted array `sorted_values` (by binary search)."""
+    if len(sorted_values) == 0:
+        return np.zeros(len(values), dtype=bool)
+    at = np.minimum(np.searchsorted(sorted_values, values), len(sorted_values) - 1)
+    return sorted_values[at] == values
 
 
 def _sample_classes(raster, lat, lon):
@@ -208,7 +227,7 @@ def drainage_flags(result, *, streams=None, canals=None, roads=None, land_cover=
             pos = by_id[at[hit]]
             area = c["area_m2"].to_numpy(dtype=float)[hit]
             cells = ids_to_int(list(c["h3"][hit]))
-            inside = np.isin(cells, crossed)
+            inside = in_sorted(cells, crossed)
             np.add.at(total, pos, area)
             np.add.at(wet, pos, np.where(inside, area, 0.0))
         with np.errstate(invalid="ignore", divide="ignore"):
