@@ -133,6 +133,10 @@ def build_parser():
     val.add_argument("--n-random", type=int, metavar="N",
                      help="random controls without --controls (default 10 per observation, at least 1000)")
     val.add_argument("--max-rings", type=int, default=5, help="largest distance, in H3 rings (default 5)")
+    val.add_argument("--classes", help="a label per depression (.csv or .parquet with id and class "
+                                       "columns): also split the lift by class and compare classes")
+    val.add_argument("--class-order", metavar="A,B,...",
+                     help="the classes in order, comma-separated (default: sorted)")
     val.add_argument("--block-res", type=int, default=6,
                      help="H3 resolution of the bootstrap blocks (default 6)")
     val.add_argument("--boot", type=int, default=1000, help="bootstrap samples (default 1000)")
@@ -417,7 +421,8 @@ def _validate(args):
     with warnings.catch_warnings():              # printed below, once, from the report
         warnings.simplefilter("ignore", UserWarning)
         result = validate(args.results, args.observations, args.controls, boundary=args.boundary,
-                          n_random=args.n_random, max_rings=args.max_rings,
+                          n_random=args.n_random, max_rings=args.max_rings, classes=args.classes,
+                          class_order=args.class_order and args.class_order.split(","),
                           block_res=args.block_res, n_boot=args.boot, seed=args.seed,
                           exclude_suspect=not args.keep_suspect)
     print(result.summary())

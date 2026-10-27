@@ -152,6 +152,8 @@ result.
 | `--boundary FILE` | the result's box, if any | The area studied (vector file, any CRS). Points outside are left out. Required without `--controls`. |
 | `--n-random N` | 10 per observation, at least 1000 | Number of random controls when `--controls` is not given. |
 | `--max-rings K` | `5` | Largest distance measured, in rings of the result's resolution. |
+| `--classes FILE` | | A label for each depression (`.csv` or `.parquet` with `id` and `class` columns, such as "fills in a 2-year storm" or "landlocked"): also split the lift by the class of the nearest depressed ground and compare the classes ([Comparing classes](validation.md#comparing-classes-of-depressions)). |
+| `--class-order A,B,...` | sorted | The classes in order: ties go to the earlier class, and each class is compared with each later one. |
 | `--block-res R` | `6` | H3 resolution of the bootstrap blocks; must not be finer than the result's. |
 | `--boot N` | `1000` | Bootstrap samples (0: no intervals). |
 | `--seed S` | `0` | Random seed (bootstrap and random controls). |

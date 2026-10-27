@@ -30,6 +30,14 @@
 - `susceptibility.cell_means`: the mean of any raster on each H3 cell, optionally only the cells
   inside a coarser parent.
 - `store.iter_file`: any `.csv` or `.parquet` table file in pieces.
+- **Comparing classes of depressions in `validate`** (`classes`, `class_order`; `--classes`,
+  `--class-order`): with a label for each depression (how often it fills, landlocked or drained,
+  anything), the lift for each class of the nearest depressed ground (`by_class`) and the ratio
+  of each pair of classes' lifts with block-bootstrap intervals (`class_ratios`). Ground is
+  assigned to depressions by a fixed rule (each claims the cells within its equivalent radius
+  of its lowest point; overlaps go to the one holding the most water). Checked by hand-worked
+  claims, ties and ratios, a planted effect, and intervals covering a ratio of 1 when there is no
+  effect. See [docs/validation.md](docs/validation.md#comparing-classes-of-depressions).
 - [Example maps](docs/example-maps.md): interactive previews of the index and the drainage flags
   for three test areas (Houston, North Dakota prairie potholes, California Central Valley).
 - **Drained or landlocked** (`drainage.drainage_flags`, `h3lowpoints drainage`): per depression,

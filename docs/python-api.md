@@ -150,7 +150,7 @@ in metres (default: matched to the input). Returns `dst_path`.
 See [Validation](validation.md) for the method, how to choose controls and how to read the
 result.
 
-### `validate(result, observations, controls=None, *, boundary=None, n_random=None, max_rings=5, depth_classes=(0.5, 1.0, 2.0), block_res=6, n_boot=1000, ci=0.95, seed=0, exclude_suspect=True, rows=500000)`
+### `validate(result, observations, controls=None, *, boundary=None, n_random=None, max_rings=5, depth_classes=(0.5, 1.0, 2.0), classes=None, class_order=None, block_res=6, n_boot=1000, ci=0.95, seed=0, exclude_suspect=True, rows=500000)`
 
 How much more often `observations` fall in or near depressed ground than `controls` do.
 
@@ -161,6 +161,8 @@ How much more often `observations` fall in or near depressed ground than `contro
 | `boundary` | The area studied: a shapely geometry in longitude/latitude or a vector file. Points outside it are left out. Without it, a `build` result's box is used if recorded. |
 | `max_rings` | Largest distance, in H3 rings of the result's resolution. |
 | `depth_classes` | Edges in metres of the depth classes of `by_depth`. |
+| `classes` | A label for each depression: a Series indexed by depression `id`, a dict, or a DataFrame or `.csv`/`.parquet` file with `id` and `class` columns. Adds `by_class` and `class_ratios` ([Comparing classes](validation.md#comparing-classes-of-depressions)). Needs the depressions' `volume_m3`. |
+| `class_order` | The classes in order (default sorted): ties go to the earlier class, and each class is compared with each later one. `"unclassified"` is reserved. |
 | `block_res`, `n_boot`, `ci`, `seed` | Bootstrap blocks (H3 resolution, not finer than the result's), samples, confidence level and seed. |
 | `exclude_suspect` | Leave out the ground around depressions flagged `deeper_than_wide`. |
 
@@ -173,10 +175,12 @@ controls, few blocks, few observations, points left out) are issued as `UserWarn
 |---|---|
 | `rings` | DataFrame, one row per k: `k`, `distance_m`, `obs_within`, `controls_within`, `obs_share`, `control_share`, `lift`, `lift_low`, `lift_high`. |
 | `by_depth` | The same per `depth_class` and `k`. |
-| `points` | One row per point used: `point_id`, `kind`, `lon`, `lat`, `h3`, `rings`, `depth_m`, `block`. |
+| `points` | One row per point used: `point_id`, `kind`, `lon`, `lat`, `h3`, `rings`, `depth_m`, `block`, and with `classes` also `class`. |
+| `by_class` | With `classes`: the ring table per `class` (the given classes, then `unclassified`) and `k`; otherwise `None`. |
+| `class_ratios` | With `classes`: one row per pair of classes and `k`: `class_a`, `class_b`, `k`, `ratio` (lift of `class_a` over lift of `class_b`), `ratio_low`, `ratio_high`, `undefined_share`; otherwise `None`. |
 | `report` | Everything, with settings, counts and warnings, as a JSON-ready dict ([fields](validation.md#the-report)). |
 | `warnings` | The list of caveats. |
-| `summary()` | The ring table as text. |
+| `summary()` | The ring table as text (with `classes`, also the class table and ratios at 0 and 1 rings). |
 | `save(path, points=None)` | Write the report as JSON, and the point table to `points` (`.csv` or `.parquet`). Returns `path`. |
 
 ### `validation.read_points(source)`

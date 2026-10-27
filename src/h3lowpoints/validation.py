@@ -28,6 +28,7 @@ from .store import CHUNK_ROWS, ids_to_int, iter_table, missing_files, read_meta,
 
 DEPTH_CLASSES = (0.5, 1.0, 2.0)
 POINT_COLUMNS = ["point_id", "kind", "lon", "lat", "h3", "rings", "depth_m", "block"]
+UNCLASSIFIED = "unclassified"  # depressed ground that no labelled depression claims
 _DISK_BATCH = 20_000          # point cells whose rings are searched at a time
 _FILTER_LEVELS = 4            # depression cells are first filtered by their parent this much coarser
 
@@ -47,12 +48,18 @@ class Validation:
     by_depth  the same for each depth class of the nearest depressed ground
     points    one row per observation and control used: its cell, its distance in rings to
               depressed ground (missing when beyond max_rings), that ground's depth, its block
+              (and its class, with `classes`)
     report    everything above plus the settings, counts and warnings, as a JSON-ready dict
+    by_class  with `classes`: the ring table for each class of the nearest depressed ground
+    class_ratios  with `classes`: for each pair of classes and each k, the ratio of their lifts
+              with its confidence interval
     """
     rings: pd.DataFrame
     by_depth: pd.DataFrame
     points: pd.DataFrame
     report: dict
+    by_class: pd.DataFrame = None
+    class_ratios: pd.DataFrame = None
 
     @property
     def warnings(self):
@@ -85,12 +92,31 @@ class Validation:
             ci = ("-" if math.isnan(row.lift_low) else f"{row.lift_low:.2f} to {row.lift_high:.2f}")
             lines.append(f"{row.k:>5} {row.distance_m:>8.0f} {100 * row.obs_share:>12.1f}% "
                          f"{100 * row.control_share:>8.1f}% {lift:>6}  {ci}")
+        if self.by_class is not None:
+            lines += ["", "By class of the nearest depressed ground:", f"{'class':>24} {'rings':>5} {'observations':>13} "
+                          f"{'controls':>9} {'lift':>6}  {level} interval"]
+            for row in self.by_class[self.by_class["k"] <= 1].to_dict("records"):
+                lines.append(f"{row['class']:>24} {row['k']:>5} {row['obs_within']:>13,} "
+                             f"{row['controls_within']:>9,} {_fmt(row['lift']):>6}  "
+                             f"{_fmt_ci(row['lift_low'], row['lift_high'])}")
+            lines += ["", f"{'lift of':>24} {'over':>24} {'rings':>5} {'ratio':>6}  {level} interval"]
+            for row in self.class_ratios[self.class_ratios["k"] <= 1].to_dict("records"):
+                lines.append(f"{row['class_a']:>24} {row['class_b']:>24} {row['k']:>5} "
+                             f"{_fmt(row['ratio']):>6}  {_fmt_ci(row['ratio_low'], row['ratio_high'])}")
         return "\n".join(lines)
 
 
+def _fmt(value):
+    return "-" if math.isnan(value) else f"{value:.2f}"
+
+
+def _fmt_ci(low, high):
+    return "-" if math.isnan(low) else f"{low:.2f} to {high:.2f}"
+
+
 def validate(result, observations, controls=None, *, boundary=None, n_random=None, max_rings=5,
-             depth_classes=DEPTH_CLASSES, block_res=6, n_boot=1000, ci=0.95, seed=0,
-             exclude_suspect=True, rows=CHUNK_ROWS):
+             depth_classes=DEPTH_CLASSES, classes=None, class_order=None, block_res=6,
+             n_boot=1000, ci=0.95, seed=0, exclude_suspect=True, rows=CHUNK_ROWS):
     """Lift of observations near depressions over controls, with block-bootstrap intervals.
 
     result         a `Result`, or a folder written by `analyze`, `build`, `clip` or `Result.save`
@@ -102,6 +128,14 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
                    outside it are left out. Without it, the result's recorded box is used if any
     max_rings      largest distance measured, in rings of the result's resolution
     depth_classes  edges, in metres, of the depth classes for `by_depth`
+    classes        a label for each depression, for `by_class` and `class_ratios`: a Series
+                   indexed by depression id, a dict, a DataFrame or a .csv/.parquet file with
+                   `id` and `class` columns. Each labelled depression claims the depressed cells
+                   within its equivalent radius, sqrt(area / pi), of its lowest point (rounded to
+                   whole rings); where claims overlap, the depression holding the most water wins.
+                   Depressed ground nobody claims is "unclassified"
+    class_order    the classes in order (default: sorted): ties between equally near and deep
+                   ground go to the earlier class, and ratios are of each class over each later one
     block_res      H3 resolution of the bootstrap blocks (coarser than or equal to the result's)
     n_boot, ci     bootstrap samples and confidence level of the percentile intervals
     exclude_suspect  leave out the ground around depressions flagged `deeper_than_wide`
@@ -109,6 +143,7 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
     meta, cells_src, deps_src, where = _source(result, rows)
     res = meta["params"]["res"]
     _check_settings(res, max_rings, depth_classes, block_res, n_boot, ci)
+    labels, order = (None, None) if classes is None else _labels(classes, class_order)
     rng = np.random.default_rng(seed)
     notes = []
 
@@ -146,30 +181,45 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
                        dtype=np.uint64, count=len(pts))
     unique, inverse = np.unique(cell, return_inverse=True)
 
-    shift = np.uint64(3 * (15 - max(0, res - _FILTER_LEVELS)))
+    coarse = max(0, res - _FILTER_LEVELS)
+    shift = np.uint64(3 * (15 - coarse))
     needed = np.unique(np.concatenate([np.unique(flat >> shift)
                                        for _, flat in _disks(unique, max_rings)]))
     dep_cells, dep_depth = _depression_cells(cells_src(), needed, shift)
     spacing = h3.average_hexagon_edge_length(res, "m") * math.sqrt(3)
+    dep_code, claimed = None, None
+    if labels is not None:
+        # a depression claims ground around its lowest point, which may lie one coarse cell away
+        around = _parents(needed << shift, coarse)
+        around = np.unique(np.fromiter(itertools.chain.from_iterable(
+            h3i.grid_disk(int(c), 1) for c in around), dtype=np.uint64))
+        dep_code, claimed = _claims(deps_src(classes=True), labels, around, coarse, spacing,
+                                    dep_cells, order)
     excluded = None
     if exclude_suspect:
         bad, n_bad = _suspect_cells(deps_src(), spacing)
         drop = _isin(dep_cells, bad)
         excluded = {"deeper_than_wide": n_bad, "cells": int(drop.sum())}
         dep_cells, dep_depth = dep_cells[~drop], dep_depth[~drop]
+        dep_code = None if dep_code is None else dep_code[~drop]
 
-    ring_u, depth_u = _rings(unique, dep_cells, dep_depth, max_rings)
+    ring_u, depth_u, code_u = _rings(unique, dep_cells, dep_depth, max_rings, dep_code)
     ring, depth = ring_u[inverse], depth_u[inverse]
     edges = np.asarray(depth_classes, dtype=float)
-    cls = np.where(ring <= max_rings, np.digitize(np.nan_to_num(depth), edges), -1)
+    near = ring <= max_rings
+    splits = [(np.where(near, np.digitize(np.nan_to_num(depth), edges), -1), len(edges) + 1)]
+    if labels is not None:
+        code = code_u[inverse]
+        splits.append((np.where(near, code, -1), len(order) + 1))
 
     block_u = unique >> np.uint64(3 * (15 - block_res))
     block_key, block = np.unique(block_u[inverse], return_inverse=True)
     is_obs = (pts["kind"] == "observation").to_numpy()
     n_blocks = len(block_key)
-    m_obs, n_obs = _tallies(block[is_obs], n_blocks, ring[is_obs], cls[is_obs], max_rings, len(edges))
-    m_ctl, n_ctl = _tallies(block[~is_obs], n_blocks, ring[~is_obs], cls[~is_obs], max_rings,
-                            len(edges))
+    m_obs, n_obs = _tallies(block[is_obs], n_blocks, ring[is_obs], max_rings,
+                            [(c[is_obs], n) for c, n in splits])
+    m_ctl, n_ctl = _tallies(block[~is_obs], n_blocks, ring[~is_obs], max_rings,
+                            [(c[~is_obs], n) for c, n in splits])
     point = _lift(m_obs.sum(0), n_obs.sum(), m_ctl.sum(0), n_ctl.sum())
     boot = _bootstrap(m_obs, n_obs, m_ctl, n_ctl, n_boot, rng)
     tail = 100 * (1 - ci) / 2
@@ -187,12 +237,22 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
     rings = pd.DataFrame({"k": k, "distance_m": k * spacing,
                           **{c: v[whole] for c, v in columns.items()}})
     rings[["obs_within", "controls_within"]] = rings[["obs_within", "controls_within"]].astype(int)
-    labels = _class_labels(edges)
-    by_depth = pd.DataFrame({"depth_class": np.repeat(labels, max_rings + 1),
-                             "k": np.tile(k, len(labels)),
-                             **{c: v[max_rings + 1:] for c, v in columns.items()}})
+    depth_part = slice(max_rings + 1, (max_rings + 1) * (len(edges) + 2))
+    by_depth = pd.DataFrame({"depth_class": np.repeat(_class_labels(edges), max_rings + 1),
+                             "k": np.tile(k, len(edges) + 1),
+                             **{c: v[depth_part] for c, v in columns.items()}})
     by_depth[["obs_within", "controls_within"]] = by_depth[["obs_within",
                                                             "controls_within"]].astype(int)
+    by_class = class_ratios = None
+    if labels is not None:
+        names = [*order, UNCLASSIFIED]
+        class_part = slice(depth_part.stop, None)
+        by_class = pd.DataFrame({"class": np.repeat(names, max_rings + 1),
+                                 "k": np.tile(k, len(names)),
+                                 **{c: v[class_part] for c, v in columns.items()}})
+        by_class[["obs_within", "controls_within"]] = by_class[["obs_within",
+                                                                "controls_within"]].astype(int)
+        class_ratios = _ratios(order, point[class_part], boot[:, class_part], max_rings, tail)
 
     obs_blocks = len(np.unique(block[is_obs]))
     if obs_blocks < 20:
@@ -214,6 +274,11 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
         "rings": pd.array(np.where(ring <= max_rings, ring, -1), dtype="Int64"),
         "depth_m": depth, "block": block_ids})
     points.loc[ring > max_rings, "rings"] = pd.NA
+    point_columns = list(POINT_COLUMNS)
+    if labels is not None:
+        names = np.array([*order, UNCLASSIFIED, None], dtype=object)
+        points["class"] = names[np.where(near, code, len(order) + 1)]
+        point_columns.append("class")
 
     report = {
         "result": where, "res": res, "ring_spacing_m": spacing,
@@ -225,6 +290,12 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
         "depression_cells_near_points": int(len(dep_cells)), "excluded": excluded,
         "rings": _records(rings), "depth_classes_m": [float(e) for e in edges],
         "by_depth": _records(by_depth),
+        **({} if labels is None else {
+            "classes": {"order": list(order), "depressions_labelled": int(len(labels)), **claimed,
+                        "rule": "each labelled depression claims the depressed cells within "
+                                "round(sqrt(area_m2 / pi) / ring_spacing_m) rings of its lowest "
+                                "point; overlaps go to the most volume_m3 (then the lower id)"},
+            "by_class": _records(by_class), "class_ratios": _records(class_ratios)}),
         "bootstrap": {"block_res": block_res, "n_blocks": n_blocks, "n_blocks_with_observations":
                       obs_blocks, "n_boot": n_boot, "ci": ci, "seed": seed,
                       "undefined_share": [float(u) for u in undefined[whole]]},
@@ -232,7 +303,7 @@ def validate(result, observations, controls=None, *, boundary=None, n_random=Non
     }
     for note in notes:
         warnings.warn(note, UserWarning, stacklevel=2)
-    return Validation(rings, by_depth, points[POINT_COLUMNS], report)
+    return Validation(rings, by_depth, points[point_columns], report, by_class, class_ratios)
 
 
 def read_points(source):
@@ -340,18 +411,21 @@ def _source(result, rows):
     """(meta, cell chunks, depression chunks, description) of a result in memory or on disk."""
     if isinstance(result, Result):
         if result.cells is not None:
-            return (result.meta, lambda: [result.cells], lambda: [result.depressions],
+            return (result.meta, lambda: [result.cells], lambda classes=False: [result.depressions],
                     "in memory")
         result = result.path
     folder = Path(result)
     missing = missing_files(folder)
     if missing:
         raise FileNotFoundError(f"{folder} is missing {', '.join(missing)}")
+
+    def depressions(classes=False):
+        columns = (["id", "h3_lowpoint", "area_m2", "volume_m3"] if classes else
+                   ["h3_lowpoint", "max_depth_m", "area_m2", "deeper_than_wide"])
+        return iter_table(folder, "depressions", rows, columns=columns)
     return (read_meta(folder),
             lambda: iter_table(folder, "cells", rows, columns=["h3", "max_depth_m"]),
-            lambda: iter_table(folder, "depressions", rows,
-                               columns=["h3_lowpoint", "max_depth_m", "area_m2", "deeper_than_wide"]),
-            str(folder))
+            depressions, str(folder))
 
 
 def _check_settings(res, max_rings, depth_classes, block_res, n_boot, ci):
@@ -367,6 +441,101 @@ def _check_settings(res, max_rings, depth_classes, block_res, n_boot, ci):
         raise ValueError("n_boot must be >= 0")
     if not 0 < ci < 1:
         raise ValueError("ci must be between 0 and 1")
+
+
+def _labels(classes, class_order):
+    """(labels: Series of class names indexed by depression id, the classes in order)."""
+    if isinstance(classes, (str, Path)):
+        path = Path(classes)
+        classes = pd.read_parquet(path) if path.suffix.lower() == ".parquet" else pd.read_csv(path)
+    if isinstance(classes, pd.DataFrame):
+        if not {"id", "class"} <= set(classes.columns):
+            raise ValueError("a table of classes needs 'id' and 'class' columns")
+        classes = pd.Series(classes["class"].to_numpy(), index=classes["id"].to_numpy())
+    labels = pd.Series(classes).dropna()
+    if not len(labels):
+        raise ValueError("classes labels no depression")
+    if labels.index.duplicated().any():
+        raise ValueError("classes gives some depressions more than one label")
+    labels = labels.astype(str)
+    found = sorted(labels.unique())
+    order = found if class_order is None else [str(c) for c in class_order]
+    if len(set(order)) != len(order) or UNCLASSIFIED in order:
+        raise ValueError(f"class_order must name each class once, and not {UNCLASSIFIED!r}")
+    unknown = sorted(set(found) - set(order))
+    if unknown:
+        raise ValueError(f"classes not in class_order: {unknown}")
+    return labels, order
+
+
+def _parents(cells, res):
+    """The parent at `res` of each H3 cell (or of a key shifted back into place), by its bits."""
+    cells = np.asarray(cells, dtype=np.uint64)
+    out = (cells & ~np.uint64(0xF << 52)) | np.uint64(res << 52)
+    return out | np.uint64((1 << (3 * (15 - res))) - 1)
+
+
+def _claims(chunks, labels, around, coarse, spacing, dep_cells, order):
+    """The position in `order` of each depressed cell's class (len(order) when unclaimed), and
+    counts for the report.
+
+    Each labelled depression whose lowest point lies in one of the coarse cells `around` claims
+    the cells within round(sqrt(area / pi) / spacing) rings of its lowest point's cell; a cell
+    claimed more than once goes to the depression with the most volume, then the lower id.
+    """
+    code_of = {name: i for i, name in enumerate(order)}
+    n_classes = len(order)
+    cells, volume, ids, codes = [], [], [], []
+    for chunk in chunks:
+        if not len(chunk):
+            continue
+        if "volume_m3" not in chunk or "id" not in chunk:
+            raise ValueError("classes need the depressions' id and volume_m3")
+        low = ids_to_int(list(chunk["h3_lowpoint"]))
+        keep = _isin(_parents(low, coarse), around) & chunk["id"].isin(labels.index).to_numpy()
+        if not keep.any():
+            continue
+        sub = chunk[keep]
+        radius = np.rint(np.sqrt(sub["area_m2"].to_numpy(float) / math.pi) / spacing).astype(int)
+        disks = [h3i.grid_disk(int(c), int(r)) if r else [int(c)] for c, r in zip(low[keep], radius)]
+        sizes = np.fromiter(map(len, disks), dtype=np.int64, count=len(disks))
+        cells.append(np.fromiter(itertools.chain.from_iterable(disks), dtype=np.uint64,
+                                 count=sizes.sum()))
+        volume.append(np.repeat(sub["volume_m3"].to_numpy(float), sizes))
+        ids.append(np.repeat(sub["id"].to_numpy(np.int64), sizes))
+        codes.append(np.repeat(labels.loc[sub["id"].to_numpy()].to_numpy(), sizes))
+    code = np.full(len(dep_cells), n_classes, dtype=np.int64)
+    if cells:
+        cells, volume, ids = np.concatenate(cells), np.concatenate(volume), np.concatenate(ids)
+        names = np.concatenate(codes)
+        order = np.lexsort((ids, -np.nan_to_num(volume, nan=-np.inf), cells))
+        cells, names = cells[order], names[order]
+        first = np.r_[True, cells[1:] != cells[:-1]]
+        cells, names = cells[first], names[first]
+        pos = np.minimum(np.searchsorted(cells, dep_cells), len(cells) - 1)
+        hit = cells[pos] == dep_cells
+        code[hit] = [code_of[n] for n in names[pos[hit]]]
+    return code, {"depressed_cells_claimed": int((code < n_classes).sum()),
+                  "depressed_cells_unclassified": int((code == n_classes).sum())}
+
+
+def _ratios(order, lift, boot, k, tail):
+    """Lift of each class over each later class, per k, with percentile intervals."""
+    rows = []
+    for a, b in itertools.combinations(range(len(order)), 2):
+        for j in range(k + 1):
+            ia, ib = a * (k + 1) + j, b * (k + 1) + j
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratio = lift[ia] / lift[ib]
+                samples = boot[:, ia] / boot[:, ib]
+            samples = samples[np.isfinite(samples)]
+            rows.append({"class_a": order[a], "class_b": order[b], "k": j,
+                         "ratio": ratio if np.isfinite(ratio) else np.nan,
+                         "ratio_low": np.percentile(samples, tail) if len(samples) else np.nan,
+                         "ratio_high": np.percentile(samples, 100 - tail) if len(samples) else np.nan,
+                         "undefined_share": (1 - len(samples) / len(boot)) if len(boot) else np.nan})
+    return pd.DataFrame(rows, columns=["class_a", "class_b", "k", "ratio", "ratio_low",
+                                       "ratio_high", "undefined_share"])
 
 
 def _area(boundary, meta):
@@ -453,37 +622,49 @@ def _grid_distance(a, b, k):
         return next(r for r in range(k + 1) if b in h3i.grid_disk(a, r))
 
 
-def _rings(cells, dep_cells, dep_depth, k):
-    """For each cell: rings to the nearest depression cell (k + 1 when none within k rings) and
-    the deepest depth among the nearest ones (NaN when none)."""
+def _rings(cells, dep_cells, dep_depth, k, dep_code=None):
+    """For each cell: rings to the nearest depression cell (k + 1 when none within k rings), the
+    deepest depth among the nearest ones (NaN when none), and the class code of that deepest
+    nearest cell (the lowest code among equals; -1 when none or without `dep_code`)."""
     ring = np.full(len(cells), k + 1, dtype=np.int64)
     depth = np.full(len(cells), np.nan)
+    code = np.full(len(cells), -1, dtype=np.int64)
     if len(dep_cells) == 0:
-        return ring, depth
+        return ring, depth, code
+    dep_code = np.full(len(dep_cells), -1, dtype=np.int64) if dep_code is None else dep_code
     for owner, flat in _disks(cells, k):
         pos = np.minimum(np.searchsorted(dep_cells, flat), len(dep_cells) - 1)
         hit = dep_cells[pos] == flat
         if not hit.any():
             continue
-        own, near, d = owner[hit], flat[hit], dep_depth[pos[hit]]
-        dist = np.fromiter((_grid_distance(int(cells[o]), int(c), k) for o, c in zip(own, near)),
+        own, near, d, c = owner[hit], flat[hit], dep_depth[pos[hit]], dep_code[pos[hit]]
+        dist = np.fromiter((_grid_distance(int(cells[o]), int(n), k) for o, n in zip(own, near)),
                            dtype=np.int64, count=len(own))
-        order = np.lexsort((-d, dist, own))            # by cell, nearest first, deepest first
-        own, dist, d = own[order], dist[order], d[order]
+        order = np.lexsort((c, -d, dist, own))         # by cell, nearest, deepest, first class
+        own, dist, d, c = own[order], dist[order], d[order], c[order]
         first = np.r_[True, own[1:] != own[:-1]]
         ring[own[first]] = dist[first]
         depth[own[first]] = d[first]
-    return ring, depth
+        code[own[first]] = c[first]
+    return ring, depth, code
 
 
-def _tallies(block, n_blocks, ring, cls, k, n_edges):
-    """Per block: points within 0..k rings (overall, then per depth class), and points."""
-    hits = np.zeros((n_blocks, n_edges + 1, k + 1))
+def _tallies(block, n_blocks, ring, k, splits):
+    """Per block: points within 0..k rings (overall, then per class of each split), and points.
+
+    `splits` are (class of each point, number of classes) pairs; the columns are the k + 1
+    overall counts, then each split's classes, k + 1 columns each.
+    """
     near = ring <= k
-    np.add.at(hits, (block[near], cls[near], ring[near]), 1)
-    within = hits.cumsum(axis=2)
-    table = np.concatenate([within.sum(axis=1), within.reshape(n_blocks, -1)], axis=1)
-    return table, np.bincount(block, minlength=n_blocks).astype(float)
+    parts = []
+    for cls, n in splits:
+        hits = np.zeros((n_blocks, n, k + 1))
+        np.add.at(hits, (block[near], cls[near], ring[near]), 1)
+        within = hits.cumsum(axis=2)
+        if not parts:
+            parts.append(within.sum(axis=1))
+        parts.append(within.reshape(n_blocks, -1))
+    return np.concatenate(parts, axis=1), np.bincount(block, minlength=n_blocks).astype(float)
 
 
 def _lift(obs_within, n_obs, ctl_within, n_ctl):

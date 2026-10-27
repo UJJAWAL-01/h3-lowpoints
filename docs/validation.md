@@ -125,6 +125,53 @@ lift, the association has a dose-response shape, which is more convincing than a
 The classes add up to the overall counts. The class is the depth at that place, not the depth of
 the whole depression: the cell table does not record which depression a cell belongs to.
 
+## Comparing classes of depressions
+
+Depth is one way to split depressed ground. `classes` gives any other: a label for each
+depression, such as how often it fills (from the [susceptibility layer](susceptibility.md)) or
+whether it is landlocked. The question then becomes *are observations more concentrated near
+depressions of one class than near those of another?*
+
+```python
+import pandas as pd
+from h3lowpoints import validate
+
+s = pd.read_parquet("us48_30m_v3/susceptibility.parquet", columns=["id", "landlocked"])
+labels = pd.Series(s["landlocked"].map({True: "landlocked", False: "drained"}).to_numpy(), index=s["id"])
+v = validate("us48_30m_v3", "reports.csv", controls="addresses.csv", boundary="city.gpkg",
+             classes=labels, class_order=["landlocked", "drained"])
+print(v.class_ratios.query("k == 0"))
+```
+
+**Which ground belongs to which depression.** The cell table does not record which depression a
+cell belongs to, so a fixed rule assigns it: each labelled depression claims the depressed cells
+within its equivalent radius, √(area / π), of its lowest point, rounded to whole rings (only the
+lowest point's cell when that radius is under half a ring spacing, which at resolution 10 is
+every depression under about 13,500 m²). Where claims overlap, the depression holding the most
+water (`volume_m3`, then the lower `id`) wins. Depressed cells that no labelled depression claims
+form the class `unclassified`: ground of depressions left out of `classes`, or the far parts of
+long, irregular ones. The report counts the cells claimed and the cells left unclassified. A
+depression's ground is a disc here, not its true outline, so the classes of a big, irregular
+depression's edges are approximate; at 0 rings, where the comparison matters most, a point's
+class is the class of the depression its own cell belongs to.
+
+**The class of a point** is the class of its nearest depressed ground (the deepest of the
+nearest cells, as for `by_depth`; equal depths go to the earlier class in `class_order`).
+`by_class` gives the ring table for each class, and the classes add up to the overall counts.
+
+**Comparing two classes.** For classes A and B, the **lift ratio** at distance k is
+lift(A) / lift(B) = (observations near A / controls near A) / (observations near B / controls
+near B): how many times more observations there are per control near A than near B. A ratio of 1
+means no difference. Its interval comes from the same block bootstrap samples as the lifts, so
+it accounts for clustering, and for A and B sharing observations' blocks. `class_ratios` gives
+every pair in `class_order` (each class over each later one) at every k; `undefined_share` is the
+share of samples where a class had no control nearby, so the ratio could not be computed.
+
+Comparing classes answers a sharper question than the overall lift: both classes are depressed
+ground, so the many things depressions share (low, flat, older neighbourhoods) cancel out to a
+large extent, and what remains is the difference the label makes. It is still association: the
+labels themselves come from models with their own errors.
+
 **Suspect depressions.** Depressions flagged `deeper_than_wide` are almost always errors in the
 elevation data. By default the ground around each one is left out: every cell within √area of its
 lowest point's cell (at least one ring). This is an approximation for the same reason as above;
@@ -144,6 +191,9 @@ lowest point's cell (at least one ring). This is an approximation for the same r
 | `excluded` | `deeper_than_wide` depressions and the cells left out around them (`null` when kept). |
 | `rings` | One entry per k: `k`, `distance_m`, `obs_within`, `controls_within`, `obs_share`, `control_share`, `lift`, `lift_low`, `lift_high`. |
 | `by_depth` | The same per `depth_class` and k. |
+| `classes` | With `classes` only: `order`, `depressions_labelled`, `depressed_cells_claimed`, `depressed_cells_unclassified` (near the points), and the `rule` that assigned ground to depressions. |
+| `by_class` | With `classes` only: the ring entries per `class` and k. |
+| `class_ratios` | With `classes` only: one entry per pair and k: `class_a`, `class_b`, `k`, `ratio`, `ratio_low`, `ratio_high`, `undefined_share`. |
 | `bootstrap` | `block_res`, `n_blocks`, `n_blocks_with_observations`, `n_boot`, `ci`, `seed`, and `undefined_share`: per k, the share of samples where the lift could not be computed (no control near depressed ground). |
 | `warnings` | Every caveat raised, also issued as `UserWarning`s and printed by the command. |
 | `package_version` | The library version. |
@@ -162,6 +212,7 @@ used:
 | `rings` | Rings to the nearest depressed cell; empty when farther than `max_rings`. |
 | `depth_m` | Depth of that nearest depressed ground (the deepest of the nearest cells). |
 | `block` | Its bootstrap block (H3 cell at `block_res`). |
+| `class` | With `classes` only: the class of that nearest depressed ground; empty when farther than `max_rings`. |
 
 ## What this cannot tell you
 
