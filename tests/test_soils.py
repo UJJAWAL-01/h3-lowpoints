@@ -95,15 +95,34 @@ def test_groups_land_on_the_nlcd_grid_pixel_for_pixel(tmp_path, fake_survey):
     ca, cb = np.clip(((x - x0) // 10).astype(int), 0, 599), np.clip(((x - x0 - 6000) // 10).astype(int), 0, 599)
     mukey = np.where(x < x0 + 6000, da[r, ca], db[r, cb])
     expected = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 4], dtype=np.uint8)[np.clip(mukey, 0, 9)]
-    # the grid is read from its 20 m overview, which can shift a lookup by one 10 m pixel: pixels
-    # whose centre is within 10 m of a 50 m block edge may take the neighbouring unit; every other
-    # pixel must match exactly
-    dx, dy = (x - x0) % 50, (y0 - y) % 50
-    edge = (np.minimum(dx, 50 - dx) <= 10) | (np.minimum(dy, 50 - dy) <= 10)
-    assert (got[~edge] == expected[~edge]).all() and (~edge).sum() > 5000
+    # every pixel exactly: these centres all lie on the 10 m grid's lines, and take the soil
+    # pixel to their east and south (what the floor division above picks)
+    assert (got == expected).all()
     assert set(np.unique(got)) <= set(range(9))
     assert len([u for u in fake_survey["asked"] if u.startswith(soils.TOKEN)]) == 1   # token reused
     del Transformer
+
+
+@pytest.mark.parametrize("shift", [(1, 0), (7, 3), (40, 11)])
+def test_a_place_gets_the_same_group_whatever_box_it_is_read_in(tmp_path, fake_survey, shift):
+    """Planted bug: reading an overview, or a fractional window, resamples the grid at an offset
+    that depends on the box, so the same pixel could get a neighbouring unit."""
+    x0, y0 = fake_survey["x0"], fake_survey["y0"]
+    grids = []
+    for name, (dc, dr), (w, h) in (("a", (0, 0), (300, 120)), ("b", shift, (210, 90))):
+        like = tmp_path / f"nlcd_{name}.tif"
+        prof = {"driver": "GTiff", "height": h, "width": w, "count": 1, "dtype": "uint8",
+                "crs": "EPSG:5070", "nodata": 0,
+                "transform": from_origin(x0 + 1005 + 30 * dc, y0 - 435 - 30 * dr, 30, 30)}
+        with rasterio.open(like, "w", **prof) as dst:
+            dst.write(np.full((h, w), 82, dtype="uint8"), 1)
+        out = soils.fetch_soil_groups(None, tmp_path / f"g_{name}.tif", cache_dir=tmp_path / "c",
+                                      like=like, get=fake_survey["get"], opener=fake_survey["opener"])
+        with rasterio.open(out) as src:
+            grids.append(src.read(1))
+    a, b = grids
+    dc, dr = shift
+    assert (a[dr:dr + b.shape[0], dc:dc + b.shape[1]] == b[:a.shape[0] - dr, :a.shape[1] - dc]).all()
 
 
 def test_default_grid_follows_nlcd_edges(tmp_path, fake_survey):

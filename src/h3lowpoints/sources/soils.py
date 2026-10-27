@@ -11,8 +11,8 @@ The groups come from the gridded National Soil Survey Geographic Database (gNATS
 a 10 m grid of soil map units (`mukey`) for the lower 48 states, and its map-unit table
 (`muaggatt`), whose `hydgrpdcd` gives each unit's group (dominant condition). The library reads
 the July 2020 edition published on Microsoft's Planetary Computer (CC0, no account: a read token
-is issued anonymously by its public API). The grid is read by parts over the internet, from its
-nearest overview not coarser than the resolution asked for.
+is issued anonymously by its public API). The grid is read by parts over the internet, at its
+full 10 m resolution.
 
 Output codes (GROUPS): 1 A, 2 B, 3 C, 4 D, 5 A/D, 6 B/D, 7 C/D; 8 a map unit with no group
 (urban land, water, rock outcrop and the like); 0 no data (outside the survey).
@@ -93,8 +93,9 @@ def fetch_soil_groups(bbox, out_path, *, cache_dir, like=None, resolution=30.0, 
     the groups with an NLCD raster pixel for pixel, pass it as `like`: its grid (extent, size,
     CRS) is then used exactly, and `bbox` may be None (the NLCD service chooses its own edge
     pixels, so the same box does not give the same extent).
-    Each pixel takes the map unit at its centre, read from the soil grid's nearest overview not
-    coarser than the output's pixels. `opener(url)` opens a tile (for tests). Returns the path.
+    Each pixel takes the map unit at its centre in the full 10 m grid (a centre on a grid line
+    takes the soil pixel to its east or south), so a place gets the same group whatever box it is
+    read in. `opener(url)` opens a tile (for tests). Returns the path.
     """
     import rasterio
     from affine import Affine
@@ -131,26 +132,32 @@ def fetch_soil_groups(bbox, out_path, *, cache_dir, like=None, resolution=30.0, 
         for url in found:
             path = opener(url) if opener else f"/vsicurl/{url}?{read_token(get)}"
             with rasterio.open(path) as src:
-                # the tile's part of the output, read at about the output's resolution: rasterio
-                # then reads the overview that is not coarser (the full 10 m grid is not fetched)
+                # the tile's part of the output, in whole pixels of its full 10 m grid. Reading
+                # an overview, or a window cut at fractional pixels, resamples the grid at an
+                # offset that depends on the box asked for, so the same place could get another
+                # map unit near unit boundaries (3% of pixels in a test region)
                 b = transform_bounds(crs, src.crs, out_bounds[0], out_bounds[1], out_bounds[2],
                                      out_bounds[3], densify_pts=21)
                 try:
-                    win = from_bounds(*b, src.transform).intersection(
-                        Window(0, 0, src.width, src.height))
-                except WindowError:                      # the tile only touches the box
+                    win = from_bounds(*b, src.transform)
+                except WindowError:
                     continue
-                if win.width < 1 or win.height < 1:
+                col0 = max(0, math.floor(win.col_off) - 1)
+                row0 = max(0, math.floor(win.row_off) - 1)
+                col1 = min(src.width, math.ceil(win.col_off + win.width) + 1)
+                row1 = min(src.height, math.ceil(win.row_off + win.height) + 1)
+                if col1 <= col0 or row1 <= row0:              # the tile only touches the box
                     continue
-                step = max(1.0, resolution / src.res[0])
-                shape = (max(1, int(round(win.height / step))), max(1, int(round(win.width / step))))
-                data = src.read(1, window=win, out_shape=shape, resampling=Resampling.nearest)
-                wt = src.window_transform(win) @ Affine.scale(win.width / shape[1],
-                                                              win.height / shape[0])
-                part = np.full((height, width), MUKEY_NODATA, dtype=np.int64)
-                reproject(data.astype(np.int64), part, src_transform=wt, src_crs=src.crs,
-                          src_nodata=MUKEY_NODATA, dst_transform=transform, dst_crs=crs,
-                          dst_nodata=MUKEY_NODATA, resampling=Resampling.nearest)
+                win = Window(col0, row0, col1 - col0, row1 - row0)
+                data = src.read(1, window=win).astype(np.int32)
+                part = np.full((height, width), MUKEY_NODATA, dtype=np.int32)
+                # each output pixel takes the map unit at its centre; a centre exactly on a soil
+                # pixel's edge (NLCD's 30 m centres fall on the 10 m grid's lines) takes the
+                # pixel to its east or south, whatever the box: the centres are moved by a
+                # millionth of a pixel so that rounding cannot decide
+                reproject(data, part, src_transform=src.window_transform(win), src_crs=src.crs,
+                          src_nodata=MUKEY_NODATA, dst_transform=transform @ Affine.translation(1e-6, 1e-6),
+                          dst_crs=crs, dst_nodata=MUKEY_NODATA, resampling=Resampling.nearest)
             take = (mukey == MUKEY_NODATA) & (part != MUKEY_NODATA)
             mukey[take] = part[take]
     groups = to_groups(mukey, keys, codes)

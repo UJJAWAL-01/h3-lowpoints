@@ -23,7 +23,8 @@
   folder of tables, read one after the other in name order.
 - `sources.soils.fetch_soil_groups` (`fetch-landcover --from soil-groups`): soil hydrologic groups
   from the USDA gNATSGO soil survey, read by parts from Microsoft's Planetary Computer without an
-  account, on NLCD's grid pixel for pixel.
+  account, on NLCD's grid pixel for pixel: each pixel takes the map unit at its centre in the full
+  10 m grid, so a place gets the same group whatever box it is read in.
 - `sources.rainfall.Atlas14Grids`: NOAA Atlas 14 depths for many points from NOAA's published
   grids (all seven project areas of the conterminous US, every duration and return period),
   with `atlas14_grid_url` and `read_ascii_grid`. It matches the point service to within 1%.

@@ -147,9 +147,12 @@ depressions can be studied apart.
 - **Library:** `sources.soils.fetch_soil_groups`, `h3lowpoints fetch-landcover --from soil-groups`;
   `runoff.fetch_curve_numbers` (`--from curve-numbers`) combines them with NLCD.
 
-The groups are read from the soil grid's 20 m overview onto 30 m pixels (each pixel takes the map
-unit at its centre, which the overview can shift by one 10 m pixel, far less than the precision
-of a soil map). Checked in October 2026 on three test boxes: Houston's soils are 84% group D
+The groups are read from the full 10 m soil grid onto 30 m pixels: each pixel takes the map unit
+at its centre (NLCD's pixel centres lie on the soil grid's lines; such a centre takes the soil
+pixel to its east or south), so a place gets the same group whatever box it is read in. Until
+October 2026 the library read the grid's 20 m overview through a window that depended on the box,
+which gave 3% of pixels in a test region another group near unit boundaries; it reads no faster,
+so nothing is gained by it. Checked in October 2026 on three test boxes: Houston's soils are 84% group D
 (clays), North Dakota's mostly C, the Central Valley's a mix of A to D. The table lists one unit
 twice ("Water"), which is harmless and dropped.
 
