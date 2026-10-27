@@ -42,9 +42,19 @@ def county_roads(geoid, *, cache_dir, year=2024):
     """Every road of one county (GEOID such as "48201"), in WGS 84, with the road's `MTFCC`
     class. The zip is downloaded once into `cache_dir`."""
     gpd = _geopandas()
+    from pathlib import Path
+
     local = download_once(ROADS.format(year=year, geoid=geoid), cache_dir)
     if local is None:
         raise ValueError(f"the Census Bureau has no {year} roads file for county {geoid}")
+    with open(local, "rb") as fh:
+        head = fh.read(300)
+    if not head.startswith(b"PK"):
+        # the Census web server answers some requests with an HTML page ("Request Rejected")
+        # when it is limiting a client: never keep that as the county's file
+        Path(local).unlink()
+        raise OSError(f"the Census server sent a web page instead of county {geoid}'s roads: "
+                      f"{head[:120]!r}")
     roads = gpd.read_file(f"zip://{local}", columns=["MTFCC"])
     return roads.to_crs(4326)[["MTFCC", "geometry"]]
 

@@ -310,3 +310,14 @@ def test_real_nhd_roads_and_land_cover(tmp_path):
     with rasterio.open(out) as src:
         values = set(np.unique(src.read(1)).tolist())
     assert values & {21, 22, 23, 24}
+
+
+def test_a_rejected_road_download_is_not_kept(tmp_path):
+    """The Census server answers a client it is limiting with a web page: that must not be kept
+    or read as the county's roads."""
+    page = tmp_path / "tl_2024_18017_roads.zip"
+    page.write_bytes(b"<html><head><title>Request Rejected</title></head><body>The requested URL "
+                     b"was rejected.</body></html>")
+    with pytest.raises(OSError, match="web page"):
+        roads.county_roads("18017", cache_dir=tmp_path)
+    assert not page.exists()
