@@ -44,8 +44,11 @@ It inherits every limit above, and adds its own:
   depressions flagged landlocked are drained. Only highways and ramps count at the spill point:
   on 30 m data in a city any road is near almost everywhere (see
   [Susceptibility](susceptibility.md#drained-or-landlocked)).
-- **Evidence against observations is not yet measured** (see
-  [Susceptibility](susceptibility.md#the-table-and-its-checks)).
+- **Evidence against observations is limited** to 311 flood reports in two cities (New York
+  City, and Houston in two floods). There, depressions that fill in a 2-year storm gathered more
+  reports than those needing rarer storms, and drained depressions more than landlocked ones (see
+  [Susceptibility](susceptibility.md#evidence-against-flood-reports)). Farmland, other climates
+  and how long water stands are untested.
 
 ## Limits that come from the elevation data
 

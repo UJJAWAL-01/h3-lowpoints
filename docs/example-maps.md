@@ -6,8 +6,9 @@ shows, for each cell, the landlocked depressions that fill in the 24-hour storm 
 10 years (or, from the menu, the water they hold, the share of all depressions that fill in that
 storm, the number of depressions, or the median curve number of their catchments); hover for
 the numbers. Washington and Oregon are dark grey for storm measures: NOAA Atlas 14 has no
-estimates there. Highways were measured at the spill points in 12 of the 49 states (the Census
-server refused the downloads for the rest), so elsewhere `drained` rests on streams and canals.
+estimates there. Landlocked depressions are shown as the candidates for waterlogging (water with
+no mapped way out); they are not where storm flooding is reported most, as the
+[evidence](susceptibility.md#evidence-against-flood-reports) found in New York and Houston.
 
 Three more maps, of 1° test areas, show every depression on its own cells. They were made while
 building the

@@ -50,11 +50,12 @@ def county_roads(geoid, *, cache_dir, year=2024):
     with open(local, "rb") as fh:
         head = fh.read(300)
     if not head.startswith(b"PK"):
-        # the Census web server answers some requests with an HTML page ("Request Rejected")
-        # when it is limiting a client: never keep that as the county's file
+        # the Census web server answers some requests with an HTML page ("Request Rejected"):
+        # mostly when limiting a client, but for a few files every time (see data-sources.md).
+        # Never keep that as the county's file
         Path(local).unlink()
-        raise OSError(f"the Census server sent a web page instead of county {geoid}'s roads: "
-                      f"{head[:120]!r}")
+        raise OSError(f"the Census server sent a web page instead of county {geoid}'s {year} "
+                      f"roads (try again later, or another year): {head[:120]!r}")
     roads = gpd.read_file(f"zip://{local}", columns=["MTFCC"])
     return roads.to_crs(4326)[["MTFCC", "geometry"]]
 

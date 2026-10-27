@@ -150,7 +150,10 @@ conserved: the runoff of all catchments equals the water stored plus the water l
 Many depressions in an elevation model are drained in reality: a canal, a ditch or a stream runs
 through them, or the rim they overflow at is a highway embankment with a culvert under it that
 the model cannot see. **Landlocked** depressions, where the water has no way out but to soak in
-or evaporate, are the ones that matter for waterlogging in towns and on farms.
+or evaporate, are the candidates for waterlogging in towns and on farms (how long water stands
+was not measured). They are not where storm flooding is reported most: in New York and Houston, drained
+depressions beside bayous, ditches and highways gathered more reports
+([Evidence](#evidence-against-flood-reports)).
 `drainage.drainage_flags` (`h3lowpoints drainage`) looks for signs of drainage in mapped lines:
 
 - `stream_m`, `canal_m`: distance from the lowest point to the nearest mapped stream or river,
@@ -211,9 +214,25 @@ bisection that reruns the cascade for every depression, and two independent answ
 other: a uniform storm of depth D fills exactly the depressions whose `rain_to_fill_upstream_mm`
 is at most D (within the 1%).
 
-**Evidence against observations: not yet measured.** Whether depressions that fill in frequent
-storms are where flooding is reported is the next step of the [roadmap](roadmap.md), with the
-[validation tools](validation.md). This page will report the result, whatever it is.
+## Evidence against flood reports
+
+A study fixed in advance compared the layer with 311 flood reports in New York City (2020 to
+2026) and in Houston (the Memorial Day flood of 2015 and the Tax Day flood of 2016), per address
+([full study](validation.md#study-the-susceptibility-layer-against-flood-reports-new-york-city-and-houston)):
+
+- **How often a depression fills carries signal.** Reports gathered more on the ground of
+  depressions that fill in a 2-year storm than on that of depressions needing a rarer storm:
+  1.27 times as much in New York (95% interval 1.03 to 1.63), 9.7 times (3.6 to 42.5) and
+  2.07 times (0.97 to 5.77) in the two Houston floods. Supported in two studies of three by the
+  rule set beforehand; the third points the same way.
+- **Landlocked depressions did not gather more reports; drained ones did.** Reports were 3 to 4
+  times more concentrated near drained depressions in both Houston floods (ratios 0.29 and 0.26,
+  intervals below 1), and New York leaned the same way (0.64, 0.46 to 1.02). Most of those
+  depressions lie by bayous, ditches or highways, which overflow or fill in extreme storms.
+
+Use `fills_in_years` (and the fill ratios) as the index of how readily a depression floods.
+Read `landlocked` as *water that collects has no mapped way out*, which bears on how long it
+stands, not on whether a storm floods the place; nothing here measured standing time.
 
 ## Limits
 

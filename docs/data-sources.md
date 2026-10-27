@@ -189,6 +189,13 @@ flags count with canals.
 - **Format:** zipped shapefiles of 1 to 12 MB per county, in NAD83.
 - **Library:** `sources.roads.fetch_roads` (the counties a box touches, cut to the box),
   `county_roads`, `counties`, `h3lowpoints drainage --tiger`.
+- **Refused files:** the Census web server answers some requests with a "Request Rejected" web
+  page instead of the zip. Most are passing (the server limiting a busy client; wait and try
+  again), but in October 2026 it refused the 2024 files of three counties every time (18017 Cass
+  County, Indiana; 21111 Jefferson County, Kentucky; 29141 Morgan County, Missouri) while their
+  neighbours and their 2023 files downloaded. `county_roads` never keeps such a page and raises
+  an `OSError`; ask for `year=2023` for those counties. The national layer did so and lists them
+  in `meta.json` (`susceptibility.drainage.roads_previous_edition_in`).
 
 ## ESA WorldCover
 

@@ -66,9 +66,10 @@
   "no data for this box". It is now asked again after 5, 15, 45 and 120 s, and if it keeps
   failing, raised as an `OSError`; only the service's real answers outside its coverage (a
   GeoTIFF of no data, an XML exception) mean no data.
-- A Census TIGER/Line download answered with a web page ("Request Rejected", the server
-  limiting a client) was kept as the county's zip and failed to open. `county_roads` now checks
-  the file is a zip, deletes it if not and raises an `OSError`, so the download can be tried again.
+- A Census TIGER/Line download answered with a web page ("Request Rejected": the server
+  limiting a client, or, for a few counties' 2024 files, refusing them every time) was kept as
+  the county's zip and failed to open. `county_roads` now checks the file is a zip, deletes it if
+  not and raises an `OSError`, so the download can be tried again or for another year.
 - `state_flowlines` drops the heights of NHD lines before reprojecting them, halving its memory:
   Oregon's lines (158 million vertices) did not fit when reprojected in 3D at once.
 
