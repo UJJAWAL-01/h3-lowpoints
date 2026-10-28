@@ -77,14 +77,15 @@ Each step is finished, tested and documented before the next starts.
    carry the water away) from those that are landlocked, where water has no way out: the case that
    matters for waterlogging in residential and farm land. The catchments, fill curves and spill
    links both need are in version 0.2 of the national dataset, so they need no new national run.
-   Every term can be inspected, and the index needs no training labels. The index is in the
-   library, unreleased (`h3lowpoints index` and `h3lowpoints drainage`,
+   Every term can be inspected, and the index needs no training labels. Done in 0.4.0
+   (`h3lowpoints index` and `h3lowpoints drainage`,
    [Susceptibility](susceptibility.md)); the drainage rule was calibrated on three test areas,
    the national layer is built and verified, and a study fixed in advance tested it against flood
    reports in New York City and Houston
    ([evidence](susceptibility.md#evidence-against-flood-reports)): how often a depression fills
    carries signal, while landlocked depressions did not gather more storm reports than drained
-   ones. Publishing it (library 0.4.0, dataset version 0.3) follows.
+   ones. The national layer is version 0.3 of the dataset:
+   [doi.org/10.5281/zenodo.23731345](https://doi.org/10.5281/zenodo.23731345).
 4. **Machine learning, only if it earns its place.** Train on the step 3 features, judge it by
    leave-one-region-out validation (never scored on the place it learned from), and keep it only
    if it beats the physical index on unseen regions. Labels of street-level waterlogging are
@@ -97,7 +98,8 @@ Each step is finished, tested and documented before the next starts.
    from the fill curves and spill links.
 6. **Release 0.1.** Done 21 October 2026: the library on PyPI (`pip install h3-lowpoints`), the
    documentation on GitHub Pages, the national dataset on Zenodo. 0.2.0 added validation, 0.3.0
-   catchments, levels and fill curves with version 0.2 of the national dataset. The explorer app
+   catchments, levels and fill curves with version 0.2 of the national dataset, 0.4.0 the
+   susceptibility index and drainage flags with version 0.3. The explorer app
    follows.
 
 ## Also planned

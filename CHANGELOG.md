@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (28 October 2026)
 
 ### Added
 - **Susceptibility: how easily each depression fills** (`susceptibility.susceptibility` and
