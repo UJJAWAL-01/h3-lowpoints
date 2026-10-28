@@ -58,6 +58,15 @@
   `sources.landcover.fetch_land_cover` (NLCD land cover classes; `fetch-landcover --from
   nlcd-landcover`).
 
+### Changed
+- **NLCD now comes from Annual NLCD by default.** `fetch_land_cover`, `fetch_impervious` and
+  `fetch_curve_numbers` take `source="annual"` (default: USGS Annual NLCD Collection 1.1, any year
+  from 1985 to 2024, default 2024, read by ranges from the cloud mosaics on Source Cooperative in
+  a second or two per box) or `source="mrlc"` (the older editions, 2001 to 2021, from the MRLC web
+  service, which was unreachable for hours in October 2026). Same classes, same 30 m grid, pixels
+  read whole. `year` defaults to the source's latest. CLI: `fetch-landcover --nlcd-source`.
+  `sources.landcover.annual_nlcd_url` gives a mosaic's address.
+
 ### Fixed
 - `python -m h3lowpoints` did nothing; it now runs the `h3lowpoints` command.
 - **Remote reads had almost no block cache.** rasterio hands `GDAL_CACHEMAX` to GDAL in bytes, so
