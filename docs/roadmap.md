@@ -109,6 +109,12 @@ Each step is finished, tested and documented before the next starts.
   remove that last limit for continents.
 - More data readers: other national lidar programs, FABDEM, water masks (JRC Global Surface
   Water).
+- **Faster curve numbers at national scale.** The national curve numbers take about 4 hours on a
+  4-core laptop, limited by the processor (8 regions at once keep it fully busy): decoding the
+  10 m soil grid, combining it with land cover, and labelling about 4 million pixels per region
+  with their H3 cells. The regions' boxes overlap by a fifth or more, and the labelling could be
+  vectorised further; both would shorten the next national run, with tests that the results stay
+  identical.
 
 ## H3 resolution policy
 

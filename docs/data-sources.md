@@ -105,15 +105,27 @@ Things to know:
 
 - **What:** the US National Land Cover Database's share of each 30 m pixel covered by pavement,
   roofs and other impervious surfaces, 0 to 100%.
-- **Where:** the lower 48 states. Years 2001, 2004, 2006, 2008, 2011, 2013, 2016, 2019, 2021.
-- **Licence:** public domain (MRLC consortium, US Government).
-- **Format:** served by MRLC's web coverage service in NAD83 / Conus Albers (EPSG:5070).
+- **Where:** the lower 48 states, from two sources:
+  - **Annual NLCD** (default): Collection 1.1, one map for every year from 1985 to 2024 (default
+    2024), read by ranges from cloud-optimized mosaics. The USGS keeps them in an AWS bucket
+    (`s3://usgs-landcover`) that charges whoever downloads; the library reads the unchanged copy
+    on Source Cooperative (`data.source.coop/kylebarron/usgs-landcover`), which needs no account.
+    A box takes a second or two.
+  - **MRLC** (`source="mrlc"`, `--nlcd-source mrlc`): the older NLCD editions, years 2001, 2004,
+    2006, 2008, 2011, 2013, 2016, 2019 and 2021 (default 2021), from MRLC's web coverage service.
+    In October 2026 it was down for hours at a time, which is why Annual NLCD became the default.
+- **Licence:** public domain (US Geological Survey and the MRLC consortium, US Government).
+- **Format:** 30 m Conus Albers. Both sources use the same grid (pixel edges 15 m off multiples of
+  30 m); Annual NLCD names its datum WGS 84 and the older editions NAD83 (EPSG:5070), and PROJ
+  converts between the two without a shift, so the pixels coincide. Pixels are read whole, never
+  resampled.
 - **Library:** `fetch_impervious`, `h3lowpoints fetch-landcover --from nlcd`. Output values are
   0 to 100, with 255 for no data.
 
-A trap found while testing: **the service labels 0 as "no data"**, but in this product 0 means
+A trap found while testing: **the MRLC service labels 0 as "no data"**, but in this product 0 means
 "0% impervious" (a park, a field, a forest). Read naively, every unbuilt pixel would vanish. The
-library drops that label and treats only values above 100 as no data.
+library drops that label and treats only values above 100 as no data (Annual NLCD marks no data
+as 250).
 
 It is the paved share of the curve numbers of the susceptibility index
 ([Susceptibility](susceptibility.md#runoff-curve-numbers)).
@@ -124,9 +136,10 @@ It is the paved share of the curve numbers of the susceptibility index
   perennial ice and snow (12), developed land of four intensities (21 to 24), barren land (31), forests (41 to 43), shrubland
   (51, 52), grassland (71 to 74), pasture and hay (81), cultivated crops (82), wetlands (90, 95);
   in `NLCD_CLASSES`.
-- **Where, licence, format:** as NLCD impervious above. Years 2001 to 2021.
+- **Where, licence, format:** as NLCD impervious above: Annual NLCD 1985 to 2024 by default, the
+  MRLC editions 2001 to 2021 on request. Annual NLCD keeps the same 16 classes.
 - **Library:** `fetch_land_cover`, `h3lowpoints fetch-landcover --from nlcd-landcover`. Output is
-  uint8 class codes, 0 for no data (outside the lower 48 states, open sea), as the service sends.
+  uint8 class codes, 0 for no data (outside the lower 48 states, open sea).
 
 The drainage flags read it at each lowest point (`land_cover`), so residential and farm
 depressions can be studied apart.

@@ -304,6 +304,59 @@ def test_impervious_request_is_well_formed():
         landcover.impervious_request((-97.8, 30.2, -97.7, 30.3), 2020)
 
 
+def _annual_mosaic(path, arr):
+    """A stand-in for an Annual NLCD mosaic: its CRS, grid offset (edges 15 m off multiples of
+    30 m) and no-data value 250, placed over Houston."""
+    crs = ('PROJCS["AEA        WGS84",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,'
+           '298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],'
+           'PROJECTION["Albers_Conic_Equal_Area"],PARAMETER["latitude_of_center",23],'
+           'PARAMETER["longitude_of_center",-96],PARAMETER["standard_parallel_1",29.5],'
+           'PARAMETER["standard_parallel_2",45.5],PARAMETER["false_easting",0],'
+           'PARAMETER["false_northing",0],UNIT["metre",1]]')
+    return write(path, arr, crs, from_origin(55515, 741555, 30, 30), 250, dtype="uint8")
+
+
+def test_annual_nlcd_reads_whole_pixels_of_the_mosaic(monkeypatch, tmp_path):
+    rng = np.random.default_rng(0)
+    arr = rng.choice(np.array([11, 21, 22, 23, 24, 82, 250, 7], dtype="uint8"), size=(200, 200))
+    mosaic = _annual_mosaic(tmp_path / "LndCov.tif", arr)
+    monkeypatch.setattr(landcover, "annual_nlcd_url", lambda product, year: str(mosaic))
+    box = (-95.40, 29.70, -95.39, 29.71)
+    out = landcover.fetch_land_cover(box, tmp_path / "lc.tif")
+    with rasterio.open(out) as r, rasterio.open(mosaic) as m:
+        got, t = r.read(1), r.transform
+        assert r.crs == m.crs and r.res == (30.0, 30.0)
+        col, row = ~m.transform @ (t.c, t.f)
+        assert col == int(col) and row == int(row)                     # whole pixels, no shift
+        want = arr[int(row):int(row) + r.height, int(col):int(col) + r.width]
+    np.testing.assert_array_equal(got, np.where(np.isin(want, list(landcover.NLCD_CLASSES)), want, 0))
+    # the window covers the box
+    left, bottom, right, top = __import__("rasterio.warp").warp.transform_bounds("EPSG:4326", r.crs, *box)
+    assert t.c <= left and t.f >= top and t.c + 30 * r.width >= right and t.f - 30 * r.height <= bottom
+
+
+def test_annual_nlcd_impervious_and_limits(monkeypatch, tmp_path):
+    arr = np.full((200, 200), 40, dtype="uint8")
+    arr[:, :100] = 0                                                   # 0% impervious is data
+    arr[:, 190:] = 250                                                 # no data in the mosaic
+    mosaic = _annual_mosaic(tmp_path / "FctImp.tif", arr)
+    asked = []
+    monkeypatch.setattr(landcover, "annual_nlcd_url", lambda product, year: asked.append((product, year)) or str(mosaic))
+    out = landcover.fetch_impervious((-95.40, 29.70, -95.39, 29.71), tmp_path / "i.tif")
+    with rasterio.open(out) as r:
+        values = set(np.unique(r.read(1)).tolist())
+    assert r.nodata == 255 and values <= {0, 40, 255} and {0, 40} <= values
+    assert asked == [("FctImp", 2024)]
+    with pytest.raises(ValueError, match="lower 48"):                  # beyond the mosaic
+        landcover.fetch_impervious((-80.0, 40.0, -79.99, 40.01), tmp_path / "x.tif")
+    with pytest.raises(ValueError, match="source must be"):
+        landcover.fetch_land_cover((-95.40, 29.70, -95.39, 29.71), tmp_path / "x.tif", source="esa")
+    monkeypatch.undo()
+    assert landcover.annual_nlcd_url("LndCov", 2024).endswith("/Annual_NLCD_LndCov_2024_CU_C1V1.tif")
+    with pytest.raises(ValueError, match="1985 to 2024"):
+        landcover.annual_nlcd_url("LndCov", 2025)
+
+
 def test_zero_percent_impervious_is_data_not_nodata():
     raw = np.array([[0, 1, 50, 100], [127, 255, 0, 99]])
     np.testing.assert_array_equal(landcover.clean_impervious(raw),
@@ -314,15 +367,16 @@ def test_impervious_from_a_service_answer_that_tags_zero_as_nodata(tmp_path):
     arr = np.array([[0, 0, 40], [100, 127, 0]], dtype="uint8")
     raw = write(tmp_path / "svc.tif", arr, "EPSG:5070", from_origin(-100000, 800000, 30, 30), 0,
                 dtype="uint8").read_bytes()
-    out = landcover.fetch_impervious((-97.8, 30.2, -97.7, 30.3), tmp_path / "o.tif", data=raw)
+    out = landcover.fetch_impervious((-97.8, 30.2, -97.7, 30.3), tmp_path / "o.tif", data=raw,
+                                     source="mrlc")
     with rasterio.open(out) as r:
         assert r.nodata == 255
         np.testing.assert_array_equal(r.read(1), [[0, 0, 40], [100, 255, 0]])
     with pytest.raises(ValueError, match="did not return a GeoTIFF"):
-        landcover.fetch_impervious((-97.8, 30.2, -97.7, 30.3), tmp_path / "x.tif",
+        landcover.fetch_impervious((-97.8, 30.2, -97.7, 30.3), tmp_path / "x.tif", source="mrlc",
                                    data=b"<ServiceException>out of range</ServiceException>")
     with pytest.raises(ValueError, match="km2"):
-        landcover.fetch_impervious((-110, 30, -90, 45), tmp_path / "x.tif", data=raw)
+        landcover.fetch_impervious((-110, 30, -90, 45), tmp_path / "x.tif", data=raw, source="mrlc")
 
 
 # ------------------------------------------------------------------ rainfall
@@ -441,7 +495,7 @@ def test_live_landcover(tmp_path):
     with rasterio.open(out) as r:
         a = r.read(1)
     assert r.nodata == 255 and (a == 0).any() and 20 < a[a != 255].mean() < 80
-    with pytest.raises(ValueError, match="conterminous US only"):
+    with pytest.raises(ValueError, match="lower 48"):
         landcover.fetch_impervious((2.30, 48.84, 2.36, 48.88), tmp_path / "p.tif")
 
 
@@ -474,10 +528,10 @@ def test_nlcd_error_pages_are_retried_and_never_taken_for_no_data(monkeypatch, t
     answers, waits = [page, page, tiff], []
     monkeypatch.setattr(landcover, "read_bytes", lambda url: answers.pop(0))
     monkeypatch.setattr(_common, "_sleep", waits.append)
-    out = landcover.fetch_impervious((-95.4, 29.7, -95.3, 29.8), tmp_path / "i.tif")
+    out = landcover.fetch_impervious((-95.4, 29.7, -95.3, 29.8), tmp_path / "i.tif", source="mrlc")
     with rasterio.open(out) as src:
         assert (src.read(1) == 20).all()
     assert waits == [5, 15]
     monkeypatch.setattr(landcover, "read_bytes", lambda url: page)
     with pytest.raises(OSError, match="error page"):
-        landcover.fetch_land_cover((-95.4, 29.7, -95.3, 29.8), tmp_path / "l.tif")
+        landcover.fetch_land_cover((-95.4, 29.7, -95.3, 29.8), tmp_path / "l.tif", source="mrlc")

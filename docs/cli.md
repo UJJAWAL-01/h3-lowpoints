@@ -256,12 +256,14 @@ Prints the size of the raster written, for example
 ## fetch-landcover
 
 ```
-h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd|nlcd-landcover|soil-groups|curve-numbers] [--year Y] [--cache-dir DIR]
+h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd|nlcd-landcover|soil-groups|curve-numbers] [--year Y] [--nlcd-source annual|mrlc] [--cache-dir DIR]
 ```
 
 `worldcover` (default): ESA WorldCover 2021 classes, 10 m, worldwide. `nlcd`: NLCD percent
-impervious surface, 30 m, lower 48 US states, for `--year` 2001, 2004, 2006, 2008, 2011, 2013,
-2016, 2019 or 2021 (default). `nlcd-landcover`: NLCD land cover classes for the same years.
+impervious surface, 30 m, lower 48 US states. `nlcd-landcover`: NLCD land cover classes. Both come
+from Annual NLCD (`--nlcd-source annual`, the default: any `--year` from 1985 to 2024, default
+2024) or from the MRLC service's older editions (`--nlcd-source mrlc`: 2001, 2004, 2006, 2008,
+2011, 2013, 2016, 2019 or 2021, default 2021).
 `soil-groups`: soil hydrologic groups from the USDA soil survey (gNATSGO), on a 30 m grid.
 `curve-numbers`: SCS curve numbers on NLCD's 30 m grid from NLCD land cover, imperviousness and
 the soil groups, with the three inputs kept beside the output. Both keep the soil survey's

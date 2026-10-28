@@ -95,9 +95,10 @@ def rain_for_runoff_mm(runoff, cn):
     return 0.2 * s + (q + np.sqrt(q * q + 4.0 * q * s)) / 2.0
 
 
-def fetch_curve_numbers(bbox, out_path, *, cache_dir, year=2021):
+def fetch_curve_numbers(bbox, out_path, *, cache_dir, year=None, source="annual"):
     """Write composite curve numbers (float32, NaN for no data) for a lon/lat box in the lower 48
-    US states: NLCD land cover and imperviousness of `year`, and gNATSGO soil groups, on NLCD's
+    US states: NLCD land cover and imperviousness of `year` (Annual NLCD 2024 by default; `source`
+    and `year` as in sources.landcover.fetch_land_cover), and gNATSGO soil groups, on NLCD's
     30 m grid. The three inputs are kept beside `out_path` (`*_land_cover.tif`,
     `*_impervious.tif`, `*_soil_groups.tif`). Returns the path."""
     from pathlib import Path
@@ -110,8 +111,8 @@ def fetch_curve_numbers(bbox, out_path, *, cache_dir, year=2021):
 
     out = Path(out_path)
     stem = out.with_suffix("")
-    lc = fetch_land_cover(bbox, f"{stem}_land_cover.tif", year=year)
-    imp = fetch_impervious(bbox, f"{stem}_impervious.tif", year=year)
+    lc = fetch_land_cover(bbox, f"{stem}_land_cover.tif", year=year, source=source)
+    imp = fetch_impervious(bbox, f"{stem}_impervious.tif", year=year, source=source)
     soil = fetch_soil_groups(None, f"{stem}_soil_groups.tif", cache_dir=cache_dir, like=lc)
     with rasterio.open(lc) as a, rasterio.open(imp) as b, rasterio.open(soil) as c:
         if not (a.shape == b.shape == c.shape and a.transform == b.transform == c.transform):

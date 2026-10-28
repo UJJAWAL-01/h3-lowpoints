@@ -3,10 +3,19 @@
     from h3lowpoints.sources.landcover import fetch_worldcover, fetch_impervious
     fetch_worldcover((-97.8, 30.2, -97.7, 30.3), "cover.tif")       # global, 10 m classes
     fetch_impervious((-97.8, 30.2, -97.7, 30.3), "imperv.tif")      # US, 30 m, percent
+    fetch_land_cover((-97.8, 30.2, -97.7, 30.3), "classes.tif")     # US, 30 m, NLCD classes
 
 - ESA WorldCover 2021 is global, 10 m, in 3 x 3 degree tiles named by their south-west corner,
   with 11 classes (WORLDCOVER_CLASSES). Licence CC BY 4.0: credit "ESA WorldCover project 2021".
-- NLCD impervious surface (MRLC) is the percentage of each 30 m pixel that is paved or built, for
+- NLCD (US Geological Survey) is the conterminous US at 30 m: land cover classes (NLCD_CLASSES)
+  and percent impervious. By default it is Annual NLCD Collection 1.1 (one map for every year
+  from 1985 to 2024; default 2024), read by ranges from cloud-optimized mosaics that Source
+  Cooperative copies unchanged from the USGS bucket (s3://usgs-landcover, which charges whoever
+  downloads). `source="mrlc"` asks the MRLC web service for the older NLCD editions (NLCD_YEARS,
+  default 2021) instead. Both are on the same Albers grid (30 m pixels whose edges sit 15 m off
+  multiples of 30 m); Annual NLCD names its datum WGS 84, the older editions NAD83, and PROJ
+  converts between the two without a shift.
+- NLCD impervious surface is the percentage of each 30 m pixel that is paved or built, for
   the conterminous US, in the Albers equal-area projection. Public domain. The service labels 0
   as "no data", but 0 means "0% impervious" (a field or a park), so that label is dropped and
   values above 100 are treated as no data instead.
@@ -20,6 +29,7 @@ import numpy as np
 import rasterio
 from rasterio.io import MemoryFile
 from rasterio.warp import transform_bounds
+from rasterio.windows import Window
 
 from . import _common
 from ._common import (bbox_area_km2, check_bbox, degree_tiles, gdal_env, mosaic, read_bytes,
@@ -43,7 +53,10 @@ NLCD_CLASSES = {
     81: "pasture and hay", 82: "cultivated crops", 90: "woody wetlands",
     95: "emergent herbaceous wetlands",
 }
-NLCD_YEARS = (2001, 2004, 2006, 2008, 2011, 2013, 2016, 2019, 2021)
+NLCD_YEARS = (2001, 2004, 2006, 2008, 2011, 2013, 2016, 2019, 2021)       # the MRLC editions
+ANNUAL_NLCD = "https://data.source.coop/kylebarron/usgs-landcover/annual-nlcd/c1/v1/cu/mosaic"
+ANNUAL_NLCD_YEARS = range(1985, 2025)
+SOURCES = {"annual": 2024, "mrlc": 2021}          # where NLCD is read from, and its default year
 IMPERVIOUS_NODATA = 255
 
 
@@ -96,6 +109,13 @@ def land_cover_request(bbox, year=2021):
     return _nlcd_request(bbox, year, "Land_Cover")
 
 
+def annual_nlcd_url(product, year=2024):
+    """The Annual NLCD CONUS mosaic of `product` ("LndCov" classes, "FctImp" percent impervious)."""
+    if year not in ANNUAL_NLCD_YEARS:
+        raise ValueError(f"Annual NLCD exists for {ANNUAL_NLCD_YEARS[0]} to {ANNUAL_NLCD_YEARS[-1]}; got {year}")
+    return f"{ANNUAL_NLCD}/Annual_NLCD_{product}_{year}_CU_C1V1.tif"
+
+
 def _nlcd_request(bbox, year, product):
     if year not in NLCD_YEARS:
         raise ValueError(f"NLCD exists for {', '.join(map(str, NLCD_YEARS))}; got {year}")
@@ -123,38 +143,46 @@ def clean_impervious(array):
     return np.where((a >= 0) & (a <= 100), a, IMPERVIOUS_NODATA).astype("uint8")
 
 
-def fetch_impervious(bbox, out_path, *, year=2021, max_area_km2=20_000.0, data=None):
+def fetch_impervious(bbox, out_path, *, year=None, source="annual", max_area_km2=20_000.0, data=None):
     """Write NLCD percent impervious (0-100, 255 = no data) for a lon/lat box to a GeoTIFF.
 
-    Conterminous US only. `data` can supply the service's GeoTIFF bytes (for tests or a cache).
-    Returns the path, in NAD83 / Conus Albers (EPSG:5070) at 30 m.
+    Conterminous US only, at 30 m in Conus Albers. `source` is "annual" (Annual NLCD, default year
+    2024) or "mrlc" (the MRLC service, default 2021); with "mrlc", `data` can supply the service's
+    GeoTIFF bytes (for tests or a cache). Returns the path.
     """
-    array, transform, crs = _nlcd(bbox, impervious_request(bbox, year), max_area_km2, data)
+    array, transform, crs = _nlcd(bbox, "FctImp", "Impervious", year, source, max_area_km2, data)
     array = clean_impervious(array)
     if not np.any(array != IMPERVIOUS_NODATA):
         raise ValueError("NLCD impervious holds no data for this box (outside the lower 48 US?)")
     return write_raster(out_path, array, transform, crs, IMPERVIOUS_NODATA, "uint8")
 
 
-def fetch_land_cover(bbox, out_path, *, year=2021, max_area_km2=20_000.0, data=None):
+def fetch_land_cover(bbox, out_path, *, year=None, source="annual", max_area_km2=20_000.0, data=None):
     """Write NLCD land cover classes (NLCD_CLASSES; 0 = no data) for a lon/lat box to a GeoTIFF.
 
-    Conterminous US only, in NAD83 / Conus Albers (EPSG:5070) at 30 m. `data` can supply the
-    service's GeoTIFF bytes (for tests or a cache). Returns the path.
+    Conterminous US only, at 30 m in Conus Albers. `source` is "annual" (Annual NLCD, default year
+    2024) or "mrlc" (the MRLC service, default 2021); with "mrlc", `data` can supply the service's
+    GeoTIFF bytes (for tests or a cache). Returns the path.
     """
-    array, transform, crs = _nlcd(bbox, land_cover_request(bbox, year), max_area_km2, data)
+    array, transform, crs = _nlcd(bbox, "LndCov", "Land_Cover", year, source, max_area_km2, data)
     array = np.where(np.isin(array, list(NLCD_CLASSES)), array, 0).astype("uint8")
     if not np.any(array):
         raise ValueError("NLCD land cover holds no data for this box (outside the lower 48 US?)")
     return write_raster(out_path, array, transform, crs, 0, "uint8")
 
 
-def _nlcd(bbox, url, max_area_km2, data):
-    """(array, transform, crs) of an NLCD GeoTIFF from the MRLC service (or from `data`)."""
+def _nlcd(bbox, annual_product, mrlc_product, year, source, max_area_km2, data):
+    """(array, transform, crs) of NLCD for a lon/lat box, from Annual NLCD or the MRLC service."""
+    if source not in SOURCES:
+        raise ValueError(f"source must be one of {', '.join(SOURCES)}; got {source!r}")
+    year = SOURCES[source] if year is None else year
     bbox = check_bbox(bbox)
     area = bbox_area_km2(bbox)
     if area > max_area_km2:
         raise ValueError(f"bbox is about {area:,.0f} km2 (limit {max_area_km2:,.0f}); fetch it in pieces")
+    if source == "annual":
+        return _annual_window(bbox, annual_nlcd_url(annual_product, year))
+    url = _nlcd_request(bbox, year, mrlc_product)
     if data is None:
         # Outside its coverage the service answers with a GeoTIFF of no data or an XML exception
         # (HTTP 404). An HTML page is its web server failing for a moment (seen in October 2026
@@ -175,6 +203,22 @@ def _nlcd(bbox, url, max_area_km2, data):
         raise ValueError(f"The NLCD service did not return a GeoTIFF (outside the lower 48 US?): {text}")
     with MemoryFile(data) as mem, mem.open() as src:
         return src.read(1), src.transform, src.crs
+
+
+def _annual_window(bbox, url):
+    """The whole pixels of an Annual NLCD mosaic that cover a lon/lat box (no resampling)."""
+    eps = 1e-6
+    with gdal_env(), rasterio.open(remote(url)) as src:
+        left, bottom, right, top = transform_bounds("EPSG:4326", src.crs, *bbox, densify_pts=21)
+        inv = ~src.transform
+        col0, row0 = inv @ (left, top)
+        col1, row1 = inv @ (right, bottom)
+        col0, row0 = int(np.floor(col0 + eps)), int(np.floor(row0 + eps))
+        col1, row1 = int(np.ceil(col1 - eps)), int(np.ceil(row1 - eps))
+        window = Window(col0, row0, col1 - col0, row1 - row0)
+        # outside the mosaic (beyond the lower 48) the window is filled with the mosaic's no data
+        array = src.read(1, window=window, boundless=True, fill_value=src.nodata)
+        return array, src.window_transform(window), src.crs
 
 
 # ------------------------------------------------------------------ water mask

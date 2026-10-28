@@ -157,9 +157,9 @@ def test_curve_numbers_from_nlcd_and_soil(tmp_path, monkeypatch):
             dst.write(np.full((4, 5), value, dtype=dtype), 1)
         return path
     monkeypatch.setattr("h3lowpoints.sources.landcover.fetch_land_cover",
-                        lambda bbox, out, year=2021: raster(out, 82, "uint8", 0))
+                        lambda bbox, out, year=None, source="annual": raster(out, 82, "uint8", 0))
     monkeypatch.setattr("h3lowpoints.sources.landcover.fetch_impervious",
-                        lambda bbox, out, year=2021: raster(out, 20, "uint8", 255))
+                        lambda bbox, out, year=None, source="annual": raster(out, 20, "uint8", 255))
     monkeypatch.setattr("h3lowpoints.sources.soils.fetch_soil_groups",
                         lambda bbox, out, cache_dir, like: raster(out, 3, "uint8", 0))
     out = runoff.fetch_curve_numbers((-95.5, 29.6, -95.4, 29.7), tmp_path / "cn.tif", cache_dir=tmp_path)

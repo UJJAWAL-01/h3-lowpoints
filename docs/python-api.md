@@ -247,10 +247,11 @@ land cover is unknown. The values are in `runoff.CN_TABLE`
 The SCS runoff equation and its exact inverse, in millimetres, and S, the most the ground can
 still hold.
 
-### `runoff.fetch_curve_numbers(bbox, out_path, *, cache_dir, year=2021)`
+### `runoff.fetch_curve_numbers(bbox, out_path, *, cache_dir, year=None, source="annual")`
 
 Curve numbers (float32, NaN for no data) for a box in the lower 48 US states, on NLCD's 30 m
-grid, from NLCD land cover and imperviousness of `year` and the gNATSGO soil groups. The three
+grid, from NLCD land cover and imperviousness of `year` (from `source`, as in `fetch_land_cover`:
+Annual NLCD 2024 by default) and the gNATSGO soil groups. The three
 inputs are kept beside the output (`*_land_cover.tif`, `*_impervious.tif`, `*_soil_groups.tif`);
 the soil survey's map-unit table is kept in `cache_dir`.
 
@@ -380,16 +381,23 @@ through a warped view of WorldCover. Returns the path.
 
 A virtual raster of the WorldCover tiles over a box of any size (missing ocean tiles read as 0).
 
-### `sources.landcover.fetch_impervious(bbox, out_path, *, year=2021, max_area_km2=20000.0, data=None)`
+### `sources.landcover.fetch_impervious(bbox, out_path, *, year=None, source="annual", max_area_km2=20000.0, data=None)`
 
-NLCD percent impervious surface (lower 48 US states, 30 m) as a GeoTIFF in EPSG:5070, values 0 to
-100 and 255 for no data. `year` is one of `sources.landcover.NLCD_YEARS`. `data` supplies the
-service's GeoTIFF bytes yourself (for tests or a cache).
+NLCD percent impervious surface (lower 48 US states, 30 m) as a GeoTIFF in Conus Albers, values 0
+to 100 and 255 for no data. `source="annual"` (default) reads Annual NLCD, `year` 1985 to 2024
+(default 2024; `sources.landcover.ANNUAL_NLCD_YEARS`); `source="mrlc"` asks the MRLC service for an
+older edition, `year` one of `sources.landcover.NLCD_YEARS` (default 2021), and there `data`
+supplies the service's GeoTIFF bytes yourself (for tests or a cache).
 
-### `sources.landcover.fetch_land_cover(bbox, out_path, *, year=2021, max_area_km2=20000.0, data=None)`
+### `sources.landcover.fetch_land_cover(bbox, out_path, *, year=None, source="annual", max_area_km2=20000.0, data=None)`
 
 NLCD land cover classes (`sources.landcover.NLCD_CLASSES`; 0 for no data) for a box, at 30 m in
-NAD83 / Conus Albers. Lower 48 US states only.
+Conus Albers, from `source` and `year` as for `fetch_impervious`. Lower 48 US states only.
+
+### `sources.landcover.annual_nlcd_url(product, year=2024)`
+
+The URL of an Annual NLCD CONUS mosaic: `product` "LndCov" (classes) or "FctImp" (percent
+impervious).
 
 ### `sources.nhd.fetch_flowlines(bbox, out_path=None, *, max_lines=200000, get=read_bytes)`
 

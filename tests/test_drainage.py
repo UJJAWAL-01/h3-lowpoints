@@ -291,7 +291,8 @@ def test_fetch_land_cover_keeps_known_classes(tmp_path):
                       transform=from_origin(0, 60, 30, 30), nodata=0) as dst:
             dst.write(arr, 1)
         buf.write(mem.read())
-    out = landcover.fetch_land_cover((-95.4, 29.7, -95.3, 29.8), tmp_path / "lc.tif", data=buf.getvalue())
+    out = landcover.fetch_land_cover((-95.4, 29.7, -95.3, 29.8), tmp_path / "lc.tif", data=buf.getvalue(),
+                                   source="mrlc")
     with rasterio.open(out) as src:
         assert src.read(1).tolist() == [[0, 11, 21], [82, 0, 95]] and src.nodata == 0
     assert "NLCD_2021_Land_Cover_L48" in landcover.land_cover_request((-95.4, 29.7, -95.3, 29.8))

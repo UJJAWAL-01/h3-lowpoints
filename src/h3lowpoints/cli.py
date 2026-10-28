@@ -72,7 +72,10 @@ def build_parser():
                          "impervious; nlcd-landcover: US 30 m land cover classes; soil-groups: US "
                          "soil hydrologic groups (gNATSGO); curve-numbers: US 30 m SCS curve "
                          "numbers from NLCD and the soil groups")
-    lc.add_argument("--year", type=int, default=2021, help="NLCD year (default 2021)")
+    lc.add_argument("--year", type=int, help="NLCD year (default 2024 from Annual NLCD, 2021 from MRLC)")
+    lc.add_argument("--nlcd-source", choices=["annual", "mrlc"], default="annual",
+                    help="annual: Annual NLCD 1985-2024 (default); mrlc: the older NLCD editions "
+                         "from the MRLC web service (2001-2021)")
     lc.add_argument("--cache-dir", help="soil-groups and curve-numbers: keep the soil table here "
                                         "(default: the output's folder)")
 
@@ -236,9 +239,9 @@ def _landcover(args):
     if args.dataset == "worldcover":
         out = landcover.fetch_worldcover(bbox, args.out)
     elif args.dataset == "nlcd":
-        out = landcover.fetch_impervious(bbox, args.out, year=args.year)
+        out = landcover.fetch_impervious(bbox, args.out, year=args.year, source=args.nlcd_source)
     elif args.dataset == "nlcd-landcover":
-        out = landcover.fetch_land_cover(bbox, args.out, year=args.year)
+        out = landcover.fetch_land_cover(bbox, args.out, year=args.year, source=args.nlcd_source)
     elif args.dataset == "soil-groups":
         from .sources.soils import fetch_soil_groups
 
@@ -247,7 +250,7 @@ def _landcover(args):
         from .runoff import fetch_curve_numbers
 
         out = fetch_curve_numbers(bbox, args.out, cache_dir=args.cache_dir or Path(args.out).parent,
-                                  year=args.year)
+                                  year=args.year, source=args.nlcd_source)
     with rasterio.open(out) as src:
         print(f"{src.width} x {src.height} pixels written to {out}")
     return 0
