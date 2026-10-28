@@ -222,8 +222,8 @@ A study fixed in advance compared the layer with 311 flood reports in New York C
 
 - **How often a depression fills carries signal.** Reports gathered more on the ground of
   depressions that fill in a 2-year storm than on that of depressions needing a rarer storm:
-  1.27 times as much in New York (95% interval 1.03 to 1.63), 9.7 times (3.6 to 42.5) and
-  2.07 times (0.97 to 5.77) in the two Houston floods. Supported in two studies of three by the
+  1.28 times as much in New York (95% interval 1.04 to 1.64), 9.9 times (3.7 to 44.0) and
+  2.12 times (0.99 to 5.91) in the two Houston floods. Supported in two studies of three by the
   rule set beforehand; the third points the same way.
 - **Landlocked depressions did not gather more reports; drained ones did.** Reports were 3 to 4
   times more concentrated near drained depressions in both Houston floods (ratios 0.29 and 0.26,

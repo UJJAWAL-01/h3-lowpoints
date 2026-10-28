@@ -39,10 +39,10 @@ Atlas 14 (counting overflow from upstream):
 | Area | Median curve number | Fill in a 2-year storm | 10-year | 100-year | Not even the 1000-year | Drained |
 |---|---|---|---|---|---|---|
 | Houston | 86 | 75% | 90% | 97% | 0.8% | 36% |
-| North Dakota potholes | 76 | 10% | 26% | 57% | 21% | 6% |
-| California Central Valley | 78 | 36% | 51% | 67% | 22% | 50% |
+| North Dakota potholes | 76 | 11% | 26% | 57% | 21% | 6% |
+| California Central Valley | 79 | 36% | 50% | 67% | 22% | 50% |
 
-> **Preview, 26 October 2026: not a flood map.** Runoff comes from SCS curve numbers (NLCD land
+> **Preview, 28 October 2026: not a flood map.** Runoff comes from SCS curve numbers (Annual NLCD 2024 land
 > cover and paving, USDA soil groups) with average soil moisture before the storm; snowmelt and
 > frozen ground, which fill the prairie potholes most springs, are not modelled. Storm drains and
 > pipes are not mapped, so some city depressions shown as landlocked are drained. See

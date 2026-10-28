@@ -344,12 +344,20 @@ Each is measured by the lift ratio at 0 rings ([Comparing classes](#comparing-cl
 **inconclusive** otherwise. All results are reported here, whatever they showed.
 
 **Layer:** the national susceptibility layer of dataset version 0.3 (`fills_in_years`,
-`landlocked`; highways measured in every state, `verify` clean). **Settings:** the defaults
+`landlocked`; highways measured in every state, `verify` clean), as published: curve numbers from
+Annual NLCD 2024 land cover and the soil groups read exactly (see the second deviation). **Settings:** the defaults
 (0 to 5 rings, blocks at resolution 6, 1,000 samples, seed 0), and the same with blocks at
-resolution 7 as a sensitivity check. **One deviation** from the written plan, made before any real
-report was run: ground is assigned to depressions exactly from the `depression_cells` table, not
-by the approximation first planned, after a test with random addresses as stand-in reports showed
-the approximation left 43% of the depressed cells near the points unclassified.
+resolution 7 as a sensitivity check. **Two deviations** from the written plan, both recorded in
+the plan itself. First, made before any real report was run: ground is assigned to depressions
+exactly from the `depression_cells` table, not by the approximation first planned, after a test
+with random addresses as stand-in reports showed the approximation left 43% of the depressed
+cells near the points unclassified. Second, made *after* the results on a first version of the
+layer had been seen: a pre-release audit found that the soil groups had been read at an offset
+that depended on each region's box (3% of pixels in a test region took a neighbouring soil), so
+the national curve numbers were computed again with the exact reader; NLCD 2021's server was down
+at the time, so the recomputation used the newer Annual NLCD 2024 (same classes and grid). The study was then run again,
+unchanged, on the corrected layer, which is the one published. Both sets of results are given
+below; every verdict is the same.
 
 **Data** (all public, downloaded 27 October 2026):
 
@@ -361,33 +369,38 @@ the approximation left 43% of the depressed cells near the points unclassified.
 
 The layer's own 24-hour storm depths (NOAA Atlas 14): New York about 86, 134 and 212 mm for
 the 2-, 10- and 100-year storms; Houston about 129, 219 and 425 mm. Of the depressions whose
-lowest point lies in each area (1,777 in New York, 3,736 in Houston), 56% and 80% fill in the
+lowest point lies in each area (1,777 in New York, 3,736 in Houston), 56% and 79% fill in the
 2-year storm, and 20% and 33% are drained.
 
 **Results** (lift ratio at 0 rings, 95% interval; blocks at resolution 7 in brackets):
 
 | Study | H1: 2-year over rarer or never | H2: landlocked over drained |
 |---|---|---|
-| New York City | **1.27** (1.03 to 1.63), supported [0.97 to 1.64] | **0.64** (0.46 to 1.02), inconclusive [0.43 to 1.03] |
-| Houston, 2015 | **9.7** (3.6 to 42.5), supported [3.9 to 44.8] | **0.29** (0.12 to 0.78), contradicted [0.15 to 0.65] |
-| Houston, 2016 | **2.07** (0.97 to 5.77), inconclusive [1.06 to 4.99] | **0.26** (0.14 to 0.52), contradicted [0.13 to 0.49] |
+| New York City | **1.28** (1.04 to 1.64), supported [0.98 to 1.65] | **0.64** (0.46 to 1.02), inconclusive [0.43 to 1.03] |
+| Houston, 2015 | **9.9** (3.7 to 44.0), supported [4.0 to 45.9] | **0.29** (0.12 to 0.78), contradicted [0.15 to 0.65] |
+| Houston, 2016 | **2.12** (0.99 to 5.91), inconclusive [1.08 to 5.11] | **0.26** (0.14 to 0.52), contradicted [0.13 to 0.49] |
+
+On the first version of the layer (before the second deviation) H1 gave 1.27 (1.03 to 1.63),
+9.7 (3.6 to 42.5) and 2.07 (0.97 to 5.77), and H2 the same ratios and intervals as above: the
+landlocked and drained flags do not depend on curve numbers. The corrected curve numbers gave
+6.5% of depressions nationally a different `fills_in_years`.
 
 The counts behind them (0 rings: reports and addresses in depressed cells of each class, and
 each class's lift over addresses in general):
 
 | Study | 2-year | rarer or never | landlocked | drained |
 |---|---|---|---|---|
-| New York City | 2,072 / 55,233, lift 1.71 | 1,463 / 49,392, lift 1.35 | 3,008 / 94,010, lift 1.46 | 527 / 10,615, lift 2.26 |
-| Houston, 2015 | 202 / 57,921, lift 1.98 | 4 / 11,110, lift 0.20 | 70 / 44,250, lift 0.90 | 136 / 24,781, lift 3.11 |
-| Houston, 2016 | 140 / 57,921, lift 1.59 | 13 / 11,110, lift 0.77 | 48 / 44,250, lift 0.71 | 105 / 24,781, lift 2.78 |
+| New York City | 2,054 / 54,469, lift 1.72 | 1,481 / 50,156, lift 1.35 | 3,008 / 94,010, lift 1.46 | 527 / 10,615, lift 2.26 |
+| Houston, 2015 | 202 / 57,691, lift 1.98 | 4 / 11,340, lift 0.20 | 70 / 44,250, lift 0.90 | 136 / 24,781, lift 3.11 |
+| Houston, 2016 | 140 / 57,691, lift 1.59 | 13 / 11,340, lift 0.75 | 48 / 44,250, lift 0.71 | 105 / 24,781, lift 2.78 |
 
 **H1: supported in two of three studies, and the third points the same way.** In every study,
 reports gather more on ground of depressions that fill in a 2-year storm than on ground of those
-that need a rarer one. In New York the difference is modest (1.27) and its interval only just
+that need a rarer one. In New York the difference is modest (1.28) and its interval only just
 clears 1 (with smaller blocks it does not). In Houston, ground of rarely filling depressions
 received almost no reports (4 and 13), so the ratios are large but imprecise. The step is
-between the 2-year class and the rest: in New York the graded classes give lifts of 1.71 (2-year),
-1.29 (10-year), 1.44 (100-year) and 1.30 (rarer or never), not a steady decline. The two Houston
+between the 2-year class and the rest: in New York the graded classes give lifts of 1.72 (2-year),
+1.28 (10-year), 1.40 (100-year) and 1.36 (rarer or never), not a steady decline. The two Houston
 studies share their addresses and the same depressions, so they are not independent tests.
 
 **H2: contradicted in both Houston floods, and New York leans the same way.** Reports were three
