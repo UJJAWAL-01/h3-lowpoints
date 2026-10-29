@@ -244,7 +244,7 @@ per storm: one row per depression, following one storm in time steps. The method
 | `runoff_mm` | float | mm | Runoff of its own catchment over the whole storm, as a depth over the catchment. |
 | `inflow_m3` | float | m³ | All water reaching it: its own runoff plus overflow from upstream. |
 | `peak_volume_m3` | float | m³ | The most water it held at any time. |
-| `peak_depth_m` | float | m | Water depth at its lowest point at that time (from the bowl shape, see [Storms in time](storms.md#the-shape-of-a-depression)). |
+| `peak_depth_m` | float | m | Water depth at its lowest point at that time (from its measured levels when the result has them, see [Storms in time](storms.md#the-shape-of-a-depression)). |
 | `peak_fill` | float | 0 to 1 | `peak_volume_m3` over its volume; 1: it filled. |
 | `time_to_fill_h` | float | h | Hours from the start of the rain until it was full; NaN if it never filled. |
 | `overflow_m3` | float | m³ | Water it passed on over its rim (to `spill_to`, or off the map). |

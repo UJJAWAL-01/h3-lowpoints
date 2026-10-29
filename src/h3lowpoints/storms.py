@@ -27,11 +27,14 @@ matters in three ways, each a separate term:
   away up to the rate of a chosen Atlas 14 storm from drained (paved enough) catchments: an
   assumption, since no national map of storm drains exists.
 
-Each depression is a bowl whose volume grows with depth as V(h) = V (h/H)^k, k = A H / V, from
-its full volume V, maximum depth H and area A (exact when full; a power law, as used for natural
-prairie depressions by Hayashi and van der Kamp, 2000). Runoff reaches it in the step it falls,
-overflow passes down the spill links (`spill_to`) in the same step, it starts empty and nothing
-evaporates. See docs/storms.md for the method, the sources of every number, and the limits.
+A depression's water depth and wet area at any volume come from its measured levels when the
+result has them (details=True: the water held and the area flooded 0.1, 0.25, 0.5, 1, 2 and 5 m
+below full), with a bowl through each pair of neighbouring levels; below the lowest level, and
+for results without levels, from a bowl whose volume grows with depth as V(h) = V1 (h/h1)^k,
+k = A1 h1 / V1, through the lowest known level (h1, V1, A1), or the full one (a power law, as
+used for natural prairie depressions by Hayashi and van der Kamp, 2000). Runoff reaches it in the
+step it falls, overflow passes down the spill links (`spill_to`) in the same step, it starts
+empty and nothing evaporates. See docs/storms.md for the method, the sources of every number, and the limits.
 """
 import numpy as np
 import pandas as pd
@@ -50,6 +53,85 @@ STORM_COLUMNS = ["id", "storm_mm", "storm_hours", "storm_years", "runoff_mm", "i
 PONDING_DEPTH_M = 0.1          # a convention for "water standing", not calibrated
 AFTER_HOURS = 72.0             # how long the run continues after the rain stops
 STEP_MINUTES = 5.0
+# the measured levels of a result with details: name in the column, metres below full
+LEVELS = (("10cm", 0.1), ("25cm", 0.25), ("50cm", 0.5), ("1m", 1.0), ("2m", 2.0), ("5m", 5.0))
+LEVEL_COLUMNS = [f"{kind}_{name}_down_{unit}" for name, _ in LEVELS
+                 for kind, unit in (("volume", "m3"), ("area", "m2"))]
+
+
+def shape_table(volume, area, max_depth, levels=None):
+    """The known points (volume, depth at the lowest point, wet area) of each depression, from
+    the lowest up, ending with the full one: arrays of shape (n, 7) and the number of points.
+
+    levels  None, or {name: (volume_m3, area_m2)} at the LEVELS below full; a level is used where
+            the depression is deeper than it and holds water there, and where it keeps volume,
+            depth and area rising. Unused slots repeat the full point.
+    """
+    volume, area, max_depth = (np.asarray(v, dtype=float) for v in (volume, area, max_depth))
+    n, m = len(volume), len(LEVELS) + 1
+    vols, depths, areas = (np.repeat(v[:, None], m, axis=1) for v in (volume, max_depth, area))
+    count = np.ones(n, dtype=np.int64)
+    if levels:
+        cand = []
+        for name, below in reversed(LEVELS):                     # deepest level first
+            if name in levels:
+                v, a = (np.asarray(x, dtype=float) for x in levels[name])
+                cand.append((v, max_depth - below, a))
+        cand.append((volume, max_depth, area))
+        cv = np.stack([c[0] for c in cand], axis=1)
+        ch = np.stack([c[1] for c in cand], axis=1)
+        ca = np.stack([c[2] for c in cand], axis=1)
+        for i in range(n):
+            pts, last = [], (0.0, 0.0, 0.0)
+            for j in range(cv.shape[1]):
+                v, h, a = cv[i, j], ch[i, j], ca[i, j]
+                full = j == cv.shape[1] - 1
+                if full or (h > last[1] and v > last[0] and a >= last[2] and v < volume[i]
+                            and h < max_depth[i] and np.isfinite(v + h + a) and a > 0):
+                    if full and pts and not (v > last[0] and h > last[1]):
+                        pts.pop()                                # keep the full point last
+                    pts.append((v, h, a))
+                    last = pts[-1]
+            for j, (v, h, a) in enumerate(pts):
+                vols[i, j], depths[i, j], areas[i, j] = v, h, a
+            count[i] = len(pts)
+    return vols, depths, areas, count
+
+
+@njit(cache=True)
+def _stage(s, vols, depths, areas, count):
+    """(depth at the lowest point, wet area) of one depression holding `s` m3."""
+    if s <= 0.0:
+        return 0.0, 0.0
+    last = count - 1
+    if s >= vols[last]:
+        return depths[last], areas[last]
+    if s < vols[0]:                                     # below the lowest known point: a bowl
+        k = max(areas[0] * depths[0] / vols[0], 1.0)
+        r = s / vols[0]
+        return depths[0] * r ** (1.0 / k), areas[0] * r ** ((k - 1.0) / k)
+    j = 1
+    while vols[j] < s:
+        j += 1
+    # between two known points, a bowl through both: V = Va (h / ha)^k, and area against volume
+    # as a power law too
+    r = s / vols[j - 1]
+    k = np.log(vols[j] / vols[j - 1]) / np.log(depths[j] / depths[j - 1])
+    if areas[j - 1] > 0.0 and areas[j] > areas[j - 1]:
+        area = areas[j - 1] * r ** (np.log(areas[j] / areas[j - 1]) / np.log(vols[j] / vols[j - 1]))
+    else:
+        area = areas[j - 1]
+    return depths[j - 1] * r ** (1.0 / k), area
+
+
+@njit(cache=True)
+def stage_of(store, vols, depths, areas, count):
+    """(depth, wet area) of each depression holding `store` m3 (shape table of `shape_table`)."""
+    n = len(store)
+    d, a = np.zeros(n), np.zeros(n)
+    for i in range(n):
+        d[i], a[i] = _stage(store[i], vols[i], depths[i], areas[i], count[i])
+    return d, a
 
 
 @njit(cache=True)
@@ -77,8 +159,8 @@ def green_ampt_step(F, ks, sd, hours):
 
 @njit(cache=True)
 def _simulate(order, target, unknown, method, cum, pattern_of, depth, n_rain, n_steps, dt,
-              catch_area, retention, impervious, ks, sd, volume, area, max_depth, k, seep_rate,
-              drain_rate, ponding_depth):
+              catch_area, retention, impervious, ks, sd, volume, vols, depths, areas, count,
+              seep_rate, drain_rate, ponding_depth):
     n = len(order)
     store, F, rain_so_far, runoff_so_far = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
     spill_in = np.zeros(n)
@@ -112,7 +194,7 @@ def _simulate(order, target, unknown, method, cum, pattern_of, depth, n_rain, n_
             inflow[i] += water
             s = store[i] + water
             if s > 0.0:
-                wet = area[i] * min(s / volume[i], 1.0) ** ((k[i] - 1.0) / k[i])
+                wet = _stage(min(s, volume[i]), vols[i], depths[i], areas[i], count[i])[1]
                 lost = min(seep_rate[i] * wet * dt, s)
                 seeped[i] += lost
                 s -= lost
@@ -134,7 +216,7 @@ def _simulate(order, target, unknown, method, cum, pattern_of, depth, n_rain, n_
             store[i] = s
             if s > peak[i]:
                 peak[i] = s
-            if s > 0.0 and max_depth[i] * (s / volume[i]) ** (1.0 / k[i]) >= ponding_depth:
+            if s > 0.0 and _stage(s, vols[i], depths[i], areas[i], count[i])[0] >= ponding_depth:
                 ponded[i] += 1
     return own, inflow, peak, fill_time, seeped, drained, over, store, ponded, leaving
 
@@ -153,7 +235,7 @@ def pattern_steps(times, cumulative, n_steps):
 def simulate(spill_to_index, depth_mm, cum, *, catch_area, volume, area, max_depth, dt,
              n_after=0, method="curve-number", curve_number=None, impervious=None, ksat_mm_h=None,
              suction_deficit_mm=None, seepage_mm_h=None, drain_mm_h=None,
-             ponding_depth_m=PONDING_DEPTH_M, pattern_of=None):
+             ponding_depth_m=PONDING_DEPTH_M, pattern_of=None, levels=None):
     """The time-stepping model on arrays, one value per depression (see the module text).
 
     spill_to_index  position of the depression each spills into, -1 for none
@@ -167,6 +249,7 @@ def simulate(spill_to_index, depth_mm, cum, *, catch_area, volume, area, max_dep
                     the conductivity and suction x water deficit of the rest
     seepage_mm_h    conductivity at the floor (mm/h, already reduced for paving), or None
     drain_mm_h      rain rate drains carry away from the whole catchment, mm/h, or None
+    levels          measured levels, {name: (volume_m3, area_m2)} (see `shape_table`), or None
     NaN in an input a method needs makes that depression, and every one downstream, unknown.
 
     Returns a dict of arrays (inflow_m3 ... ponding_hours as in STORM_COLUMNS, NaN where
@@ -197,24 +280,23 @@ def simulate(spill_to_index, depth_mm, cum, *, catch_area, volume, area, max_dep
         raise ValueError(f"method must be one of {METHODS}, got {method!r}")
     seep = arr(seepage_mm_h) / 1000.0 / 3600.0                           # m/s
     drain = arr(drain_mm_h) / 1000.0 / 3600.0 * catch_area               # m3/s
-    with np.errstate(divide="ignore", invalid="ignore"):
-        k = np.where(volume > 0, area * max_depth / volume, 1.0)
     bad = np.zeros(n, bool)
     for v in need + [depth, seep, drain, catch_area, volume, area, max_depth]:
         bad |= np.isnan(v)
     bad |= ~(volume > 0) | ~(area > 0) | ~(max_depth > 0) | np.isnan(cum[pattern_of]).any(axis=1)
     unknown = _downstream(order, target, bad)
-    k = np.where(unknown, 1.0, np.maximum(k, 1.0))
+    vols, depths, areas, count = shape_table(np.where(unknown, 1.0, volume), np.where(unknown, 1.0, area),
+                                             np.where(unknown, 1.0, max_depth), levels)
     safe = [np.where(unknown, 0.0, v) for v in (depth, retention, imp, ks, sd, seep, drain)]
     own, inflow, peak, fill_time, seeped, drained, over, store, ponded, leaving = _simulate(
         order, target, unknown, 0 if method == "curve-number" else 1, cum, pattern_of, safe[0],
         n_rain, n_rain + int(n_after), float(dt), catch_area, safe[1], safe[2], safe[3], safe[4],
-        np.where(unknown, 1.0, volume), np.where(unknown, 1.0, area),
-        np.where(unknown, 1.0, max_depth), k, safe[5], safe[6], float(ponding_depth_m))
+        np.where(unknown, 1.0, volume), vols, depths, areas, count, safe[5], safe[6],
+        float(ponding_depth_m))
+    end_depth = stage_of(store, vols, depths, areas, count)[0]
     with np.errstate(divide="ignore", invalid="ignore"):
-        end_depth = max_depth * (store / volume) ** (1.0 / k)
         out = {"own_m3": own, "inflow_m3": inflow, "peak_volume_m3": peak,
-               "peak_depth_m": max_depth * (peak / volume) ** (1.0 / k),
+               "peak_depth_m": stage_of(peak, vols, depths, areas, count)[0],
                "peak_fill": peak / volume,
                "time_to_fill_h": fill_time * dt / 3600.0,
                "overflow_m3": over, "seepage_m3": seeped, "drained_m3": drained,
@@ -314,8 +396,10 @@ def storm_response(result, *, hours, years=None, depth_mm=None, method="curve-nu
         raise ValueError("drains need impervious")
     if not hours > 0 or not step_minutes > 0 or after_hours < 0:
         raise ValueError("hours and step_minutes must be positive, after_hours not negative")
+    with_levels = set(LEVEL_COLUMNS) <= _depression_columns(result)
     deps, catchment_chunks, meta = _tables(result, rows, extra=["max_depth_m", "area_m2", "lat", "lon",
-                                                                "h3_lowpoint"])
+                                                                "h3_lowpoint"]
+                                           + (LEVEL_COLUMNS if with_levels else []))
     res = meta["params"]["res"]
     ids = deps["id"].to_numpy(dtype=np.int64)
     n = len(ids)
@@ -413,10 +497,12 @@ def storm_response(result, *, hours, years=None, depth_mm=None, method="curve-nu
             cum, pattern_text = pattern_steps(*pattern, n_rain), "given"
         pattern_of = None
     target = spill_order(ids, deps["spill_to"].to_numpy())[1]
+    levels = ({name: (deps[f"volume_{name}_down_m3"].to_numpy(float), deps[f"area_{name}_down_m2"].to_numpy(float))
+               for name, _ in LEVELS} if with_levels else None)
     sim, leaving = simulate(target, depth, cum, catch_area=catch, volume=deps["volume_m3"].to_numpy(float),
                             area=deps["area_m2"].to_numpy(float), max_depth=deps["max_depth_m"].to_numpy(float),
                             dt=dt, n_after=n_after, method=method, seepage_mm_h=seep, drain_mm_h=drain,
-                            ponding_depth_m=ponding_depth_m, pattern_of=pattern_of, **kwargs)
+                            ponding_depth_m=ponding_depth_m, pattern_of=pattern_of, levels=levels, **kwargs)
     with np.errstate(invalid="ignore", divide="ignore"):
         runoff = 1000.0 * sim["own_m3"] / catch
     storm_years = _years(storms, depth, hours, lat, lon) if rarity else np.full(n, np.nan)
@@ -429,11 +515,31 @@ def storm_response(result, *, hours, years=None, depth_mm=None, method="curve-nu
         "storm": f"NOAA Atlas 14, {years}-year" if years is not None else
                  ("given per point" if callable(depth_mm) else f"uniform {float(depth_mm):g} mm"),
         "pattern": pattern_text, "step_minutes": dt / 60.0, "after_hours": n_after * dt / 3600.0,
+        "shape": ("measured levels (0.1 to 5 m below full), a bowl through each pair; a bowl below the "
+                  "lowest" if with_levels else "a bowl through the full point (no measured levels)"),
         "seepage": bool(seepage), "drains": drains, "ponding_depth_m": ponding_depth_m,
         "min_coverage": min_coverage, "water_left_table_m3": float(leaving),
         "inputs": {name: desc for name, (_, desc) in sources.items()},
         "package_version": _package_version()}
     return table
+
+
+def _depression_columns(result):
+    """Names of the columns of a result's depression table, without reading it."""
+    from pathlib import Path
+
+    from .pipeline import Result
+
+    if isinstance(result, Result) and result.depressions is not None:
+        return set(result.depressions.columns)
+    path = table_path(Path(result.path if isinstance(result, Result) else result), "depressions")
+    if path is None:
+        return set()
+    if path.suffix == ".parquet":
+        import pyarrow.parquet as pq
+
+        return set(pq.read_schema(path).names)
+    return set(pd.read_csv(path, nrows=0).columns)
 
 
 def _nearest(hours):

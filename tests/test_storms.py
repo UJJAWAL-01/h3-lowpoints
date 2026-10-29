@@ -416,3 +416,65 @@ def test_clip_keeps_storm_rows_of_kept_depressions(result, tmp_path):  # noqa: F
     assert set(read_table(out, "storm_s")["id"]) == set(kept)
     assert read_meta(out)["storms"]["s"]["clipped_after"] is True
     assert check_saved(out) == []
+
+
+# ------------------------------------------------------------ the shape of a depression
+
+def test_shape_without_levels_is_the_bowl_through_the_full_point():
+    from h3lowpoints.storms import shape_table, stage_of
+    v, a, h = np.array([300.0]), np.array([400.0]), np.array([2.0])      # k = 400 * 2 / 300
+    table = shape_table(v, a, h)
+    assert table[3].tolist() == [1]
+    k = 400 * 2 / 300
+    for s in (1.0, 50.0, 299.0):
+        d, w = stage_of(np.array([s]), *table)
+        assert d[0] == pytest.approx(2.0 * (s / 300) ** (1 / k))
+        assert w[0] == pytest.approx(400.0 * (s / 300) ** ((k - 1) / k))
+    assert stage_of(np.array([300.0, 0.0]), *table)[0].tolist() == [2.0, 0.0]
+
+
+def test_measured_levels_are_followed_exactly_and_bowl_shaped_between():
+    from h3lowpoints.storms import shape_table, stage_of
+    # a wide shallow pan (0.5 m, 1000 m2) over a narrow pit (2 m deep below it, 10 m2): full depth
+    # 2.5 m; a single bowl gets the pan badly wrong
+    full_v = 10 * 2.0 + 1000 * 0.5
+    levels = {"10cm": (10 * 2.0 + 1000 * 0.4, 1000.0), "25cm": (10 * 2.0 + 1000 * 0.25, 1000.0),
+              "50cm": (10 * 2.0, 10.0), "1m": (10 * 1.5, 10.0), "2m": (10 * 0.5, 10.0), "5m": (0.0, 0.0)}
+    table = shape_table([full_v], [1000.0], [2.5], {k: (np.array([v]), np.array([a])) for k, (v, a) in levels.items()})
+    assert table[3].tolist() == [6]                             # 5 m below full is not inside
+    for name, (v, _) in levels.items():
+        if v > 0:
+            below = dict(__import__("h3lowpoints.storms", fromlist=["LEVELS"]).LEVELS)[name]
+            assert stage_of(np.array([v]), *table)[0][0] == pytest.approx(2.5 - below)
+    mid = stage_of(np.array([10 * 2.0 + 1000 * 0.1]), *table)[0][0]   # between 50 cm and 25 cm below
+    assert 2.0 < mid < 2.25
+    bowl = stage_of(np.array([10 * 2.0 + 1000 * 0.1]), *shape_table([full_v], [1000.0], [2.5]))[0][0]
+    assert abs(bowl - 2.1) > abs(mid - 2.1)                      # the measured levels are closer
+
+
+def test_levels_that_break_the_order_are_left_out():
+    from h3lowpoints.storms import shape_table
+    lv = {"10cm": (np.array([150.0]), np.array([90.0])), "25cm": (np.array([160.0]), np.array([80.0])),
+          "50cm": (np.array([np.nan]), np.array([np.nan]))}
+    vols, depths, areas, count = shape_table([200.0], [100.0], [1.0], lv)
+    # 25 cm below full holds more than 10 cm below; read from the deepest up, the 10 cm level is
+    # the one out of order and is dropped; NaN dropped
+    assert count[0] == 2 and vols[0, :2].tolist() == [160.0, 200.0]
+    assert (np.diff(depths[0, :2]) > 0).all() and (np.diff(areas[0, :2]) >= 0).all()
+
+
+def test_storm_uses_the_measured_levels_of_a_result_with_details():
+    from h3lowpoints import analyze_array
+    from test_susceptibility import UTM
+    from test_tiling import smooth
+    res = analyze_array(smooth(3, (120, 120), sigma=3.0, trend=2.0), UTM[1], UTM[0], res=11, min_depth=0.05,
+                        catchments=True, details=True)
+    t = storm_response(res, depth_mm=200.0, hours=6, curve_number=85.0, pattern="uniform", rarity=False)
+    assert t.attrs["settings"]["shape"].startswith("measured levels")
+    k = t[t["inflow_m3"].notna()]
+    gap = k["inflow_m3"] - k["overflow_m3"] - k["seepage_m3"] - k["drained_m3"] - k["water_left_m3"]
+    assert np.abs(gap).max() <= 1e-9 * k["inflow_m3"].max()
+    deps = res.depressions.set_index("id").loc[k["id"]]
+    assert (k["peak_depth_m"].to_numpy() <= deps["max_depth_m"].to_numpy() + 1e-9).all()
+    full = k["peak_fill"].to_numpy() >= 1 - 1e-12
+    assert np.allclose(k["peak_depth_m"].to_numpy()[full], deps["max_depth_m"].to_numpy()[full])

@@ -109,12 +109,22 @@ and `ψΔθ` is the product of the means (a simplification).
 
 ### The shape of a depression
 
-The model needs the water depth and wet area at any volume, but a depression is described by its
-full volume `V`, maximum depth `H` and area `A`. It is taken as a bowl whose volume grows with
-depth as `V(h) = V (h/H)^k`, with `k = A H / V` so that the wet area is exactly `A` when full.
-Power laws like this are used for natural prairie depressions (Hayashi and van der Kamp, 2000,
-Journal of Hydrology 237); for urban depressions they are an assumption. With `details=True` a
-result holds the measured volume at 0.1 to 5 m below full, which allows a check (below).
+The model needs the water depth and wet area at any volume. A result computed with
+`details=True` (as the national layer is) holds, for every depression, the water it holds and
+the area under water at six levels, 0.1, 0.25, 0.5, 1, 2 and 5 m below full, measured on the
+elevation data. The model uses these points, and between two neighbouring ones a bowl through
+both (`V = Va (h/ha)^k`, with `k` set by the two points; the wet area also a power law of the
+volume). Below the lowest level, and for a result without levels, it uses a bowl
+`V(h) = V1 (h/h1)^k` with `k = A1 h1 / V1` through the lowest known point, which for a result
+without levels is the full one (volume `V`, depth `H`, area `A`). Power laws like this are used
+for natural prairie depressions (Hayashi and van der Kamp, 2000, Journal of Hydrology 237); for
+urban depressions they are an assumption. Levels that break the order (more water at a lower
+level) are left out.
+
+The rule was chosen on the Houston test box and checked on the two others by leaving each
+measured level out in turn and predicting its depth from the rest (see the examples below). A
+bowl through the full point alone, the first version, was off by a median of 9 cm at 1 m below
+full and 19 cm at 2 m in Houston; with the levels, 3 cm and 5 cm.
 
 ### Steps
 
@@ -156,7 +166,66 @@ depressions hold water far longer than any run. See [Outputs](outputs.md#storm-t
 
 ## Examples
 
-To be filled from the example runs (phase 5.1).
+The three 1-degree test boxes of the [example maps](example-maps.md) (Houston; North Dakota's
+prairie potholes; the Central Valley's canals), at 30 m with catchments and levels, with every
+input the national layer uses (curve numbers from Annual NLCD 2024 and the soil survey, the soil
+rasters above). Each storm is NOAA Atlas 14's 100-year storm of that length at each catchment,
+spread by NOAA's median curve for the region; seepage on, no drains, average ground. Run on
+29 October 2026 with the script `phase5/tools/example51.py` of the project's research folder;
+nothing was tuned.
+
+**The model agrees with the index.** With uniform rain, no seepage and no drains, the water each
+depression receives equals that of the susceptibility index for the 100-year 24-hour storm in
+all 45,368 depressions of the three boxes (largest relative difference 1e-13), and the two agree
+on every depression that fills.
+
+**Share of depressions that fill** (method A curve numbers / method B Green-Ampt):
+
+| Storm | Houston (15,984) | Potholes (21,827) | Central Valley (7,557) |
+|---|---|---|---|
+| 100-year, 1 hour | 73% / 76% | 17% / 23% | 16% / 24% |
+| 100-year, 6 hours | 92% / 87% | 33% / 7% | 44% / 23% |
+| 100-year, 24 hours | 94% / 85% | 32% / 4% | 57% / 20% |
+
+The median storm is 121, 284 and 425 mm in Houston, 70, 110 and 137 mm in the potholes, and 26,
+50 and 87 mm in the Central Valley. Depressions that fill do so after a median of 0.3, 1.3 and
+3.3 hours in Houston (method A).
+
+**The two runoff methods disagree most where soils take in water fast.** In the potholes the
+survey gives the catchments a median conductivity of 28 mm/h (loams). The 6 and 24-hour storms
+fall on average more slowly than that, so by Green-Ampt almost all of it soaks in (median runoff
+1.2 and 0.2 mm, against 50 and 71 mm by curve numbers), and only the 1-hour burst runs off. The
+curve numbers come from measured runoff of whole watersheds; Green-Ampt from soil conductivity
+measured or estimated on soil samples. Which of the two describes these places better is not
+known yet: that is a question for real storms and observations (phase 5.4).
+
+**Without drains, water stays.** In Houston about two thirds of the depressions still hold at
+least 0.1 m of water 72 hours after any of these storms, because only seepage empties them and
+the clays seep slowly (seepage takes about 1% of the water or less). In the potholes 10% to 14%, in the Central
+Valley 20% to 35%. City streets have inlets; these numbers describe ground drained by its soil
+alone (see [storm drains](#storm-drains-an-assumption-you-set)).
+
+**Soil data.** The survey had no usable data for 7.3% (Houston), 9.3% (potholes) and 10.6%
+(Central Valley) of the surveyed pixels, which took the fallback values.
+
+**The shape rule, checked.** Leaving each measured level out in turn and predicting its depth from
+the others (the rule was chosen on Houston; the potholes and the Central Valley are the check):
+
+| Level below full | Houston: levels / bowl | Potholes: levels / bowl | Central Valley: levels / bowl |
+|---|---|---|---|
+| 0.1 m | 0.5 / 0.4 cm | 0.4 / 0.3 cm | 0.4 / 0.3 cm |
+| 0.25 m | 1.0 / 1.6 cm | 1.0 / 1.2 cm | 0.9 / 1.3 cm |
+| 0.5 m | 1.7 / 3.7 cm | 1.5 / 2.7 cm | 1.5 / 3.2 cm |
+| 1 m | 3.3 / 9.2 cm | 3.0 / 5.3 cm | 3.3 / 8.8 cm |
+| 2 m | 5.2 / 19 cm | 5.3 / 10 cm | 6.9 / 23 cm |
+| 5 m | 13 / 45 cm | 13 / 21 cm | 16 / 72 cm |
+
+Median error of the depth, in centimetres; "bowl" is a single bowl through the full point. With
+every level in use, as in the model, the levels themselves are exact and only the stretches
+between them are approximated.
+
+**Time.** About 20 to 70 seconds per storm per box once each raster's per-cell means are known
+(about 2 to 3 minutes per box to compute them, on a laptop).
 
 ## Limits
 
@@ -166,7 +235,7 @@ To be filled from the example runs (phase 5.1).
   matters for large catchments and short storms.
 - One storm depth per catchment (its mean), one rain pattern per depression (at its lowest point).
 - Depressions start empty, nothing evaporates, ponds do not freeze, and there is no groundwater.
-- The bowl shape, the seepage gradient, the three soil-water states, the fallback soil values,
+- The bowl shape below the lowest measured level and between levels, the seepage gradient, the three soil-water states, the fallback soil values,
   the drain rule and the 0.1 m ponding depth are assumptions, each stated where it is used.
 - The soil survey grid (July 2020) and the horizon data (current edition) are not the same
   edition; units without usable data take the fallback, and the share is reported.

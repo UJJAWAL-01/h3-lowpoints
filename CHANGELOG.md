@@ -11,8 +11,9 @@
   runoff methods: SCS curve numbers applied as the rain falls (`curve-number`; the same total as
   the index) and Green-Ampt infiltration (`green-ampt`; intense rain runs off more). Dry, average
   or wet ground (`condition`). Seepage through depression floors from the soil survey; storm
-  drains only as a rule you set (`drains`), off by default. Depressions are bowls with
-  V(h) = V (h/H)^k, k = A H / V. Water conserved in every depression (tested to 1e-9). Tables
+  drains only as a rule you set (`drains`), off by default. Water depth and wet area come from
+  each depression's measured levels (results with details), with a bowl V = Va (h/ha)^k through
+  each pair of levels and below the lowest (`storms.shape_table`). Water conserved in every depression (tested to 1e-9). Tables
   saved as `storm_<name>.csv` or `.parquet` with settings in `meta.json`, carried by `clip` and
   checked by `verify` (`check_storms`). See [docs/storms.md](docs/storms.md).
 - `sources.rainfall.Atlas14Storms`: NOAA Atlas 14 depth for any duration from 5 minutes to 60

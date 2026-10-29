@@ -340,6 +340,13 @@ The model on plain arrays, one value per depression, for your own inputs (real r
 one cumulative curve per depression in `cum` and `pattern_of = arange(n)`). Returns a dict of
 arrays (`own_m3`, and the water columns of the storm table) and the water that left the table.
 
+### `storms.shape_table(volume, area, max_depth, levels=None)`
+
+The known points (volume, depth at the lowest point, wet area) of each depression from its
+measured levels (`{name: (volume_m3, area_m2)}` at `storms.LEVELS`) and its full point;
+`storms.stage_of(store, *table)` gives the depth and wet area at any volumes, by the rule of
+[Storms in time](storms.md#the-shape-of-a-depression).
+
 ### `storms.green_ampt_step(F, ks, sd, hours)`
 
 Cumulative infiltration (mm) after `hours` with water standing on the ground, starting from `F`
