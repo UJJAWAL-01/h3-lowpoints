@@ -207,3 +207,277 @@ class Atlas14Grids:
             count[ok] += 1
         with np.errstate(invalid="ignore"):
             return np.where(count > 0, total / np.maximum(count, 1), np.nan)
+
+
+# ---------------------------------------------------------------- storms of any duration
+
+def duration_hours(duration):
+    """Hours of a duration as NOAA names its grid files ("05m", "06h", "03d", ...)."""
+    if duration not in ATLAS14_DURATIONS:
+        raise ValueError(f"duration must be one of {list(ATLAS14_DURATIONS)}, got {duration!r}")
+    value, unit = int(duration[:2]), duration[2]
+    return value / 60.0 if unit == "m" else value * 24.0 if unit == "d" else float(value)
+
+
+ATLAS14_HOURS = np.array([duration_hours(d) for d in ATLAS14_DURATIONS])
+
+
+class Atlas14Storms:
+    """NOAA Atlas 14 storms of any duration from 5 minutes to 60 days, and the return period of
+    any storm, at points in the conterminous US.
+
+        storms = Atlas14Storms(cache_dir="atlas14")
+        storms.depth(100, 6.0, lat, lon)              # mm in the 100-year 6-hour storm
+        storms.return_period(300.0, 6.0, lat, lon)    # years between storms of 300 mm in 6 hours
+
+    Between NOAA's published durations, depth is interpolated linearly in log(depth) against
+    log(duration); between its published return periods (1 to 1000 years), the return period is
+    interpolated linearly in log(years) against depth. A storm smaller than the 1-year storm gets
+    0 (more frequent than once a year) and one larger than the 1000-year storm gets inf (beyond
+    Atlas 14). Return periods are NOAA's average recurrence intervals from partial-duration
+    series. Points Atlas 14 does not cover get NaN. Grids are read as in Atlas14Grids, one set per
+    duration, the first time they are needed.
+    """
+
+    def __init__(self, *, cache_dir=None, volumes=None):
+        self.cache_dir, self.volumes = cache_dir, volumes
+        self.sets = {}
+
+    def grids(self, duration):
+        """The Atlas14Grids of one published duration (all return periods), made once."""
+        if duration not in self.sets:
+            self.sets[duration] = Atlas14Grids(ATLAS14_YEARS, duration, cache_dir=self.cache_dir,
+                                               volumes=self.volumes)
+        return self.sets[duration]
+
+    @staticmethod
+    def bracket(hours):
+        """(shorter, longer, weight of longer) of the published durations around `hours`."""
+        if not ATLAS14_HOURS[0] <= hours <= ATLAS14_HOURS[-1]:
+            raise ValueError(f"Atlas 14 covers storms of 5 minutes to 60 days, not {hours:g} hours")
+        hi = int(np.searchsorted(ATLAS14_HOURS, hours))
+        if ATLAS14_HOURS[hi] == hours:
+            return ATLAS14_DURATIONS[hi], ATLAS14_DURATIONS[hi], 1.0
+        lo = hi - 1
+        w = ((np.log(hours) - np.log(ATLAS14_HOURS[lo]))
+             / (np.log(ATLAS14_HOURS[hi]) - np.log(ATLAS14_HOURS[lo])))
+        return ATLAS14_DURATIONS[lo], ATLAS14_DURATIONS[hi], float(w)
+
+    def depth(self, years, hours, lat, lon):
+        """Depth in mm of the `hours`-long storm expected once in `years` years (ATLAS14_YEARS)."""
+        if years not in ATLAS14_YEARS:
+            raise ValueError(f"years must be one of {list(ATLAS14_YEARS)}, got {years!r}")
+        short, long, w = self.bracket(float(hours))
+        b = self.grids(long).depth(years, lat, lon)
+        if w == 1.0:
+            return b
+        a = self.grids(short).depth(years, lat, lon)
+        return log_interpolate(a, b, w)
+
+    def depths(self, hours, lat, lon):
+        """Depths in mm at every return period of ATLAS14_YEARS: shape (points, 10)."""
+        lat, lon = np.atleast_1d(np.asarray(lat, float)), np.atleast_1d(np.asarray(lon, float))
+        return np.stack([self.depth(y, hours, lat, lon) for y in ATLAS14_YEARS], axis=-1)
+
+    def return_period(self, depth_mm, hours, lat, lon):
+        """Years between storms of `depth_mm` (or more) in `hours` at each point; see the class."""
+        lat, lon = np.atleast_1d(np.asarray(lat, float)), np.atleast_1d(np.asarray(lon, float))
+        depth_mm = np.broadcast_to(np.asarray(depth_mm, dtype=float), lat.shape)
+        return years_of_depth(depth_mm, self.depths(hours, lat, lon))
+
+
+def log_interpolate(a, b, w):
+    """exp((1 - w) log a + w log b): depth between two durations, `w` the share of the way."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.exp((1 - w) * np.log(a) + w * np.log(b))
+
+
+def years_of_depth(depth_mm, table):
+    """Return period of each depth from its row of depths at ATLAS14_YEARS (the rule of
+    Atlas14Storms.return_period): 0 below the first, inf above the last, NaN where unknown."""
+    depth_mm = np.asarray(depth_mm, dtype=float)
+    table = np.asarray(table, dtype=float).reshape(depth_mm.shape + (len(ATLAS14_YEARS),))
+    log_years = np.log(np.asarray(ATLAS14_YEARS, dtype=float))
+    out = np.full(depth_mm.shape, np.nan)
+    for i in np.ndindex(depth_mm.shape):
+        row, d = table[i], depth_mm[i]
+        if np.isnan(d) or np.isnan(row).any():
+            continue
+        if d < row[0]:
+            out[i] = 0.0
+        elif d > row[-1]:
+            out[i] = np.inf
+        else:
+            out[i] = float(np.exp(np.interp(d, row, log_years)))
+    return out
+
+
+# --------------------------------------------------------------------- how storms unfold
+
+TEMPORAL_SHAPEFILES = "https://hdsc.nws.noaa.gov/pfds/shapefiles/Vol{n}_Temporals_Shapefiles.zip"
+# Atlas 14 volume -> region number -> file prefix, for the lower 48 (checked in October 2026
+# against NOAA's temporal-distribution page: volume 1 area 1 is "general" and area 2
+# "convective"; the files of volumes 1 and 6 are in the sw folder)
+TEMPORAL_VOLUMES = {
+    1: lambda r: {1: "sw_general", 2: "sw_convective"}[r],
+    2: lambda r: "orb_general",
+    6: lambda r: f"ca_{r}",
+    8: lambda r: f"mw_{r}",
+    9: lambda r: f"se_{r}",
+    10: lambda r: f"ne_{r}",
+    11: lambda r: f"tx_{r}",
+    12: lambda r: f"inw_{r}",
+}
+TEMPORAL_HOURS = (6, 12, 24, 96)
+TEMPORAL_CASES = ("first", "second", "third", "fourth", "all")
+TEMPORAL_PERCENTS = (10, 20, 30, 40, 50, 60, 70, 80, 90)
+
+
+def temporal_url(name, hours):
+    """URL of NOAA's temporal-distribution file of region `name` ("tx_1", "ca_3", ...)."""
+    if hours not in TEMPORAL_HOURS:
+        raise ValueError(f"NOAA publishes temporal distributions for {TEMPORAL_HOURS} hours, not {hours!r}")
+    prefix = name.split("_")[0]
+    folder = "sw" if prefix in ("sw", "ca") else prefix
+    if folder not in ATLAS14_VOLUMES:
+        raise ValueError(f"unknown temporal-distribution region {name!r}")
+    return f"{ATLAS14_DATA}/{folder}/{name}_{hours}h_temporal.csv"
+
+
+def parse_temporal(text):
+    """NOAA Atlas 14 temporal distributions from one of its CSV files.
+
+    Returns {case: (time as a share of the duration, {percent: cumulative share of the rain})},
+    case in TEMPORAL_CASES (the four quartiles of storms, by when most rain falls, and all
+    storms). A curve's percent is the share of storms that had at least that much rain by each
+    time (10: front-loaded ... 90: late; 50 is the median). Reads both of NOAA's layouts: volumes
+    1 and 2 (one row per curve, columns in percent of the duration) and the later volumes (one
+    row per time, in hours). Where rounding makes a curve fall back slightly (by at most 0.03
+    percentage points in the 120 files of the lower 48), it is held level instead.
+    """
+    out, case = {}, None
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        low = lines[i].strip().strip(",").strip().lower()
+        if "quartile" in low or "all cases" in low:
+            case = next((k for k in TEMPORAL_CASES if low.startswith(k) or f"for {k}" in low), None)
+        elif case and low.startswith("percent of duration"):          # volumes 1 and 2
+            times = np.array([float(v) for v in low.split(",")[1:] if v.strip()]) / 100.0
+            curves = {}
+            for ln in lines[i + 1:i + 1 + len(TEMPORAL_PERCENTS)]:
+                cells = [c.strip() for c in ln.split(",") if c.strip()]
+                curves[int(cells[0].rstrip("%"))] = np.array([float(v) for v in cells[1:]]) / 100.0
+            out[case], case = (times, curves), None
+            i += len(TEMPORAL_PERCENTS)
+        elif case and low.startswith("hours,"):                         # later volumes
+            percents = [int(v.strip().rstrip("%")) for v in low.split(",")[1:] if v.strip()]
+            rows = []
+            for ln in lines[i + 1:]:
+                try:
+                    row = [float(c) for c in ln.split(",") if c.strip()]
+                except ValueError:
+                    break
+                if not row:
+                    break
+                rows.append(row)
+            rows = np.array(rows)
+            out[case] = (rows[:, 0] / rows[-1, 0],
+                         {p: rows[:, j + 1] / 100.0 for j, p in enumerate(percents)})
+            case = None
+            i += len(rows)
+        i += 1
+    if set(out) != set(TEMPORAL_CASES):
+        raise ValueError(f"expected the cases {TEMPORAL_CASES} in the temporal file, found {sorted(out)}")
+    for times, curves in out.values():
+        if set(curves) != set(TEMPORAL_PERCENTS) or any(len(c) != len(times) for c in curves.values()):
+            raise ValueError("a temporal table does not have the curves 10% to 90% at every time")
+        for p, c in curves.items():
+            # NOAA's tables are rounded: a few curves fall back by up to 0.03 percentage points
+            curves[p] = np.maximum.accumulate(c)
+    return out
+
+
+def nearest_temporal_hours(hours):
+    """The published temporal duration (6, 12, 24, 96 h) nearest to `hours` in log time."""
+    if not hours > 0:
+        raise ValueError("a storm lasts a positive number of hours")
+    gaps = np.abs(np.log(np.asarray(TEMPORAL_HOURS, float)) - np.log(hours))
+    return TEMPORAL_HOURS[int(np.argmin(gaps))]
+
+
+class TemporalPatterns:
+    """NOAA Atlas 14 temporal distributions: how the rain of a storm is spread over its duration,
+    by region, for 6, 12, 24 and 96-hour storms.
+
+        patterns = TemporalPatterns(cache_dir="atlas14")
+        patterns.region(lat, lon)                  # e.g. "tx_1" at each point (None: no region)
+        t, cum = patterns.pattern("tx_1", 6.0)     # all-cases median curve of a 6-hour storm
+
+    Regions come from NOAA's shapefiles of temporal-distribution areas, one per volume (reading
+    them needs geopandas); curves from its CSV files; both are downloaded once into `cache_dir`.
+    A storm of another duration takes the curve of the nearest published duration (in log time),
+    stretched to its own length: an assumption, as NOAA publishes these four only.
+    """
+
+    def __init__(self, *, cache_dir=None):
+        self.cache_dir = cache_dir
+        self.regions, self.tables = None, {}
+
+    def _bytes(self, url):
+        if self.cache_dir:
+            local = download_once(url, self.cache_dir)
+            if local is None:
+                raise ValueError(f"NOAA has no file at {url}")
+            return Path(local).read_bytes()
+        return read_bytes(url)
+
+    def _region_frame(self):
+        if self.regions is None:
+            import tempfile
+
+            import geopandas as gpd
+
+            frames = []
+            for n, prefix in sorted(TEMPORAL_VOLUMES.items(), reverse=True):     # newest first
+                data = self._bytes(TEMPORAL_SHAPEFILES.format(n=n))
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / f"vol{n}.zip"
+                    path.write_bytes(data)
+                    g = gpd.read_file(f"zip://{path}").to_crs("EPSG:4326")
+                field = "Region" if "Region" in g.columns else "Id"
+                g["name"] = [prefix(int(r)) for r in g[field]]
+                frames.append(g[["name", "geometry"]])
+            self.regions = pd.concat(frames, ignore_index=True)
+        return self.regions
+
+    def region(self, lat, lon):
+        """Name of the temporal-distribution region at each point (None outside every region).
+
+        NOAA's regions of different volumes overlap only in thin strips along their borders (at
+        most about 1,000 km2, under 1% of a region; measured in October 2026) and where Volume 8's
+        region 4 and Volume 9's region 1 are one area with identical files; a point in two takes
+        the newer volume's region."""
+        import geopandas as gpd
+
+        lat, lon = np.atleast_1d(np.asarray(lat, float)), np.atleast_1d(np.asarray(lon, float))
+        points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(lon, lat), crs="EPSG:4326")
+        hit = gpd.sjoin(points, self._region_frame(), how="left", predicate="within")
+        names = hit[~hit.index.duplicated(keep="first")]["name"].reindex(points.index)
+        return np.array([None if pd.isna(v) else v for v in names], dtype=object)
+
+    def table(self, name, hours):
+        """parse_temporal of region `name` for a published duration (6, 12, 24 or 96 hours)."""
+        if (name, hours) not in self.tables:
+            text = self._bytes(temporal_url(name, hours)).decode("latin-1")
+            self.tables[(name, hours)] = parse_temporal(text)
+        return self.tables[(name, hours)]
+
+    def pattern(self, name, hours, case="all", percent=50):
+        """(time share, cumulative share of the rain) of a storm of `hours` in region `name`."""
+        if case not in TEMPORAL_CASES:
+            raise ValueError(f"case must be one of {TEMPORAL_CASES}, got {case!r}")
+        if percent not in TEMPORAL_PERCENTS:
+            raise ValueError(f"percent must be one of {TEMPORAL_PERCENTS}, got {percent!r}")
+        times, curves = self.table(name, nearest_temporal_hours(hours))[case]
+        return times, curves[percent]

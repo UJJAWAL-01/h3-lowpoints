@@ -84,19 +84,9 @@ def to_groups(mukeys, keys, codes):
     return np.where(found, codes[at], 0).astype(np.uint8)
 
 
-def fetch_soil_groups(bbox, out_path, *, cache_dir, like=None, resolution=30.0, get=read_bytes,
-                      opener=None):
-    """Write soil hydrologic group codes (GROUPS) for a lon/lat box to a GeoTIFF.
-
-    By default the grid is NAD83 / Conus Albers (EPSG:5070) at `resolution` metres covering the
-    box, with pixel edges where NLCD's are (15 m past multiples of 30 m, for 30 m). To combine
-    the groups with an NLCD raster pixel for pixel, pass it as `like`: its grid (extent, size,
-    CRS) is then used exactly, and `bbox` may be None (the NLCD service chooses its own edge
-    pixels, so the same box does not give the same extent).
-    Each pixel takes the map unit at its centre in the full 10 m grid (a centre on a grid line
-    takes the soil pixel to its east or south), so a place gets the same group whatever box it is
-    read in. `opener(url)` opens a tile (for tests). Returns the path.
-    """
+def mukey_grid(bbox, *, like=None, resolution=30.0, get=read_bytes, opener=None):
+    """(map-unit keys, transform, crs) of the gNATSGO grid for a box, on the output grid of
+    `fetch_soil_groups` (see there); MUKEY_NODATA outside the survey."""
     import rasterio
     from affine import Affine
     from rasterio.errors import WindowError
@@ -123,7 +113,6 @@ def fetch_soil_groups(bbox, out_path, *, cache_dir, like=None, resolution=30.0, 
         height = int(math.ceil((top - bottom) / resolution))
         transform = from_origin(left, top, resolution, resolution)
     out_bounds = rasterio.transform.array_bounds(height, width, transform)
-    keys, codes = group_table(cache_dir, get)
     mukey = np.full((height, width), MUKEY_NODATA, dtype=np.int64)
     found = tiles(bbox, get)
     if not found:
@@ -160,7 +149,181 @@ def fetch_soil_groups(bbox, out_path, *, cache_dir, like=None, resolution=30.0, 
                           dst_crs=crs, dst_nodata=MUKEY_NODATA, resampling=Resampling.nearest)
             take = (mukey == MUKEY_NODATA) & (part != MUKEY_NODATA)
             mukey[take] = part[take]
+    return mukey, transform, crs
+
+
+def fetch_soil_groups(bbox, out_path, *, cache_dir, like=None, resolution=30.0, get=read_bytes,
+                      opener=None):
+    """Write soil hydrologic group codes (GROUPS) for a lon/lat box to a GeoTIFF.
+
+    By default the grid is NAD83 / Conus Albers (EPSG:5070) at `resolution` metres covering the
+    box, with pixel edges where NLCD's are (15 m past multiples of 30 m, for 30 m). To combine
+    the groups with an NLCD raster pixel for pixel, pass it as `like`: its grid (extent, size,
+    CRS) is then used exactly, and `bbox` may be None (the NLCD service chooses its own edge
+    pixels, so the same box does not give the same extent).
+    Each pixel takes the map unit at its centre in the full 10 m grid (a centre on a grid line
+    takes the soil pixel to its east or south), so a place gets the same group whatever box it is
+    read in. `opener(url)` opens a tile (for tests). Returns the path.
+    """
+    keys, codes = group_table(cache_dir, get)
+    mukey, transform, crs = mukey_grid(bbox, like=like, resolution=resolution, get=get, opener=opener)
     groups = to_groups(mukey, keys, codes)
     if not groups.any():
         raise ValueError("the soil survey holds no data for this box")
     return write_raster(out_path, groups, transform, crs, 0, "uint8")
+
+
+# ------------------------------------------- how fast water soaks in (Green-Ampt parameters)
+
+SDA = "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest"
+SDA_EDITION = "SSURGO via USDA Soil Data Access (current edition when read)"
+KSAT_DEPTH_CM = 50          # NRCS judges a soil's group by its least conductive layer in 0-50 cm
+FALLBACK_KSAT_MM_H = 3.6    # 1 micrometre per second: the most a group D soil conducts (NEH 630 ch. 7)
+INFILTRATION_COLUMNS = ["mukey", "ksat_mm_h", "suction_mm", "theta_sat", "theta_fc", "theta_wp",
+                        "texture", "component", "comppct"]
+_SQL = """SELECT c.mukey, c.cokey, c.compname, c.comppct_r, h.hzdept_r, h.hzdepb_r, h.ksat_r,
+h.wsatiated_r, h.wthirdbar_r, h.wfifteenbar_r, t.texcl
+FROM component c
+JOIN chorizon h ON h.cokey = c.cokey
+LEFT JOIN chtexturegrp g ON g.chkey = h.chkey AND g.rvindicator = 'Yes'
+LEFT JOIN chtexture t ON t.chtgkey = g.chtgkey
+WHERE c.mukey IN ({keys})"""
+
+
+def _post(data):
+    import urllib.request
+
+    req = urllib.request.Request(SDA, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        return r.read()
+
+
+def sda_query(sql, post=_post):
+    """Rows (list of dicts) of an SQL query to USDA Soil Data Access (public, no account)."""
+    from ._common import with_retries
+
+    body = json.dumps({"query": sql, "format": "JSON+COLUMNNAME"}).encode()
+    answer = json.loads(with_retries(lambda: post(body)) or b"{}")
+    table = answer.get("Table", [])
+    if not table:
+        return []
+    return [dict(zip(table[0], row)) for row in table[1:]]
+
+
+def infiltration_parameters(horizons):
+    """Green-Ampt parameters of each map unit from its components' horizons (rows of `_SQL`).
+
+    For each map unit, the component with the largest share that has a usable surface horizon
+    (a mineral texture class, and water contents at saturation, 1/3 bar and 15 bar) and a
+    conductivity for every horizon starting above 50 cm gives:
+      ksat_mm_h   the least saturated conductivity of those horizons (as NRCS judges soil groups)
+      suction_mm  the wetting-front suction of the surface horizon's texture (runoff.SUCTION_MM)
+      theta_sat, theta_fc, theta_wp   surface water content at saturation, 1/3 bar and 15 bar
+    Map units without such a component are left out.
+    """
+    import pandas as pd
+
+    from ..runoff import SUCTION_MM, texture_class
+
+    frame = pd.DataFrame(horizons)
+    if frame.empty:
+        return pd.DataFrame({c: pd.Series(dtype=object if c in ("texture", "component") else float)
+                             for c in INFILTRATION_COLUMNS}).astype({"mukey": "int64"})
+    for c in ("comppct_r", "hzdept_r", "hzdepb_r", "ksat_r", "wsatiated_r", "wthirdbar_r", "wfifteenbar_r"):
+        frame[c] = pd.to_numeric(frame[c], errors="coerce")
+    frame["mukey"] = frame["mukey"].astype(np.int64)
+    rows = []
+    for mukey, unit in frame.groupby("mukey", sort=True):
+        comps = unit.groupby("cokey").agg(pct=("comppct_r", "first"), name=("compname", "first"))
+        for cokey in comps.sort_values("pct", ascending=False, kind="stable").index:
+            hz = unit[unit["cokey"] == cokey].drop_duplicates(["hzdept_r", "hzdepb_r"])
+            top = hz[hz["hzdept_r"] == 0]
+            upper = hz[hz["hzdept_r"] < KSAT_DEPTH_CM]["ksat_r"]
+            if top.empty or upper.empty or upper.isna().any():
+                continue
+            top = top.iloc[0]
+            texture = texture_class(top["texcl"])
+            water = top[["wsatiated_r", "wthirdbar_r", "wfifteenbar_r"]].astype(float)
+            if texture is None or water.isna().any():
+                continue
+            rows.append((mukey, float(upper.min()) * 3.6, SUCTION_MM[texture], water.iloc[0] / 100,
+                         water.iloc[1] / 100, water.iloc[2] / 100, texture, comps.loc[cokey, "name"],
+                         float(comps.loc[cokey, "pct"])))
+            break
+    return pd.DataFrame(rows, columns=INFILTRATION_COLUMNS)
+
+
+def infiltration_table(mukeys, cache_dir, *, batch=500, post=_post):
+    """infiltration_parameters of the map units `mukeys`, read from Soil Data Access in batches
+    and kept in `cache_dir` (sda_infiltration.parquet, and the keys already asked for in
+    sda_infiltration_asked.npy), so each map unit is asked for once."""
+    from pathlib import Path
+
+    import pandas as pd
+
+    folder = Path(cache_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    known_path, asked_path = folder / "sda_infiltration.parquet", folder / "sda_infiltration_asked.npy"
+    known = pd.read_parquet(known_path) if known_path.exists() else infiltration_parameters([])
+    asked = np.load(asked_path) if asked_path.exists() else np.zeros(0, dtype=np.int64)
+    wanted = np.unique(np.asarray(mukeys, dtype=np.int64))
+    wanted = wanted[(wanted != MUKEY_NODATA) & ~np.isin(wanted, asked)]
+    for i in range(0, len(wanted), batch):
+        part = wanted[i:i + batch]
+        sql = _SQL.format(keys=",".join(str(int(k)) for k in part))
+        got = infiltration_parameters(sda_query(sql, post))
+        known = pd.concat([known, got], ignore_index=True) if len(known) else got
+        asked = np.concatenate([asked, part])
+        known.to_parquet(known_path.with_suffix(".part"))
+        known_path.with_suffix(".part").replace(known_path)
+        np.save(asked_path, asked)
+    return known.drop_duplicates("mukey").sort_values("mukey").reset_index(drop=True)
+
+
+def fetch_soil_infiltration(bbox, out_stem, *, cache_dir, like=None, resolution=30.0, get=read_bytes,
+                            opener=None, post=_post):
+    """Write rasters of Green-Ampt soil parameters for a box, on the grid of `fetch_soil_groups`
+    (same `bbox`, `like`, `resolution`). Map units come from the gNATSGO grid (July 2020), their
+    horizons from Soil Data Access (`infiltration_table`). Files, named after `out_stem`:
+
+      <stem>_ksat.tif              saturated conductivity, mm/h
+      <stem>_suction.tif           wetting-front suction, mm
+      <stem>_deficit_average.tif   water the surface soil can still take in, from field capacity
+                                   (1/3 bar) to saturation, as a share of its volume
+      <stem>_deficit_dry.tif       the same from the wilting point (15 bar)
+      <stem>_fallback.tif          1 where the survey had no usable data for the map unit, 0 where
+                                   it had, 255 outside the survey
+
+    Where a map unit has no usable data (urban land, water, pits, rock; units renamed since 2020),
+    the fallback is used: conductivity 3.6 mm/h (1 um/s, the most a group D soil conducts), no
+    water deficit (as if already saturated) and suction 0, so the ground takes water only at that
+    slow rate. Pixels outside the survey are NaN. Returns a dict of the paths.
+    """
+    from pathlib import Path
+
+    mukey, transform, crs = mukey_grid(bbox, like=like, resolution=resolution, get=get, opener=opener)
+    surveyed = mukey != MUKEY_NODATA
+    if not surveyed.any():
+        raise ValueError("the soil survey holds no data for this box")
+    table = infiltration_table(np.unique(mukey[surveyed]), cache_dir, post=post)
+    keys = table["mukey"].to_numpy(dtype=np.int64)
+    at = np.minimum(np.searchsorted(keys, mukey), max(len(keys) - 1, 0))
+    found = surveyed & (keys[at] == mukey) if len(keys) else np.zeros(mukey.shape, bool)
+
+    def layer(values, fallback):
+        out = np.full(mukey.shape, np.nan, dtype=np.float32)
+        out[surveyed] = fallback
+        if len(keys):
+            out[found] = np.asarray(values, dtype=np.float32)[at[found]]
+        return out
+    sat, fc, wp = (table[c].to_numpy(float) for c in ("theta_sat", "theta_fc", "theta_wp"))
+    layers = {"ksat": layer(table["ksat_mm_h"], FALLBACK_KSAT_MM_H),
+              "suction": layer(table["suction_mm"], 0.0),
+              "deficit_average": layer(np.maximum(sat - fc, 0.0), 0.0),
+              "deficit_dry": layer(np.maximum(sat - wp, 0.0), 0.0)}
+    stem = Path(out_stem)
+    paths = {name: write_raster(f"{stem}_{name}.tif", values, transform, crs, float("nan"), "float32")
+             for name, values in layers.items()}
+    flag = np.where(surveyed, (~found).astype(np.uint8), 255).astype(np.uint8)
+    paths["fallback"] = write_raster(f"{stem}_fallback.tif", flag, transform, crs, 255, "uint8")
+    return paths

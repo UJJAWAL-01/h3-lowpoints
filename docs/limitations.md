@@ -35,7 +35,7 @@ It inherits every limit above, and adds its own:
   snowmelt on the prairies) more runs off; snowmelt itself is not modelled. Each catchment takes
   one area-weighted curve number, and each H3 cell the mean of its pixels.
 - **Volumes, not timing.** A storm enters only through its total depth; how fast it falls and how
-  long water stays are not modelled.
+  long water stays are left to [Storms in time](storms.md), which has its own limits (below).
 - **Spill links from the terrain model**: water passes under roads through culverts the model
   cannot see.
 - **Rainfall data.** NOAA Atlas 14 covers the US except Washington and Oregon; where its project
@@ -49,6 +49,15 @@ It inherits every limit above, and adds its own:
   reports than those needing rarer storms, and drained depressions more than landlocked ones (see
   [Susceptibility](susceptibility.md#evidence-against-flood-reports)). Farmland, other climates
   and how long water stands are untested.
+
+## Storms in time
+
+[Storms in time](storms.md) follows a storm step by step. It adds its own assumptions, each named
+where it is used: the bowl shape of a depression, runoff reaching it without travel time,
+seepage with a unit gradient, empty depressions at the start, no evaporation, three
+soil-water states for Green-Ampt, fallback soil values where the survey has none, and drains
+only as a rule you set. Which runoff method fits real storms, and whether a drain rule helps, is
+not yet tested against observations (phase 5.4).
 
 ## Limits that come from the elevation data
 

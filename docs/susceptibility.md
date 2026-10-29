@@ -9,7 +9,8 @@ term by term and needing no training data. It is still not a flood map
 
 It needs a result computed with catchments (`catchments=True`, `--catchments`): each
 depression's catchment, its volume, and the depression it overflows into (see
-[Definition](definition.md#catchments-and-spill)).
+[Definition](definition.md#catchments-and-spill)). The index uses storm totals only; for how long
+it rains, how the rain falls and how long water stands, see [Storms in time](storms.md).
 
 ## Quick start
 

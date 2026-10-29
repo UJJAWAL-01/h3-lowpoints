@@ -86,6 +86,10 @@ Each step is finished, tested and documented before the next starts.
    carries signal, while landlocked depressions did not gather more storm reports than drained
    ones. The national layer is version 0.3 of the dataset:
    [doi.org/10.5281/zenodo.23731345](https://doi.org/10.5281/zenodo.23731345).
+   **Storm duration** (for 0.5.0, in progress): storms of any length and their rarity, NOAA's
+   rain patterns, two runoff methods, seepage, an optional drain rule and how long water stands
+   ([Storms in time](storms.md)). Next, a second study fixed in advance tests it on past storms
+   with their real radar rain, against 311 reports in more cities and FEMA flood-insurance claims.
 4. **Machine learning, only if it earns its place.** Train on the step 3 features, judge it by
    leave-one-region-out validation (never scored on the place it learned from), and keep it only
    if it beats the physical index on unseen regions. Labels of street-level waterlogging are

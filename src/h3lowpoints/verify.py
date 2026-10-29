@@ -504,8 +504,51 @@ def check_saved(folder, rows=CHUNK_ROWS):
         return [f"{folder} is missing {', '.join(missing)}"]
     optional = [iter_table(folder, name, rows=rows) if table_path(folder, name) else None
                 for name in ("catchments", "depression_cells", "susceptibility")]
-    return _check(iter_table(folder, "depressions", rows=rows), iter_table(folder, "cells", rows=rows),
-                  read_meta(folder), *optional)
+    meta = read_meta(folder)
+    problems = _check(iter_table(folder, "depressions", rows=rows), iter_table(folder, "cells", rows=rows),
+                      meta, *optional)
+    return problems + check_storms(folder, meta, rows)
+
+
+def check_storms(folder, meta=None, rows=CHUNK_ROWS):
+    """Problems in the storm tables of a saved result (`storms.write_storm`): each listed in
+    meta.json exists; its depressions are in the depression table, once each; water is conserved
+    in every depression (inflow = overflow + seepage + drained + water left, to 1e-6); fills and
+    hours are within their bounds."""
+    meta = read_meta(folder) if meta is None else meta
+    names = list((meta.get("storms") or {}))
+    if not names:
+        return []
+    ids = np.sort(np.concatenate([c["id"].to_numpy() for c in iter_table(folder, "depressions", rows=rows,
+                                                                           columns=["id"])] or [np.zeros(0)]))
+    out = []
+    for name in names:
+        table = f"storm_{name}"
+        if table_path(folder, table) is None:
+            out.append(f"meta.json lists storm {name!r} but {table} is missing")
+            continue
+        seen = []
+        for t in iter_table(folder, table, rows=rows):
+            seen.append(t["id"].to_numpy())
+            known = t["inflow_m3"].notna()
+            k = t[known]
+            gap = (k["inflow_m3"] - k["overflow_m3"] - k["seepage_m3"] - k["drained_m3"] - k["water_left_m3"]).abs()
+            leak = gap > 1e-6 * np.maximum(k["inflow_m3"].abs(), 1.0)
+            if leak.any():
+                out.append(f"{table}: water is not conserved in {int(leak.sum())} depressions")
+            if ((k["peak_fill"] < -1e-9) | (k["peak_fill"] > 1 + 1e-9)).any():
+                out.append(f"{table}: peak_fill outside 0 to 1")
+            if (k["ponding_hours"] < 0).any() or (k["time_to_fill_h"] < 0).any():
+                out.append(f"{table}: negative hours")
+            for c in ("overflow_m3", "seepage_m3", "drained_m3", "water_left_m3"):
+                if (k[c] < -1e-9).any():
+                    out.append(f"{table}: negative {c}")
+        seen = np.concatenate(seen) if seen else np.zeros(0)
+        if len(np.unique(seen)) != len(seen):
+            out.append(f"{table}: a depression appears more than once")
+        if not np.isin(seen, ids).all():
+            out.append(f"{table}: names depressions that are not in the depression table")
+    return out
 
 
 def compare_results(a, b, rel=1e-9):

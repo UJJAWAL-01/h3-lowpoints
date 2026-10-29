@@ -191,6 +191,47 @@ verifies the folder. See [Susceptibility](susceptibility.md) for the method.
 h3lowpoints index houston --curve-numbers cn.tif --rain atlas14 --cache-dir atlas14
 ```
 
+## storm
+
+```
+h3lowpoints storm FOLDER --hours H (--years N | --depth MM) [--method curve-number|green-ampt] [options]
+```
+
+Follows one storm in time steps over a result made with `--catchments`: when each depression
+fills, how deep it gets, how much overflows, seeps or drains away, and how long water stands.
+Writes `storm_<name>.csv` or `.parquet` into the folder, with its settings in `meta.json` under
+`storms`, prints a summary and verifies the folder. See [Storms in time](storms.md).
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--hours H` | | How long it rains, hours (5 minutes to 60 days for Atlas 14 storms). |
+| `--years N` | | The storm: NOAA Atlas 14's storm of this return period (1, 2, 5, 10, 25, 50, 100, 200, 500 or 1000 years) and duration, at each catchment (US). |
+| `--depth MM` | | Instead of `--years`: this much rain everywhere, mm. |
+| `--method M` | `curve-number` | How much runs off: `curve-number` (SCS curve numbers applied as the rain falls) or `green-ampt` (infiltration from the soil's conductivity; needs `--soil` and `--impervious`). |
+| `--curve-numbers FILE` | | Method curve-number: SCS curve numbers, a raster or a table, as for `index`. |
+| `--curve-number CN` | | Method curve-number: one curve number for all ground instead. |
+| `--condition C` | `average` | Ground before the storm: `average`, `dry` or `wet` (NRCS ARC II, I, III curve numbers; for Green-Ampt, soil water at field capacity, at the wilting point, or saturated). |
+| `--impervious FILE` | | Percent paved per cell, a raster or a table of `h3` and `impervious_pct`; needed by green-ampt and by drains. |
+| `--soil STEM` | | The rasters made by `fetch-landcover` from the `soil-infiltration` source, by their common start (`soil` for `soil_ksat.tif` ...); needed by green-ampt, and turns on seepage. |
+| `--pattern P` | `atlas14` | How the rain is spread in time: `atlas14` (NOAA's curve for the region at each lowest point) or `uniform`. |
+| `--case C` | `all` | Atlas 14 curves of all storms (`all`) or of storms with most rain in the `first`, `second`, `third` or `fourth` quarter. |
+| `--percent P` | `50` | Which Atlas 14 curve: 10 (front-loaded) to 90 (late); 50 is the median. |
+| `--no-seepage` | | No seepage through depression floors, even with `--soil`. |
+| `--drain-years N` | | Assume storm drains that carry away rain at the intensity of the N-year Atlas 14 storm of `--drain-hours`, from catchments at least `--drain-min-impervious` percent paved. An assumption: no national map of storm drains exists. Without it, no drains. |
+| `--drain-hours H` | `1` | Duration of that storm. |
+| `--drain-min-impervious P` | `20` | Only catchments at least this percent paved are drained. |
+| `--ponding-depth M` | `0.1` | Water at least this deep at the lowest point counts as standing water. |
+| `--after-hours H` | `72` | How long the run continues after the rain stops. |
+| `--step-minutes M` | `5` | Time step: the storm is cut into equal steps of about this length. |
+| `--name NAME` | from the storm | The table's name: `storm_<NAME>` (default such as `100yr_6h` or `90mm_6h`). |
+| `--min-coverage F` | `0.9` | Share of a catchment an input must cover. |
+| `--cache-dir DIR` | | Keep the downloaded Atlas 14 grids, temporal distributions and region maps here. |
+| `--workers N` | `1` | Label raster pixels with H3 cells in this many processes. |
+
+```
+h3lowpoints storm houston --years 100 --hours 6 --curve-numbers cn.tif --soil soil --impervious imp.tif --cache-dir atlas14
+```
+
 ## drainage
 
 ```
@@ -256,7 +297,7 @@ Prints the size of the raster written, for example
 ## fetch-landcover
 
 ```
-h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd|nlcd-landcover|soil-groups|curve-numbers] [--year Y] [--nlcd-source annual|mrlc] [--cache-dir DIR]
+h3lowpoints fetch-landcover --bbox WEST SOUTH EAST NORTH --out FILE.tif [--from worldcover|nlcd|nlcd-landcover|soil-groups|curve-numbers|soil-infiltration] [--year Y] [--nlcd-source annual|mrlc] [--cache-dir DIR] [--like RASTER]
 ```
 
 `worldcover` (default): ESA WorldCover 2021 classes, 10 m, worldwide. `nlcd`: NLCD percent
@@ -267,7 +308,13 @@ from Annual NLCD (`--nlcd-source annual`, the default: any `--year` from 1985 to
 `soil-groups`: soil hydrologic groups from the USDA soil survey (gNATSGO), on a 30 m grid.
 `curve-numbers`: SCS curve numbers on NLCD's 30 m grid from NLCD land cover, imperviousness and
 the soil groups, with the three inputs kept beside the output. Both keep the soil survey's
-map-unit table in `--cache-dir` (default: the output's folder). See [Data sources](data-sources.md).
+map-unit table in `--cache-dir` (default: the output's folder).
+`soil-infiltration`: the soil rasters the Green-Ampt method and seepage need (conductivity,
+wetting-front suction, water deficits and where the fallback was used), named after `--out`
+(`soil.tif` gives `soil_ksat.tif`, `soil_suction.tif`, ...); the horizons come from USDA Soil
+Data Access and are kept in `--cache-dir`. `--like RASTER` (soil groups and soil infiltration):
+use that raster's grid exactly, for example the NLCD raster the curve numbers were made on. See
+[Data sources](data-sources.md) and [Storms in time](storms.md).
 
 ## rainfall
 

@@ -59,11 +59,13 @@ fills ([Susceptibility](susceptibility.md)), is published as open data:
     depressions more often than chance, with honest uncertainty.
 12. [Susceptibility](susceptibility.md): how easily each depression fills: runoff, the rain that
     fills it, and design storms.
-13. [Example maps](example-maps.md): interactive maps of three test areas (Houston, North Dakota,
+13. [Storms in time](storms.md): how long it rains: storms of any duration and their rarity,
+    how the rain falls, two runoff methods, seepage, assumed drains, and how long water stands.
+14. [Example maps](example-maps.md): interactive maps of three test areas (Houston, North Dakota,
     the Central Valley), a preview of the explorer.
-14. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
-15. [Glossary](glossary.md): terms used across these pages.
-16. [Roadmap](roadmap.md): what is done and what comes next.
+15. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
+16. [Glossary](glossary.md): terms used across these pages.
+17. [Roadmap](roadmap.md): what is done and what comes next.
 
 The [changelog](../CHANGELOG.md) lists every change, and [contributing](../CONTRIBUTING.md) explains
 how to help.

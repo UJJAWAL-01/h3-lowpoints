@@ -67,17 +67,21 @@ def build_parser():
     lc = sub.add_parser("fetch-landcover", help="download land cover for a box")
     _bbox_out(lc)
     lc.add_argument("--from", dest="dataset", default="worldcover",
-                    choices=["worldcover", "nlcd", "nlcd-landcover", "soil-groups", "curve-numbers"],
+                    choices=["worldcover", "nlcd", "nlcd-landcover", "soil-groups", "curve-numbers",
+                             "soil-infiltration"],
                     help="worldcover: global 10 m classes (default); nlcd: US 30 m percent "
                          "impervious; nlcd-landcover: US 30 m land cover classes; soil-groups: US "
                          "soil hydrologic groups (gNATSGO); curve-numbers: US 30 m SCS curve "
-                         "numbers from NLCD and the soil groups")
+                         "numbers from NLCD and the soil groups; soil-infiltration: US Green-Ampt "
+                         "soil rasters (gNATSGO map units, USDA Soil Data Access), named after OUT")
     lc.add_argument("--year", type=int, help="NLCD year (default 2024 from Annual NLCD, 2021 from MRLC)")
     lc.add_argument("--nlcd-source", choices=["annual", "mrlc"], default="annual",
                     help="annual: Annual NLCD 1985-2024 (default); mrlc: the older NLCD editions "
                          "from the MRLC web service (2001-2021)")
-    lc.add_argument("--cache-dir", help="soil-groups and curve-numbers: keep the soil table here "
-                                        "(default: the output's folder)")
+    lc.add_argument("--cache-dir", help="soil-groups, curve-numbers and soil-infiltration: keep the "
+                                        "soil tables here (default: the output's folder)")
+    lc.add_argument("--like", help="soil-groups and soil-infiltration: use this raster's grid exactly "
+                                   "(for example an NLCD raster), instead of the box")
 
     b = sub.add_parser("build", help="analyze a US region of any size from USGS 3DEP (streams the tiles)")
     b.add_argument("--bbox", nargs=4, type=float, required=True,
@@ -170,6 +174,43 @@ def build_parser():
     ix.add_argument("--workers", type=int, default=1,
                     help="label raster pixels with H3 cells in this many processes")
 
+    st = sub.add_parser("storm", help="one storm in time: when depressions fill, how deep, for how "
+                                      "long water stands (needs a result made with --catchments)")
+    st.add_argument("results", help="folder written by 'analyze', 'build' or 'clip' with --catchments")
+    st.add_argument("--hours", type=float, required=True, help="how long it rains, hours")
+    st.add_argument("--years", type=int, help="NOAA Atlas 14's storm of this return period (US)")
+    st.add_argument("--depth", type=float, help="instead of --years: this much rain, mm, everywhere")
+    st.add_argument("--method", choices=["curve-number", "green-ampt"], default="curve-number",
+                    help="runoff: SCS curve numbers in time (default) or Green-Ampt infiltration")
+    st.add_argument("--curve-numbers", help="curve-number method: raster or table, as for 'index'")
+    st.add_argument("--curve-number", type=float, help="curve-number method: one curve number for all")
+    st.add_argument("--condition", choices=["average", "dry", "wet"], default="average",
+                    help="ground before the storm (default average)")
+    st.add_argument("--impervious", help="percent paved per cell (raster or table); green-ampt and drains")
+    st.add_argument("--soil", help="stem of the rasters of 'fetch-landcover --from soil-infiltration' "
+                                   "(<stem>_ksat.tif ...); green-ampt and seepage")
+    st.add_argument("--pattern", choices=["atlas14", "uniform"], default="atlas14",
+                    help="how the rain falls: NOAA Atlas 14's curve for the region (default) or evenly")
+    st.add_argument("--case", choices=["first", "second", "third", "fourth", "all"], default="all",
+                    help="Atlas 14 curves of storms with most rain in that quarter, or all (default)")
+    st.add_argument("--percent", type=int, default=50, help="Atlas 14 curve, 10 to 90 (default 50, the median)")
+    st.add_argument("--no-seepage", action="store_true", help="no seepage through depression floors")
+    st.add_argument("--drain-years", type=int,
+                    help="assume storm drains carrying the rate of this Atlas 14 storm (default: none)")
+    st.add_argument("--drain-hours", type=float, default=1.0, help="duration of that storm (default 1)")
+    st.add_argument("--drain-min-impervious", type=float, default=20.0,
+                    help="only catchments at least this percent paved are drained (default 20)")
+    st.add_argument("--ponding-depth", type=float, default=0.1,
+                    help="depth counted as standing water, m (default 0.1)")
+    st.add_argument("--after-hours", type=float, default=72.0, help="hours run after the rain (default 72)")
+    st.add_argument("--step-minutes", type=float, default=5.0, help="time step, about (default 5)")
+    st.add_argument("--name", help="table name: storm_<name> (default from the storm, e.g. 100yr_6h)")
+    st.add_argument("--min-coverage", type=float, default=0.9,
+                    help="share of a catchment an input must cover (default 0.9)")
+    st.add_argument("--cache-dir", help="keep downloaded Atlas 14 grids and temporal files here")
+    st.add_argument("--workers", type=int, default=1,
+                    help="label raster pixels with H3 cells in this many processes")
+
     dr = sub.add_parser("drainage", help="drained or landlocked: mapped channels and roads near each "
                                          "depression, and its land cover")
     dr.add_argument("results", help="folder written by 'analyze', 'build' or 'clip'")
@@ -245,7 +286,16 @@ def _landcover(args):
     elif args.dataset == "soil-groups":
         from .sources.soils import fetch_soil_groups
 
-        out = fetch_soil_groups(bbox, args.out, cache_dir=args.cache_dir or Path(args.out).parent)
+        out = fetch_soil_groups(bbox, args.out, cache_dir=args.cache_dir or Path(args.out).parent,
+                                like=args.like)
+    elif args.dataset == "soil-infiltration":
+        from .sources.soils import fetch_soil_infiltration
+
+        stem = Path(args.out).with_suffix("") if Path(args.out).suffix.lower() == ".tif" else Path(args.out)
+        paths = fetch_soil_infiltration(bbox, stem, cache_dir=args.cache_dir or stem.parent, like=args.like)
+        for path in paths.values():
+            print(f"written {path}")
+        return 0
     else:
         from .runoff import fetch_curve_numbers
 
@@ -533,13 +583,55 @@ def _map(args):
     return 0
 
 
+def _storm(args):
+    import numpy as np
+
+    from .storms import storm_response, write_storm
+
+    if (args.years is None) == (args.depth is None):
+        raise ValueError("give --years or --depth")
+    soil = None
+    if args.soil:
+        soil = {k: f"{args.soil}_{k}.tif" for k in ("ksat", "suction", "deficit_average", "deficit_dry",
+                                                     "fallback")}
+        missing = [p for p in soil.values() if not Path(p).exists()]
+        if missing:
+            raise ValueError(f"--soil: missing {', '.join(missing)}")
+    drains = None
+    if args.drain_years is not None:
+        drains = {"years": args.drain_years, "hours": args.drain_hours,
+                  "min_impervious": args.drain_min_impervious}
+    table = storm_response(args.results, hours=args.hours, years=args.years, depth_mm=args.depth,
+                           method=args.method, curve_numbers=args.curve_numbers,
+                           curve_number=args.curve_number, condition=args.condition,
+                           impervious=args.impervious, soil=soil, pattern=args.pattern, case=args.case,
+                           percent=args.percent, seepage=False if args.no_seepage else None,
+                           drains=drains, ponding_depth_m=args.ponding_depth, after_hours=args.after_hours,
+                           step_minutes=args.step_minutes, min_coverage=args.min_coverage,
+                           cache_dir=args.cache_dir, workers=args.workers)
+    hours = f"{args.hours:g}h".replace(".", "p")
+    name = args.name or (f"{args.years}yr_{hours}" if args.years is not None
+                         else f"{args.depth:g}mm_{hours}".replace(".", "p"))
+    path = write_storm(args.results, table, name)
+    known = table["inflow_m3"].notna()
+    filled = table["time_to_fill_h"].notna()
+    still = np.isinf(table["ponding_hours"])
+    after = table.attrs["settings"]["after_hours"]
+    median_fill = np.nanmedian(table["time_to_fill_h"]) if filled.any() else float("nan")
+    print(f"{len(table):,} depressions, known for {int(known.sum()):,}; filled: {int(filled.sum()):,} "
+          f"(median after {median_fill:.1f} h); still holding at least {args.ponding_depth:g} m of "
+          f"water {after:g} h after the rain: {int(still.sum()):,}")
+    print(f"written to {path}")
+    return 0
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     try:
         commands = {"analyze": _analyze, "fetch-dem": _fetch, "map": _map,
                     "fetch-landcover": _landcover, "rainfall": _rainfall, "build": _build,
                     "verify": _verify, "clip": _clip, "validate": _validate, "index": _index,
-                    "drainage": _drainage}
+                    "drainage": _drainage, "storm": _storm}
         return commands[args.command](args)
     except (ValueError, OSError, ImportError) as exc:
         raise SystemExit(f"error: {exc}") from exc

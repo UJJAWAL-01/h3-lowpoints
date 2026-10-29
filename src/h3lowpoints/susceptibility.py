@@ -192,9 +192,10 @@ def _storms(rain, cache_dir):
     raise ValueError(f"rain must be None, 'atlas14', a depth in mm or a dict, got {rain!r}")
 
 
-def _tables(result, rows):
-    """(depressions, catchment chunks, meta) of a result in memory or a folder."""
-    columns = ["id", "volume_m3", "catchment_area_m2", "spill_to"]
+def _tables(result, rows, extra=()):
+    """(depressions, catchment chunks, meta) of a result in memory or a folder; the depressions
+    with their id, volume, catchment area and spill link, and the `extra` columns."""
+    columns = ["id", "volume_m3", "catchment_area_m2", "spill_to", *extra]
     if isinstance(result, Result) and result.depressions is not None:
         deps, meta = result.depressions, result.meta
         if result.catchments is None or "spill_to" not in deps:
@@ -209,6 +210,53 @@ def _tables(result, rows):
                          f"({folder} has no catchments table)")
     deps = pd.concat(list(iter_table(folder, "depressions", rows, columns=columns)), ignore_index=True)
     return deps, (lambda: iter_table(folder, "catchments", rows)), read_meta(folder)
+
+
+def catchment_sums(ids, catchment_chunks, sources, samplers):
+    """Area sums over each depression's catchment, read chunk by chunk.
+
+    ids               the depressions' ids
+    catchment_chunks  function giving the catchment table (id, h3, area_m2) in chunks
+    sources           {name: (lookup, description)} of per-cell inputs (`_cell_source`)
+    samplers          storms: each a depth in mm or a function of (lat, lon) giving mm
+
+    Returns (covered, summed, rain_area, rain_sum): per input, the catchment area where it is
+    known and the area-weighted sum of its values there; per depression and storm, the same for
+    the rain (shape n x storms).
+    """
+    n, n_storms = len(ids), len(samplers)
+    by_id = np.argsort(ids, kind="stable")
+    covered = {name: np.zeros(n) for name in sources}         # area where the input is known
+    summed = {name: np.zeros(n) for name in sources}          # area x value there
+    rain_area, rain_sum = np.zeros((n, n_storms)), np.zeros((n, n_storms))
+    for chunk in catchment_chunks():
+        if len(chunk) == 0:
+            continue
+        at = np.minimum(np.searchsorted(ids[by_id], chunk["id"].to_numpy()), max(n - 1, 0))
+        hit = ids[by_id][at] == chunk["id"].to_numpy() if n else np.zeros(len(chunk), bool)
+        pos, area = by_id[at[hit]], chunk["area_m2"].to_numpy(dtype=float)[hit]
+        cells, inverse = np.unique(ids_to_int(list(chunk["h3"][hit])), return_inverse=True)
+        u, inv = np.unique(pos, return_inverse=True)
+
+        def add(target, values, col=None):
+            sums = np.bincount(inv, weights=values, minlength=len(u))
+            if col is None:
+                target[u] += sums
+            else:
+                target[u, col] += sums
+        for name, (lookup, _) in sources.items():
+            value = lookup.lookup(cells)[inverse] if len(cells) else np.zeros(0)
+            known = ~np.isnan(value)
+            add(covered[name], np.where(known, area, 0.0))
+            add(summed[name], np.where(known, area * np.nan_to_num(value), 0.0))
+        if n_storms:
+            rain_cells = _rain_on(cells, samplers)
+            for s in range(n_storms):
+                p = rain_cells[s][inverse]
+                known = ~np.isnan(p)
+                add(rain_area, np.where(known, area, 0.0), s)
+                add(rain_sum, np.where(known, area * np.nan_to_num(p), 0.0), s)
+    return covered, summed, rain_area, rain_sum
 
 
 def susceptibility(result, *, curve_numbers=None, curve_number=None, impervious=None, rain=None,
@@ -252,40 +300,10 @@ def susceptibility(result, *, curve_numbers=None, curve_number=None, impervious=
     keys, samplers, rain_text = _storms(rain, cache_dir)
     n, n_storms = len(deps), len(keys)
     ids = deps["id"].to_numpy(dtype=np.int64)
-    by_id = np.argsort(ids, kind="stable")
     volume = deps["volume_m3"].to_numpy(dtype=float)
     catch = deps["catchment_area_m2"].to_numpy(dtype=float)
 
-    covered = {name: np.zeros(n) for name in sources}         # area where the input is known
-    summed = {name: np.zeros(n) for name in sources}          # area x value there
-    rain_area, rain_sum = np.zeros((n, n_storms)), np.zeros((n, n_storms))
-    for chunk in catchment_chunks():
-        if len(chunk) == 0:
-            continue
-        at = np.minimum(np.searchsorted(ids[by_id], chunk["id"].to_numpy()), max(n - 1, 0))
-        hit = ids[by_id][at] == chunk["id"].to_numpy() if n else np.zeros(len(chunk), bool)
-        pos, area = by_id[at[hit]], chunk["area_m2"].to_numpy(dtype=float)[hit]
-        cells, inverse = np.unique(ids_to_int(list(chunk["h3"][hit])), return_inverse=True)
-        u, inv = np.unique(pos, return_inverse=True)
-
-        def add(target, values, col=None):
-            sums = np.bincount(inv, weights=values, minlength=len(u))
-            if col is None:
-                target[u] += sums
-            else:
-                target[u, col] += sums
-        for name, (lookup, _) in sources.items():
-            value = lookup.lookup(cells)[inverse] if len(cells) else np.zeros(0)
-            known = ~np.isnan(value)
-            add(covered[name], np.where(known, area, 0.0))
-            add(summed[name], np.where(known, area * np.nan_to_num(value), 0.0))
-        if n_storms:
-            rain_cells = _rain_on(cells, samplers)
-            for s in range(n_storms):
-                p = rain_cells[s][inverse]
-                known = ~np.isnan(p)
-                add(rain_area, np.where(known, area, 0.0), s)
-                add(rain_sum, np.where(known, area * np.nan_to_num(p), 0.0), s)
+    covered, summed, rain_area, rain_sum = catchment_sums(ids, catchment_chunks, sources, samplers)
 
     with np.errstate(invalid="ignore", divide="ignore"):
         def mean(name):

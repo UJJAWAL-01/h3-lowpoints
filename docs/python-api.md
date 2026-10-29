@@ -300,6 +300,66 @@ through, found by points every `step` metres along them (default a third of the 
 about `batch` points at a time so that a state's millions of lines fit in memory.
 `drainage.in_sorted(values, sorted_values)` tells which values are in such a sorted array.
 
+## Storms in time: `h3lowpoints.storms`
+
+The duration model: one storm followed in time steps. See [Storms in time](storms.md).
+
+### `storms.storm_response(result, *, hours, years=None, depth_mm=None, method="curve-number", curve_numbers=None, curve_number=None, condition="average", impervious=None, soil=None, pattern="atlas14", case="all", percent=50, seepage=None, drains=None, ponding_depth_m=0.1, after_hours=72.0, step_minutes=5.0, rarity=True, min_coverage=0.9, cache_dir=None, rows=500000, workers=1)`
+
+One row per depression (`storms.STORM_COLUMNS`, plus the inputs used): when it fills, how deep
+it gets, where its water goes and how long it stands ([Outputs](outputs.md#storm-tables)).
+Returns a DataFrame whose `attrs["settings"]` hold the settings; write it with `write_storm`.
+
+| Parameter | Meaning |
+|---|---|
+| `result` | A `Result` computed with `catchments=True`, or its folder. |
+| `hours` | How long it rains. |
+| `years`, `depth_mm` | The storm, one of the two: NOAA Atlas 14's storm of `years` (`ATLAS14_YEARS`) and `hours` on each catchment; or a depth in mm, or a function of (lat, lon) giving mm. |
+| `method` | `"curve-number"` (SCS runoff of the rain fallen so far) or `"green-ampt"` (infiltration). |
+| `curve_numbers`, `curve_number` | Method curve-number: as in `susceptibility`. |
+| `condition` | `"average"`, `"dry"` or `"wet"` ground before the storm. |
+| `impervious` | Percent paved per cell (raster, table, DataFrame with `impervious_pct`); for green-ampt and drains. |
+| `soil` | For green-ampt and seepage: the dict of `fetch_soil_infiltration`, or a dict with `ksat` (mm/h), `suction` (mm), `deficit_average`, `deficit_dry` (shares) and optionally `fallback`, each a raster, table (column named as the key), DataFrame or number. |
+| `pattern`, `case`, `percent` | `"atlas14"` (NOAA's curve of the region at the lowest point, chosen by `case` and `percent`), `"uniform"`, or a pair (time shares, cumulative rain shares). |
+| `seepage` | Seepage through the floor; by default on when `soil` is given. |
+| `drains` | None, or `{"years": N, "hours": T, "min_impervious": 20}`: catchments at least that percent paved lose rain up to the intensity of the N-year, T-hour Atlas 14 storm. |
+| `ponding_depth_m`, `after_hours` | Standing water is at least this deep; the run continues this long after the rain. |
+| `step_minutes` | The storm is cut into equal steps of about this many minutes. |
+| `rarity` | Give each depression `storm_years` (needs the Atlas 14 grids; NaN when False). |
+| `min_coverage`, `cache_dir`, `rows`, `workers` | As in `susceptibility`; `cache_dir` also keeps the temporal distributions and region maps. |
+
+### `storms.write_storm(folder, table, name)`
+
+Writes the table as `storm_<name>.<format>` in a result folder, in the format of its tables, and
+its settings in `meta.json` under `storms.<name>`. `verify.check_storms` checks these tables
+(water balance, bounds, ids); `check_saved` runs it.
+
+### `storms.simulate(spill_to_index, depth_mm, cum, *, catch_area, volume, area, max_depth, dt, n_after=0, method="curve-number", curve_number=None, impervious=None, ksat_mm_h=None, suction_deficit_mm=None, seepage_mm_h=None, drain_mm_h=None, ponding_depth_m=0.1, pattern_of=None)`
+
+The model on plain arrays, one value per depression, for your own inputs (real radar rain, say:
+one cumulative curve per depression in `cum` and `pattern_of = arange(n)`). Returns a dict of
+arrays (`own_m3`, and the water columns of the storm table) and the water that left the table.
+
+### `storms.green_ampt_step(F, ks, sd, hours)`
+
+Cumulative infiltration (mm) after `hours` with water standing on the ground, starting from `F`
+mm, for conductivity `ks` (mm/h) and suction x water deficit `sd` (mm): the implicit Green-Ampt
+equation solved exactly.
+
+### `storms.pattern_steps(times, cumulative, n_steps)`
+
+A cumulative rain curve (shares of the duration and of the rain) at the ends of `n_steps` equal steps.
+
+### `runoff.adjust_curve_number(cn, condition="average")`
+
+Curve number for `"dry"` (ARC I) or `"wet"` (ARC III) ground from the average one, by NRCS's
+table 10-1 (`runoff.ARC_TABLE`), linear between its rows.
+
+### `runoff.texture_class(name)`
+
+The USDA texture class of an NRCS texture name ("Fine sandy loam" gives "sandy loam"), or None;
+its wetting-front suction is `runoff.SUCTION_MM[...]` (Rawls, Brakensiek and Miller, 1983).
+
 ## Verification: `h3lowpoints.verify`
 
 See [Verification](verification.md) for what each check means.
@@ -308,7 +368,8 @@ See [Verification](verification.md) for what each check means.
 |---|---|
 | `check_result(result)` | List of problems (empty when every invariant holds). Works on results in memory and on disk. |
 | `check_tables(depressions, cells, meta, catchments=None, depression_cells=None, susceptibility=None)` | The same for the tables (the susceptibility table with its index and drainage columns). |
-| `check_saved(folder, rows=500000)` | The same for a saved folder, reading the cell table `rows` at a time so any size can be checked. |
+| `check_saved(folder, rows=500000)` | The same for a saved folder, reading the cell table `rows` at a time so any size can be checked; includes `check_storms`. |
+| `check_storms(folder, meta=None, rows=500000)` | Problems in a folder's storm tables: missing tables, depressions not in the depression table or listed twice, water not conserved, fills or hours out of bounds. |
 | `compare_results(a, b, rel=1e-9)` | Differences between two results of the same data (empty when they agree). |
 | `spot_check(dem_path, *, windows=3, size=600, tile=170, seed=0, **params)` | Cuts `windows` random `size` × `size` windows from a raster, analyzes each whole and tiled, and returns every disagreement or invariant failure. `params` go to both analyses (`res`, `min_depth`, ...). |
 
@@ -424,6 +485,24 @@ that raster's grid exactly, which is how to combine the groups with an NLCD down
 pixel. The map-unit table (12.5 MB) is kept in `cache_dir`. `sources.soils.group_table`,
 `tiles` and `to_groups` are its parts.
 
+### `sources.soils.fetch_soil_infiltration(bbox, out_stem, *, cache_dir, like=None, resolution=30.0, get=read_bytes, opener=None, post=_post)`
+
+Writes the Green-Ampt soil rasters of a box (`<stem>_ksat.tif`, `_suction.tif`,
+`_deficit_average.tif`, `_deficit_dry.tif`, `_fallback.tif`) on the grid of `fetch_soil_groups`
+and returns their paths in a dict. Map units come from the gNATSGO grid; their horizons from
+USDA Soil Data Access, kept in `cache_dir` ([Data sources](data-sources.md#usda-soil-survey-how-fast-water-soaks-in)).
+
+### `sources.soils.infiltration_table(mukeys, cache_dir, *, batch=500, post=_post)`
+
+The Green-Ampt parameters of map units (`mukey`, `ksat_mm_h`, `suction_mm`, `theta_sat`,
+`theta_fc`, `theta_wp`, `texture`, `component`, `comppct`), each asked of Soil Data Access once
+and kept in `cache_dir`. `infiltration_parameters(horizons)` is the rule applied to the rows it
+returns; `sda_query(sql)` runs any query.
+
+### `sources.soils.mukey_grid(bbox, *, like=None, resolution=30.0, get=read_bytes, opener=None)`
+
+(map-unit keys, transform, CRS) of the gNATSGO grid on the output grid of `fetch_soil_groups`.
+
 ### `sources.roads.fetch_roads(bbox, out_path=None, *, cache_dir, year=2024, get=read_bytes)`
 
 Every road of the counties a box touches, from Census TIGER/Line, cut to the box: a GeoDataFrame
@@ -461,6 +540,22 @@ grid cell containing it, the mean where two project areas overlap, NaN where non
 (Washington, Oregon, the sea, outside the US). A grid is downloaded and read the first time a
 point falls within its project area's extent (`ATLAS14_EXTENTS`), so a city needs only its own
 area's grids; `grid(volume, years)` returns one grid as `(values, west, north, cell)`.
+
+### `sources.rainfall.Atlas14Storms(*, cache_dir=None, volumes=None)`
+
+NOAA Atlas 14 storms of any duration from 5 minutes to 60 days. `depth(years, hours, lat, lon)`:
+depth in mm, interpolated between published durations in log(depth) against log(duration);
+`depths(hours, lat, lon)`: at every return period; `return_period(depth_mm, hours, lat, lon)`:
+years between such storms (0 below the 1-year storm, inf above the 1000-year storm, NaN outside
+Atlas 14). `years_of_depth(depth_mm, table)` is the rule on depths you already have.
+
+### `sources.rainfall.TemporalPatterns(*, cache_dir=None)`
+
+NOAA Atlas 14 temporal distributions. `region(lat, lon)`: the region name at each point (None
+outside); `pattern(name, hours, case="all", percent=50)`: (time shares, cumulative rain shares)
+of the published duration nearest to `hours` (6, 12, 24 or 96); `table(name, hours)`: every
+curve. `parse_temporal(text)` reads one of NOAA's files, in either layout;
+`temporal_url(name, hours)` gives its address.
 
 ### `sources.rainfall.atlas14_grid_url(volume, years, duration="24h")`
 

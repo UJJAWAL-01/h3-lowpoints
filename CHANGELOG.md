@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.5.0 (unreleased)
+
+### Added
+- **Storms in time** (`storms.storm_response`, `write_storm`, `simulate`; `h3lowpoints storm`):
+  one storm followed in steps of about 5 minutes over a result with catchments, so its length
+  matters. Per depression: the storm's depth and return period, runoff, all water reaching it,
+  peak volume, depth and fill, when it filled, overflow, seepage, water carried by assumed
+  drains, water left, and how many hours water stood at least 0.1 m deep (`ponding_hours`). Two
+  runoff methods: SCS curve numbers applied as the rain falls (`curve-number`; the same total as
+  the index) and Green-Ampt infiltration (`green-ampt`; intense rain runs off more). Dry, average
+  or wet ground (`condition`). Seepage through depression floors from the soil survey; storm
+  drains only as a rule you set (`drains`), off by default. Depressions are bowls with
+  V(h) = V (h/H)^k, k = A H / V. Water conserved in every depression (tested to 1e-9). Tables
+  saved as `storm_<name>.csv` or `.parquet` with settings in `meta.json`, carried by `clip` and
+  checked by `verify` (`check_storms`). See [docs/storms.md](docs/storms.md).
+- `sources.rainfall.Atlas14Storms`: NOAA Atlas 14 depth for any duration from 5 minutes to 60
+  days (log-log between published durations) and the return period of any storm (log years
+  between published return periods; 0 below the 1-year and inf above the 1000-year storm).
+  Checked by leaving published values out at 12 cities: median error 1.2% (depth) and 3.3%
+  (return period).
+- `sources.rainfall.TemporalPatterns`: NOAA Atlas 14 temporal distributions (6, 12, 24, 96 hours;
+  quartile and all-case curves, 10% to 90%) for the 30 regions of the lower 48 states, with
+  NOAA's region maps; both of NOAA's file layouts are read.
+- `sources.soils.fetch_soil_infiltration` (`fetch-landcover --from soil-infiltration`): Green-Ampt
+  soil rasters (conductivity of the least conductive layer in the top 50 cm, suction by texture
+  from Rawls et al. 1983, water deficits from field capacity and the wilting point) from the
+  gNATSGO map units and USDA Soil Data Access, with a stated fallback where the survey has no
+  usable data; `infiltration_table`, `mukey_grid`, `sda_query`.
+- `runoff.adjust_curve_number`: ARC I and III curve numbers from NRCS's table 10-1 (NEH 630
+  chapter 10); `runoff.texture_class` and `runoff.SUCTION_MM`.
+- `fetch-landcover --like RASTER` for soil groups and soil infiltration.
+
+### Changed
+- `susceptibility.catchment_sums` holds the catchment averaging shared by the index and the
+  storms (no change in results).
+
 ## 0.4.0 (28 October 2026)
 
 ### Added

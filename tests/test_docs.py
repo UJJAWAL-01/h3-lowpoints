@@ -14,6 +14,7 @@ from h3lowpoints.pipeline import (BUILDING_COLUMNS, CATCHMENT_COLUMNS, CATCHMENT
                                   CORE_COLUMNS, DEPRESSION_CELL_TABLE, DETAIL_COLUMNS,
                                   DRAIN_COLUMNS)
 from h3lowpoints.drainage import DRAINAGE_COLUMNS
+from h3lowpoints.storms import STORM_COLUMNS
 from h3lowpoints.susceptibility import BASE_COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,7 +90,8 @@ def test_every_column_is_documented():
     for column in (CORE_COLUMNS + DRAIN_COLUMNS + BUILDING_COLUMNS + CATCHMENT_COLUMNS + CELL_TABLE
                    + CATCHMENT_TABLE + DETAIL_COLUMNS + DEPRESSION_CELL_TABLE + BASE_COLUMNS
                    + ["fill_ratio", "fill_ratio_2yr", "fill_ratio_10yr", "fill_ratio_100yr",
-                      "fills_in_years"] + DRAINAGE_COLUMNS):
+                      "fills_in_years"] + DRAINAGE_COLUMNS + STORM_COLUMNS
+                   + ["curve_number", "seepage_mm_h", "drain_mm_h", "soil_fallback_share"]):
         assert f"`{column}`" in text, f"column {column} is not described in outputs.md"
 
 

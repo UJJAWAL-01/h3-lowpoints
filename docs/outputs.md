@@ -14,6 +14,7 @@ three files in a folder. This page describes every file, column and field.
 | `catchments.csv` or `catchments.parquet` | results computed with `catchments=True` (`--catchments`) | the catchment table |
 | `depression_cells.csv` or `depression_cells.parquet` | results computed with `details=True` (`--details`) | the depression × cell table |
 | `susceptibility.csv` or `susceptibility.parquet` | `h3lowpoints index` or `write_susceptibility` (results with catchments) | the susceptibility table |
+| `storm_<name>.csv` or `.parquet` | `h3lowpoints storm` or `write_storm` (results with catchments) | one storm followed in time ([storm tables](#storm-tables)) |
 | `meta.json` | every saved result | settings, versions, counts |
 | `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
 | `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
@@ -228,6 +229,40 @@ water from one whose runoff is unknown (see
 [Susceptibility](susceptibility.md#missing-inputs-and-coverage)). Rows are in the order of the
 depression table. A clipped result keeps the rows of the depressions it keeps.
 
+## Storm tables
+
+Written by `h3lowpoints storm` (or `storms.write_storm`) as `storm_<name>.csv` or `.parquet`, one
+per storm: one row per depression, following one storm in time steps. The method is in
+[Storms in time](storms.md). The settings of each storm are in `meta.json` under `storms`.
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | The depression. |
+| `storm_mm` | float | mm | Rain of the storm on its catchment (area-weighted mean over the catchment's H3 cells). |
+| `storm_hours` | float | h | How long it rains. |
+| `storm_years` | float | years | Return period of `storm_mm` in `storm_hours` at the lowest point, from NOAA Atlas 14 (average recurrence interval, partial-duration series); `0` when smaller than the 1-year storm, `inf` when larger than the 1000-year storm, NaN outside Atlas 14 or when not asked for. |
+| `runoff_mm` | float | mm | Runoff of its own catchment over the whole storm, as a depth over the catchment. |
+| `inflow_m3` | float | m³ | All water reaching it: its own runoff plus overflow from upstream. |
+| `peak_volume_m3` | float | m³ | The most water it held at any time. |
+| `peak_depth_m` | float | m | Water depth at its lowest point at that time (from the bowl shape, see [Storms in time](storms.md#the-shape-of-a-depression)). |
+| `peak_fill` | float | 0 to 1 | `peak_volume_m3` over its volume; 1: it filled. |
+| `time_to_fill_h` | float | h | Hours from the start of the rain until it was full; NaN if it never filled. |
+| `overflow_m3` | float | m³ | Water it passed on over its rim (to `spill_to`, or off the map). |
+| `seepage_m3` | float | m³ | Water that seeped through its floor. |
+| `drained_m3` | float | m³ | Water carried away by the assumed storm drains (0 without drains). |
+| `water_left_m3` | float | m³ | Water still in it at the end of the run. |
+| `ponding_hours` | float | h | Hours with water at least `ponding_depth_m` deep at the lowest point; `inf` when still that deep at the end of the run. |
+| `curve_number` | float | 0 to 100 | Method curve-number only: the curve number used (the catchment's, adjusted for dry or wet ground). |
+| `impervious_pct`, `ksat_mm_h`, `suction_mm`, `water_deficit` | float | %, mm/h, mm, share | Method green-ampt only: the catchment's mean percent paved, saturated conductivity, wetting-front suction and water the soil can still take in (share of its volume). |
+| `soil_fallback_share` | float | 0 to 1 | Method green-ampt with the soil rasters: share of the catchment where the soil survey had no usable data and the fallback values were used. |
+| `seepage_mm_h` | float | mm/h | With seepage: the rate water seeps through the floor (conductivity at the lowest point times the unpaved share there). |
+| `drain_mm_h` | float | mm/h | With drains: the rain rate the assumed drains carry from the catchment (0 where it is not paved enough). |
+
+NaN in every water column means unknown: an input the method needs does not cover enough of the
+catchment (`min_coverage`), the soil or the rain pattern is unknown at the lowest point, or the
+depression receives water from one that is unknown. For every depression, `inflow_m3` equals
+`overflow_m3 + seepage_m3 + drained_m3 + water_left_m3` (tested to 1e-9).
+
 ## meta.json
 
 | Field | Meaning |
@@ -251,6 +286,7 @@ depression table. A clipped result keeps the rows of the depressions it keeps.
 | `output` | Saved results: `format` (`csv` or `parquet`) and `n_cells` (rows in the cell table). |
 | `clip` | Clipped results only: `boundary`, the membership `rule`, and `depressions_before` and `cells_before` (the counts before clipping). |
 | `susceptibility` | Results with a susceptibility table only: `runoff` (the runoff rule), `curve_numbers` and `impervious` (their sources, or `null`), `rain` (the storms' source, or `null`), `years` (the storms' return periods), `ratio_years`, `min_coverage`, `upstream_rel` (the precision of `rain_to_fill_upstream_mm`), `package_version`, and `clipped_after` (true when the result was clipped after the table was made); with drainage flags, `drainage`: the sources of `streams`, `canals`, `roads` and `land_cover`, `near_m`, `min_share`, `max_distance_m`, the `crs` distances were measured in, whether `channel_share` was measured, and `package_version`. |
+| `storms` | Results with storm tables only: one entry per storm name, with `method`, `condition`, `hours`, `storm` (its source), `pattern`, `step_minutes` (the step used), `after_hours`, `seepage`, `drains` (the drain rule, or `null`), `ponding_depth_m`, `min_coverage`, `water_left_table_m3` (water that flowed off the map), `inputs` (the per-cell inputs and their sources), `package_version`, and `clipped_after` when the result was clipped after the storm was run. |
 | `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis (of the last part, for a run made in parts); with `--water-mask`, also `water_mask`, the rule that made the mask. |
 
 Example (from `examples/quickstart.py`):

@@ -95,6 +95,58 @@ def rain_for_runoff_mm(runoff, cn):
     return 0.2 * s + (q + np.sqrt(q * q + 4.0 * q * s)) / 2.0
 
 
+# NRCS National Engineering Handbook Part 630, chapter 10 (July 2004), table 10-1: curve number
+# for average conditions (ARC II) -> ARC I (dry) and ARC III (wet), "CN:I:III"
+_TABLE_10_1 = (
+    "100:100:100 99:97:100 98:94:99 97:91:99 96:89:99 95:87:98 94:85:98 93:83:98 92:81:97 91:80:97 "
+    "90:78:96 89:76:96 88:75:95 87:73:95 86:72:94 85:70:94 84:68:93 83:67:93 82:66:92 81:64:92 "
+    "80:63:91 79:62:91 78:60:90 77:59:89 76:58:89 75:57:88 74:55:88 73:54:87 72:53:86 71:52:86 "
+    "70:51:85 69:50:84 68:48:84 67:47:83 66:46:82 65:45:82 64:44:81 63:43:80 62:42:79 61:41:78 "
+    "60:40:78 59:39:77 58:38:76 57:37:75 56:36:75 55:35:74 54:34:73 53:33:72 52:32:71 51:31:70 "
+    "50:31:70 49:30:69 48:29:68 47:28:67 46:27:66 45:26:65 44:25:64 43:25:63 42:24:62 41:23:61 "
+    "40:22:60 39:21:59 38:21:58 37:20:57 36:19:56 35:18:55 34:18:54 33:17:53 32:16:52 31:16:51 "
+    "30:15:50 25:12:43 20:9:37 15:6:30 10:4:22 5:2:13 0:0:0")
+ARC_TABLE = np.array(sorted(tuple(int(v) for v in row.split(":")) for row in _TABLE_10_1.split()),
+                     dtype=float)
+CONDITIONS = {"dry": "ARC I", "average": "ARC II", "wet": "ARC III"}
+
+
+def adjust_curve_number(cn, condition="average"):
+    """Curve number for dry ("dry", ARC I), average or wet ("wet", ARC III) conditions before a
+    storm, from the average one by NRCS's table 10-1 (NEH 630 ch. 10), linear between its rows.
+
+    NRCS describes ARC I and III as the low and high ends of the spread of runoff seen for the
+    same ground (about the 10% and 90% curve numbers), which past practice tied to rain in the
+    5 days before; they are not exact soil-moisture states.
+    """
+    if condition not in CONDITIONS:
+        raise ValueError(f"condition must be one of {list(CONDITIONS)}, got {condition!r}")
+    cn = np.asarray(cn, dtype=float)
+    if condition == "average":
+        return cn
+    column = 1 if condition == "dry" else 2
+    out = np.interp(cn, ARC_TABLE[:, 0], ARC_TABLE[:, column])
+    return np.where(np.isnan(cn), np.nan, out)
+
+
+# Green-Ampt wetting-front suction head, mm, by USDA texture class: Rawls, Brakensiek and Miller
+# (1983), J. Hydraul. Eng. 109(1), table 2, rows for the whole class. Silt has no row there (too
+# few samples): it takes silt loam's value, an assumption
+SUCTION_MM = {"sand": 49.5, "loamy sand": 61.3, "sandy loam": 110.1, "loam": 88.9,
+              "silt loam": 166.8, "silt": 166.8, "sandy clay loam": 218.5, "clay loam": 208.8,
+              "silty clay loam": 273.0, "sandy clay": 239.0, "silty clay": 292.2, "clay": 316.3}
+
+
+def texture_class(name):
+    """The USDA texture class of an NRCS texture name ("Fine sandy loam" -> "sandy loam"), or
+    None for names that are not mineral textures (muck, peat, bedrock, missing)."""
+    if not isinstance(name, str):
+        return None
+    words = name.lower().replace("very fine", "").replace("coarse", "").replace("fine", "").split()
+    base = " ".join(words)
+    return base if base in SUCTION_MM else None
+
+
 def fetch_curve_numbers(bbox, out_path, *, cache_dir, year=None, source="annual"):
     """Write composite curve numbers (float32, NaN for no data) for a lon/lat box in the lower 48
     US states: NLCD land cover and imperviousness of `year` (Annual NLCD 2024 by default; `source`

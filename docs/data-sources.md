@@ -169,6 +169,37 @@ so nothing is gained by it. Checked in October 2026 on three test boxes: Houston
 (clays), North Dakota's mostly C, the Central Valley's a mix of A to D. The table lists one unit
 twice ("Water"), which is harmless and dropped.
 
+## USDA soil survey: how fast water soaks in
+
+- **What:** for each soil map unit, the horizons of its components with their saturated
+  hydraulic conductivity (`ksat_r`), water content at saturation, 1/3 bar (field capacity) and
+  15 bar (wilting point), and texture class, from the Soil Survey Geographic Database (SSURGO).
+- **Where:** the lower 48 states (the map units of the gNATSGO grid above).
+- **Licence:** USDA data are public domain.
+- **Access:** USDA's Soil Data Access service (`https://sdmdataaccess.sc.egov.usda.gov`), which
+  answers SQL queries without an account; the library asks for 500 map units at a time and keeps
+  the answers. Microsoft's copy of gNATSGO has the horizon table too, but for the lower 48 states
+  it is empty (checked in October 2026: its Texas part has no rows; only Palau has data), so it
+  cannot be used.
+- **Edition:** Soil Data Access serves the current survey, while the grid of map units is the
+  July 2020 edition. 98.3% of a random 3,000 of the 2020 map units still exist in it (measured in
+  October 2026); the rest fall back (below).
+- **Library:** `sources.soils.fetch_soil_infiltration`, `h3lowpoints fetch-landcover --from
+  soil-infiltration`; used by the Green-Ampt method and by seepage ([Storms in time](storms.md)).
+
+The rule, per map unit: the component with the largest share that has a usable surface horizon
+(a mineral texture class, and the three water contents) and a conductivity for every horizon
+starting above 50 cm. Its conductivity is the least of those horizons: NRCS judges hydrologic
+groups by the least transmissive layer in the top 50 cm (National Engineering Handbook Part 630,
+chapter 7), so conductivity and group follow the same rule. The wetting-front suction comes from
+the surface horizon's texture class through the table of Rawls, Brakensiek and Miller (1983,
+Journal of Hydraulic Engineering 109(1), table 2, values for the whole class; silt, which has no
+row there, takes silt loam's). NRCS's 21 texture names map to the 12 USDA classes by dropping
+the sand-size words ("fine sandy loam" is sandy loam). Map units without such a component (urban
+land, water, pits, rock, units renamed since 2020) take the **fallback**: conductivity 1 µm/s
+(3.6 mm/h, the most a group D soil conducts), no water deficit and no suction, so the ground
+takes in water only slowly. The share of each catchment on the fallback is reported.
+
 ## USGS National Hydrography Dataset (NHD)
 
 - **What:** the mapped surface water of the US at high resolution (1:24,000 or finer): streams
@@ -306,6 +337,36 @@ Where two project areas meet, both have values in a thin strip (0.4% of covered 
 they differ by about 5% typically and up to 41% (100-year 24-hour grids), as NOAA notes
 discrepancies at project boundaries are inevitable, and the mean is used. The 24-hour grid
 matches the point service to within 1% (a network test, at Houston).
+
+**Storms of any duration and their rarity.** `Atlas14Storms` reads the grids of every published
+duration (`05m` to `60d`; NOAA names the 1-hour grid `60m`) as needed. A duration between two
+published ones gets the depth interpolated linearly in log(depth) against log(duration); a depth
+gets its return period interpolated linearly in log(years) between the published return periods,
+0 below the 1-year storm and inf above the 1000-year storm (beyond Atlas 14; nothing is
+extrapolated). Both rules were checked against NOAA's point estimates at 12 US cities by leaving
+each published value out and predicting it from its neighbours (`h3lowpoints-data`, October 2026):
+depth across durations, median error 1.2%, 90th percentile 3.8%, worst 11.8% (2,040 values);
+return period, median 3.3%, 90th percentile 9.4%, worst 46% (1,824 values). Leaving a value out
+doubles the gap it is predicted across, so in use the errors are likely smaller; this is not
+proven. The grids the library reads are the partial-duration series (NOAA also publishes
+annual-maximum grids, `_ams`); their return periods are average recurrence intervals.
+
+**How storms unfold.** NOAA publishes temporal distributions with Atlas 14: for 6, 12, 24 and
+96-hour storms, the cumulative share of the rain by each time, for storms with most rain in the
+first, second, third or fourth quarter and for all storms, each as nine curves (10% to 90% of
+storms had at least that much rain by then; 50% is the median). There are 120 files for the
+lower 48 states, in two layouts (volumes 1 and 2, and the later ones), and a map of regions per
+volume (`https://hdsc.nws.noaa.gov/pfds/shapefiles/`): 30 regions, for example `tx_3` around
+Houston, `ne_2` around New York, `ca_1` to `ca_14` in California. Volume 1's two areas are
+"general" (area 1) and "convective" (area 2), as NOAA's own page names them. Checked in October
+2026: every file reads, every curve runs from 0 to 100%; in 51 curves rounding makes the share
+fall back by at most 0.03 percentage points, which the library holds level; the regions of
+different volumes overlap only in thin strips along their borders (at most 1,018 km², under 1% of
+a region; a point there takes the newer volume's region), except that volume 8's region 4 and
+volume 9's region 1 are the same area with identical files. Washington and Oregon have none.
+`TemporalPatterns` reads them; a storm of another duration takes the curve of the published
+duration nearest in log time, stretched to its length, an assumption since NOAA publishes these
+four only.
 
 ## US Census Bureau boundaries
 
