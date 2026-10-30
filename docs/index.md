@@ -33,6 +33,7 @@ fills ([Susceptibility](susceptibility.md)), is published as open data:
 | Know how results are checked, and check your own | [Verification](verification.md) |
 | Test the depressions against observed flooding | [Validation](validation.md) |
 | Know how easily each depression fills in a storm | [Susceptibility](susceptibility.md) |
+| See what has been tested against real floods, and what failed | [Evidence](evidence.md) |
 | See example maps of three test areas | [Example maps](example-maps.md) |
 | Know what the results cannot tell you | [Accuracy and limits](limitations.md) |
 | Look up a term | [Glossary](glossary.md) |
@@ -61,11 +62,13 @@ fills ([Susceptibility](susceptibility.md)), is published as open data:
     fills it, and design storms.
 13. [Storms in time](storms.md): how long it rains: storms of any duration and their rarity,
     how the rain falls, two runoff methods, seepage, assumed drains, and how long water stands.
-14. [Example maps](example-maps.md): interactive maps of three test areas (Houston, North Dakota,
+14. [Evidence](evidence.md): every study against real floods and terrain, with what worked and
+    what did not.
+15. [Example maps](example-maps.md): interactive maps of three test areas (Houston, North Dakota,
     the Central Valley), a preview of the explorer.
-15. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
-16. [Glossary](glossary.md): terms used across these pages.
-17. [Roadmap](roadmap.md): what is done and what comes next.
+16. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
+17. [Glossary](glossary.md): terms used across these pages.
+18. [Roadmap](roadmap.md): what is done and what comes next.
 
 The [changelog](../CHANGELOG.md) lists every change, and [contributing](../CONTRIBUTING.md) explains
 how to help.

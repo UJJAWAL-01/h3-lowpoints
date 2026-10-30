@@ -86,14 +86,15 @@ Each step is finished, tested and documented before the next starts.
    carries signal, while landlocked depressions did not gather more storm reports than drained
    ones. The national layer is version 0.3 of the dataset:
    [doi.org/10.5281/zenodo.23731345](https://doi.org/10.5281/zenodo.23731345).
-   **Storm duration** (for 0.5.0, in progress): storms of any length and their rarity, NOAA's
-   rain patterns, two runoff methods, seepage, an optional drain rule and how long water stands
-   ([Storms in time](storms.md)). Next, a second study fixed in advance tests it on past storms
-   with their real radar rain, against 311 reports in more cities and FEMA flood-insurance claims.
-4. **Machine learning, only if it earns its place.** Train on the step 3 features, judge it by
-   leave-one-region-out validation (never scored on the place it learned from), and keep it only
-   if it beats the physical index on unseen regions. Labels of street-level waterlogging are
-   scarce and biased towards where people report; that is audited first.
+   **Storm duration**, done in 0.5.0: storms of any length and their rarity, NOAA's rain
+   patterns, two runoff methods, seepage, an optional drain rule and how long water stands
+   ([Storms in time](storms.md)). A second study fixed in advance tested it on ten past storms
+   with their real radar rain in six cities: predicted standing water marks where reports come
+   from, modestly, but no better than the storm total; drain rules made it worse
+   ([Evidence](evidence.md)).
+4. **Machine learning, only if it earns its place.** Tried in 2026 on the same ten storms,
+   each city scored by models trained on the others: the learned model did not beat the physical
+   score in unseen cities and is not kept ([Evidence](evidence.md#machine-learning)).
 5. **The explorer web app.** A website in the spirit of h3geo.org, in a black-and-white design,
    that runs entirely in the visitor's browser (no server, no cost): try the analysis on a small
    box, browse the national layer at every resolution, view depressions flat, as wells below the
@@ -103,10 +104,17 @@ Each step is finished, tested and documented before the next starts.
 6. **Release 0.1.** Done 21 October 2026: the library on PyPI (`pip install h3-lowpoints`), the
    documentation on GitHub Pages, the national dataset on Zenodo. 0.2.0 added validation, 0.3.0
    catchments, levels and fill curves with version 0.2 of the national dataset, 0.4.0 the
-   susceptibility index and drainage flags with version 0.3. The explorer app
-   follows.
+   susceptibility index and drainage flags with version 0.3, 0.5.0 storms in time and the
+   [evidence](evidence.md) of phase 5. The explorer app follows.
 
 ## Also planned
+
+- **Deferred from phase 5** (each needs its own study or check first): a national storm-timing
+  layer (it ranks places like the published index); publishing the storm and report catalogue
+  (the cities' terms for sharing 311 data are to be checked); a national test against FEMA
+  flood-insurance claims (needs radar rain for many more storms); the simple logistic model that
+  did better than the physical score in the machine-learning test, tested in its own study fixed
+  in advance; 10 m terrain for more places.
 
 - **Vertical units.** An option to read heights in feet (or any factor), with the unit recorded
   in `meta.json`; today heights must be in metres ([Accuracy and limits](limitations.md)).

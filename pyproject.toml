@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "h3-lowpoints"
-version = "0.4.0"
+version = "0.5.0"
 description = "Find closed depressions in elevation models and map them on H3 cells at any resolution"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 (unreleased)
+## 0.5.0 (30 October 2026)
 
 ### Added
 - **Storms in time** (`storms.storm_response`, `write_storm`, `simulate`; `h3lowpoints storm`):
@@ -41,6 +41,9 @@
   and what it says in [docs/storms.md](docs/storms.md) and [docs/limitations.md](docs/limitations.md):
   the storm model ranks places like the storm total, methods A and B do equally well, uniform drain
   rules make the ranking worse; defaults unchanged (method A, no drains).
+- Docs: [docs/evidence.md](docs/evidence.md) collects every study of phase 5 (the two validation
+  studies, terrain quality, machine learning), with what worked and what did not; the roadmap lists
+  what is deferred.
 
 ## 0.4.0 (28 October 2026)
 
