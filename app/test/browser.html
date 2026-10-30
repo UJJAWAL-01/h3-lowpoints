@@ -1,0 +1,91 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Explorer browser test</title>
+<pre id="out">running</pre>
+<script type="module">
+// Reads packs by range request from DATA (?data=URL, ?fallback=URL), runs the simulator and
+// compares with the library's reference values written by app/tools/check_sim.py.
+import { loadPack, httpRange } from "../src/pack.js";
+import { simulate } from "../src/sim.js";
+import { parseRarity, returnPeriod } from "../src/rarity.js";
+import { gunzip } from "../src/pack.js";
+
+const q = new URLSearchParams(location.search);
+const hosts = [q.get("data"), q.get("fallback")].filter(Boolean);
+const refBase = q.get("ref") || hosts[0];
+const out = document.getElementById("out");
+const log = { requests: 0, fallbacks: 0, hostUsed: [] };
+
+async function fetchRange(path, start, length) {
+  let last;
+  for (const h of hosts) {
+    try {
+      log.requests++;
+      const bytes = await httpRange(path.replace("{host}", h), start, length);
+      log.hostUsed.push(h);
+      return bytes;
+    } catch (e) { last = e; log.fallbacks++; }
+  }
+  throw last;
+}
+
+async function fetchJson(name) {           // whole small files, with the same fallback
+  let last;
+  for (const h of hosts) {
+    try {
+      log.requests++;
+      const r = await fetch(`${h}/${name}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      log.hostUsed.push(h);
+      return await r.json();
+    } catch (e) { last = e; log.fallbacks++; }
+  }
+  throw last;
+}
+
+function relErr(a, b) {
+  let worst = 0;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (Number.isNaN(x) || Number.isNaN(y)) { if (Number.isNaN(x) !== Number.isNaN(y)) return Infinity; continue; }
+    worst = Math.max(worst, Math.abs(x - y) / Math.max(Math.abs(y), 1e-9));
+  }
+  return worst;
+}
+
+try {
+  const t0 = performance.now();
+  const cases = await (await fetch(`${refBase}/browser_cases.json`)).json();
+  const index = await fetchJson("index.json");
+  const results = {};
+  const packs = {};
+  let worst = 0;
+  for (const c of cases.cases) {
+    if (!packs[c.region]) {
+      const t = performance.now();
+      packs[c.region] = await loadPack(index, c.region, "{host}", fetchRange);
+      results[`load_ms_${c.name}`] = Math.round(performance.now() - t);
+    }
+    const r = simulate(packs[c.region], c.depth_mm, c.condition);
+    const ref = new Float64Array(await (await fetch(`${refBase}/${c.file}`)).arrayBuffer());
+    const n = r.store.length;
+    const e = Math.max(relErr(r.store, ref.subarray(0, n)), relErr(r.cellWet, ref.subarray(n)));
+    results[`${c.name}|${c.depth_mm}|${c.condition}`] = e;
+    worst = Math.max(worst, e);
+  }
+  // rarity: the app's rule on the stored tables against the library's rule on the same tables
+  const ri = await fetchJson("rarity_index.json");
+  let rworst = 0;
+  for (const p of cases.rarity) {
+    const [off, len, n] = ri.regions[p.region];
+    const block = parseRarity(await gunzip(await fetchRange(`{host}/${ri.file}`, off, len)), n);
+    const at = block.cells.indexOf(BigInt("0x" + p.cell6));
+    const yrs = returnPeriod(p.depth_mm, p.hours, block.depths.subarray(at * 70, at * 70 + 70));
+    rworst = Math.max(rworst, Math.abs(yrs - p.app_python) / p.app_python);
+  }
+  out.textContent = JSON.stringify({ done: true, worst, pass: worst <= 1e-6, rarity_worst: rworst,
+    seconds: Math.round(performance.now() - t0) / 1000, ...log, hostUsed: [...new Set(log.hostUsed)], results });
+} catch (e) {
+  out.textContent = JSON.stringify({ done: true, error: String(e), stack: e.stack });
+}
+</script>

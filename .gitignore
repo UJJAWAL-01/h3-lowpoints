@@ -222,6 +222,7 @@ data_tiles.json
 *.html
 outputs/
 !docs/**/*.html
+!app/**/*.html
 
 # generated data, downloads and large files (never commit these)
 data/
@@ -229,9 +230,13 @@ data/
 
 # but keep the demo maps under docs/
 !docs/**/*.html
+!app/**/*.html
 
 # generated maps
 maps/
 
 # the map page is package data and must be committed and shipped
 !src/h3lowpoints/viz/map_template.html
+
+# explorer app
+app/node_modules/
