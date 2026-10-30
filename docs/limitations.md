@@ -56,8 +56,10 @@ It inherits every limit above, and adds its own:
 where it is used: the bowl shape of a depression, runoff reaching it without travel time,
 seepage with a unit gradient, empty depressions at the start, no evaporation, three
 soil-water states for Green-Ampt, fallback soil values where the survey has none, and drains
-only as a rule you set. Which runoff method fits real storms, and whether a drain rule helps, is
-not yet tested against observations (phase 5.4).
+only as a rule you set. Tested on ten real storms in six cities
+([the study](validation.md#study-2-storms-in-time-against-flood-reports-six-cities)), it ranked
+the places that reported flooding no better than the storm total alone, the two runoff methods
+did equally well, and every uniform drain rule made the ranking worse.
 
 ## Limits that come from the elevation data
 

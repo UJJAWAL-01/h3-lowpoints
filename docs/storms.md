@@ -12,9 +12,19 @@ where every number in it comes from, and what it cannot do.
 | How much runs off | runoff in each step | SCS curve numbers (method A) or Green-Ampt infiltration (method B) |
 | How a depression empties | seepage through its floor; storm drains, if assumed | USDA soil survey; an assumption you set |
 
-Nothing in the model was tuned to observations. Which runoff method and which drain assumption
-fit real storms best is the question of the validation study that follows (phase 5.4); until it
-reports, both methods are offered and drains are off by default.
+Nothing in the model was tuned to observations. It was then tested on ten real storms in six
+cities against flood reports ([the study](validation.md#study-2-storms-in-time-against-flood-reports-six-cities)).
+**What the evidence says:**
+
+- For telling apart *where* flooding is reported, the model ranks places the same as the storm
+  total alone (the [susceptibility index](susceptibility.md)): following the storm in time,
+  seepage and Green-Ampt changed the ranking by about 0.001 in AUC or less. Use the model for what
+  the total cannot give (how deep, when, how long water stands), not to rank places better.
+- Methods A and B did equally well; A stays the default.
+- Every drain rule tried (1- to 10-year, 1-hour storms) made the ranking *worse*; drains stay off
+  by default.
+- Predicted standing water at the peak marks the places that report flooding better than where
+  people live, but modestly (AUC 0.575 in four cities held out of all choices; 0.5 is no better).
 
 ## Quick start
 
@@ -151,9 +161,11 @@ No national map of storm drains, pipes or pumps exists, yet in cities they carry
 water. `drains={"years": N, "hours": T}` assumes that catchments at least `min_impervious` percent
 paved (default 20) are drained, and that the drains carry away rain up to the intensity of the
 N-year, T-hour Atlas 14 storm there (drainage systems are usually designed for a storm of some
-return period; the right N and T, and whether such a rule works at all, are to be found on
-calibration cities and tested on others in phase 5.4). Without it, no drains: the results are then
-for ground that drains only into the soil.
+return period). Without it, no drains: the results are then for ground that drains only into the
+soil. On real storms in New York and Houston, every rule tried (N of 1, 2, 5 or 10 years, T of 1
+hour) ranked the places that reported flooding worse than no drains, the more so the larger N
+([the study](validation.md#study-2-storms-in-time-against-flood-reports-six-cities)): a uniform
+rule does not describe where drains work. Set one only with local knowledge of the system.
 
 ### What is reported
 
@@ -196,8 +208,9 @@ survey gives the catchments a median conductivity of 28 mm/h (loams). The 6 and 
 fall on average more slowly than that, so by Green-Ampt almost all of it soaks in (median runoff
 1.2 and 0.2 mm, against 50 and 71 mm by curve numbers), and only the 1-hour burst runs off. The
 curve numbers come from measured runoff of whole watersheds; Green-Ampt from soil conductivity
-measured or estimated on soil samples. Which of the two describes these places better is not
-known yet: that is a question for real storms and observations (phase 5.4).
+measured or estimated on soil samples. On real storms in six cities the two ranked the places
+that reported flooding equally well ([the study](validation.md#study-2-storms-in-time-against-flood-reports-six-cities));
+which describes the amounts of water better was not tested.
 
 **Without drains, water stays.** In Houston about two thirds of the depressions still hold at
 least 0.1 m of water 72 hours after any of these storms, because only seepage empties them and
@@ -245,4 +258,5 @@ between them are approximated.
   than ground with a high water table can, and the curve numbers (which use the groups) may be closer.
 - Without drains, only seepage empties a depression, so in cities many are still full at the end
   of the run (`ponding_hours` inf). That describes ground drained by its soil alone, not a city
-  street with inlets: use a drain rule, and read ponding hours with it in mind.
+  street with inlets: read ponding hours with it in mind. A uniform drain rule did not help on
+  real storms (see [Storm drains](#storm-drains-an-assumption-you-set)).

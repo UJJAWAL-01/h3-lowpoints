@@ -36,6 +36,11 @@
 ### Changed
 - `susceptibility.catchment_sums` holds the catchment averaging shared by the index and the
   storms (no change in results).
+- Docs: the second validation study (ten real storms, six cities) in
+  [docs/validation.md](docs/validation.md#study-2-storms-in-time-against-flood-reports-six-cities),
+  and what it says in [docs/storms.md](docs/storms.md) and [docs/limitations.md](docs/limitations.md):
+  the storm model ranks places like the storm total, methods A and B do equally well, uniform drain
+  rules make the ranking worse; defaults unchanged (method A, no drains).
 
 ## 0.4.0 (28 October 2026)
 

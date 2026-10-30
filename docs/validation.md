@@ -420,3 +420,133 @@ residents who chose to report, located at an address. The Houston addresses are 
 current list, years after the floods. Two of the three studies are one city. Storm drains, pumps
 and sewers are in none of the layers, and New York's combined sewers drain much of its
 "landlocked" ground. Association is not cause.
+
+The same two hypotheses were run again in four other cities in the second study below; neither
+replicated cleanly ([results](#study-1-in-four-more-cities)).
+
+## Study 2: storms in time against flood reports (six cities)
+
+Does following a real storm in time ([Storms in time](storms.md)) mark the places that report
+flooding better than the storm total alone? The cities, storms, settings, measures and the rule
+for calling each result were written down on 29 October 2026, before the model was run on any
+real storm or any report was scored. Three deviations, all made during the build and before any
+scoring, are listed under **Limits**. All results are reported here, whatever they showed.
+
+**Storms and roles.** Settings were chosen on four storms in two **calibration** cities and then
+fixed; the hypotheses were tested on six storms in four **held-out** cities.
+
+| Role | Storms (by date) |
+|---|---|
+| Calibration | New York 2021-09-01 and 2023-09-29; Houston 2015-05-25 and 2016-04-18 |
+| Held out | Austin 2015-05-25 and 2015-10-30; New Orleans 2024-04-10; Chicago 2023-07-02 and 2025-08-17; Baltimore 2015-06-27 |
+
+**Data** (all public). Rain: MRMS hourly gauge-corrected radar rain (Iowa Environmental Mesonet
+archive), 72 hours per storm, each depression taking the hour-by-hour rain of the H3
+resolution-8 cell holding its lowest point. Terrain: USGS 3DEP 10 m (the main runs), 30 m, and
+1 m lidar in New York and Chicago, over each city's 2024 limits plus 2 km, open water masked
+(ESA WorldCover). Land cover and paving: Annual NLCD 2024; soil groups gNATSGO; soil
+infiltration USDA Soil Data Access. Reports: each city's public 311 requests in street-flooding
+categories during the storm (Houston: the city's flood-request layers), repeats at one place on
+one day counted once. Where people live: Census 2020 block populations (TIGERweb).
+
+**Score and measure.** Unit: H3 resolution-9 cells (about 0.1 km2) inside the city limits. A
+cell's score for a storm is the predicted standing-water area at the peak: the sum over
+depressions of the wet area at that depression's peak (from its measured levels) times the share
+of its area lying in the cell. The measure is the **population-weighted AUC**: the chance that a
+cell with a report scores higher than the cell of a randomly chosen resident (ties count half);
+0.5 is no better than where people live. 95% intervals from a block bootstrap (blocks at
+resolution 6, resampled per city, 1,000 samples, seed 0). Pooled values are the mean over a
+group's storms. A **placebo** came first: cases drawn at random by population gave pooled AUCs
+of 0.501 to 0.505 for every model (required: 0.45 to 0.55).
+
+**Models.** *Totals only*: the storm total and curve numbers, no timing, no seepage, no drains
+(this equals the susceptibility index). *Ten duration-aware candidates*: method A (curve numbers
+in time) or B (Green-Ampt), each with seepage, and drains of none or the 1-, 2-, 5- or 10-year
+1-hour Atlas 14 rate on catchments at least 20% paved. The candidate with the highest pooled AUC
+on the calibration storms at 10 m is **the model** (ties within 0.005 go to A, then to fewer drains).
+
+**Calibration** (not a test):
+
+| Model | Pooled AUC (95% interval) |
+|---|---|
+| Totals only | 0.571 (0.545 to 0.597) |
+| A, no drains | 0.570 (0.545 to 0.597) |
+| B, no drains | 0.570 (0.544 to 0.597) |
+| A with drains of 1, 2, 5, 10 years | 0.553, 0.554, 0.546, 0.532 |
+| B with drains of 1, 2, 5, 10 years | 0.546, 0.542, 0.533, 0.521 |
+
+The model chosen is **A without drains**. Every drain rule lowered the AUC, the more so the larger
+the drain.
+
+**Hypotheses** (held-out storms, 10 m, the model as chosen; supported if the whole interval is on
+the stated side, contradicted if on the other):
+
+- **H1 (duration):** pooled AUC of the model minus that of totals only, above 0.
+  **-0.0006 (-0.0018 to 0.0003): inconclusive.**
+- **H2 (filling marks flooding):** pooled AUC of the model above 0.5.
+  **0.575 (0.549 to 0.600): supported.**
+
+| Held-out storm | Reports | AUC (95% interval) | Reading | Totals only |
+|---|---|---|---|---|
+| Austin 2015-05-25 | 247 | 0.528 (0.496 to 0.574) | inconclusive | 0.528 |
+| Austin 2015-10-30 | 211 | 0.627 (0.573 to 0.686) | supported | 0.627 |
+| New Orleans 2024-04-10 | 90 | 0.610 (0.470 to 0.673) | inconclusive | 0.611 |
+| Chicago 2023-07-02 | 579 | 0.517 (0.489 to 0.551) | inconclusive | 0.516 |
+| Chicago 2025-08-17 | 417 | 0.511 (0.458 to 0.573) | inconclusive | 0.515 |
+| Baltimore 2015-06-27 | 69 | 0.660 (0.601 to 0.734) | supported | 0.660 |
+
+Both readings hold with all report categories (adding catch basins and basements: H1 -0.0000,
+-0.0014 to 0.0010; H2 0.558, 0.535 to 0.584) and without either of the two storms that have one
+missing radar hour (H2 0.565 and 0.559, intervals above 0.5).
+
+**Reported beside them:**
+
+- **Method A minus B** (held out): 0.0004 (-0.0002 to 0.0012). No difference; A stays the default.
+- **Terrain, 10 m minus 30 m** (all ten storms): **+0.012 (0.003 to 0.022)**; 10 m was higher in
+  8 of 10 storms. Finer terrain helps, a little.
+- **Terrain, 1 m lidar minus 10 m** (the four New York and Chicago storms): -0.008 (-0.039 to
+  0.019), inconclusive, going both ways storm by storm. The lidar (New York mostly 2013-14, Chicago mostly 2016)
+  is years older than the storms, and at 1 m 78% to 93% of the depressions filled.
+- **Flood-insurance claims** (OpenFEMA NFIP claims for rainfall, block groups, exposure = policies
+  in force; storms with at least 100 claims): New York 2021 0.606 (0.528 to 0.680), New York 2023
+  0.488 (0.381 to 0.582), Houston 2015 0.487 (0.436 to 0.537), Houston 2016 0.586 (0.529 to
+  0.646), Austin 2015-10-30 0.606 (0.318 to 0.769). Only the last is a held-out storm.
+
+### Study 1 in four more cities
+
+Study 1's H1 and H2 were run again exactly as written (the published layer, lift ratio at 0 rings,
+blocks at resolution 6) in the four held-out cities, with all their street-category reports of all
+years, and 200,000 points drawn by population from Census 2020 blocks as controls (these cities
+have no address lists like study 1's). The rule set in advance: **replicates** if supported in at
+least 3 of 4 cities and contradicted in none; **fails** if contradicted in 2 or more; else **mixed**.
+
+| City | Reports | H1: 2-year over rarer or never | H2: landlocked over drained |
+|---|---|---|---|
+| Austin | 7,542 | 1.08 (0.34 to 1.95), inconclusive | 0.44 (0.27 to 0.85), contradicted |
+| New Orleans | 3,507 | 0.78 (0.56 to 0.97), contradicted | 1.71 (1.06 to 2.40), supported |
+| Chicago | 82,141 | 0.81 (0.65 to 1.02), inconclusive | 1.05 (0.72 to 1.39), inconclusive |
+| Baltimore | 6,650 | 1.96 (0.80 to 3.16), inconclusive | 0.93 (0.67 to 1.27), inconclusive |
+
+**Both mixed.** The 2-year class does not draw more reports in these cities (New Orleans goes the
+other way), and landlocked against drained goes opposite ways in Austin and New Orleans.
+
+### What study 2 says
+
+- Predicted standing water marks the places that report flooding better than where people live,
+  but modestly (AUC about 0.58), and in Chicago hardly at all.
+- Following the storm in time adds nothing measurable to *where*; the storm total ranks places
+  the same. The model's value is in what the total cannot give: depth, timing, how long water
+  stands (none of which was tested here).
+- A uniform drain rule makes things worse. Real drains, sewers and pumps are not in the model;
+  Chicago and New York have combined sewers and New Orleans is pumped.
+- 10 m terrain helps a little over 30 m; 1 m lidar did not help over 10 m in two dense cities.
+
+**Limits.** Ten readings without correction for multiple tests. Small samples in New Orleans (90
+reports) and Baltimore (69). 311 reports reflect who chooses to report. Missing radar hours
+(Austin 2015-11-01 01 UTC, Baltimore 2015-06-26 14 UTC) were run as no rain. Austin's block
+population inside its 2024 limits is 2.8% above its Census count. **Deviations** (all before any
+scoring): rain was read for the whole terrain box plus one ring of resolution-8 cells, not only
+the city cells, so depressions near the edge get rain; land and soil inputs were averaged on
+resolution-10 cells, finer cells taking their parent's value, so the three terrain resolutions
+differ only in their terrain; a block group's claims score is the mean of its cells' scores, not
+the sum. Association is not cause.
