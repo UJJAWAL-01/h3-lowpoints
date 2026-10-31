@@ -1,5 +1,6 @@
-// The basemap: OpenStreetMap vector tiles (Protomaps schema) from our own PMTiles file, drawn as
-// a quiet paper map so the hexagons carry the colour. No icons, so no sprite sheet is needed.
+// The basemap: OpenStreetMap vector tiles (Protomaps schema) from our own PMTiles file, in two
+// looks: "detailed" (Protomaps' light style: parks, water, road classes, places of interest, road
+// shields) and "quiet" (paper, no icons). Glyphs and icons ship with the app.
 
 import { layers, namedFlavor } from "@protomaps/basemaps";
 import { BASEMAP_URL, LOCAL } from "../config.js";
@@ -25,8 +26,16 @@ const DROP = new Set(["roads_oneway", "roads_shields", "pois", "address_label"])
 export const OVERLAY_BEFORE = "roads_pier";        // hexagons go above buildings, below roads
 export const LABELS_FROM = "water_waterway_label"; // first label layer
 
-export function basemapStyle() {
+export const BASEMAPS = ["detailed", "quiet"];
+
+export function basemapStyle(kind = "detailed") {
   const base = namedFlavor("light");
+  if (kind === "detailed") {
+    // beyond the edge of our US extract there are no tiles: paint it as sea so the edge disappears
+    const list = layers("protomaps", { ...base, background: base.water }, { lang: "en" });
+    return { version: 8, glyphs: glyphsUrl(), sprite: new URL("sprites/light", location.href).href,
+      sources: source(), layers: list };
+  }
   const flavor = { ...base, ...PAPER };
   for (const k of Object.keys(base)) {
     if (k.startsWith("tunnel_")) flavor[k] = k.endsWith("casing") ? "#d9ddd9" : "#eef0ed";
@@ -45,15 +54,36 @@ export function basemapStyle() {
       }
       return l;
     });
-  return {
-    version: 8,
-    glyphs: new URL(LOCAL.glyphs, location.href).href.replace("%7Bfontstack%7D", "{fontstack}").replace("%7Brange%7D", "{range}"),
-    sources: {
-      protomaps: {
-        type: "vector", url: `pmtiles://${BASEMAP_URL}`,
-        attribution: "© OpenStreetMap contributors · Protomaps",
-      },
+  return { version: 8, glyphs: glyphsUrl(), sources: source(), layers: list };
+}
+
+function glyphsUrl() {
+  return new URL(LOCAL.glyphs, location.href).href.replace("%7Bfontstack%7D", "{fontstack}").replace("%7Brange%7D", "{range}");
+}
+
+function source() {
+  return { protomaps: { type: "vector", url: `pmtiles://${BASEMAP_URL}`, attribution: "© OpenStreetMap contributors · Protomaps" } };
+}
+
+// Swap the basemap and keep everything of ours (sources with their data, layers, order).
+export function swapBasemap(map, kind) {
+  map.setStyle(basemapStyle(kind), {
+    diff: false,
+    transformStyle: (prev, next) => {
+      if (!prev) return next;
+      const cut = prev.layers.findIndex((l) => l.id === OVERLAY_BEFORE);
+      const mine = prev.layers.map((l, i) => [l, i]).filter(([l]) => l.source && l.source !== "protomaps");
+      const low = mine.filter(([, i]) => i < cut).map(([l]) => l);
+      const high = mine.filter(([, i]) => i >= cut).map(([l]) => l);
+      const layers = [];
+      for (const l of next.layers) {
+        if (l.id === OVERLAY_BEFORE) layers.push(...low);
+        if (l.id === LABELS_FROM) layers.push(...high);
+        layers.push(l);
+      }
+      const sources = { ...next.sources };
+      for (const [k, v] of Object.entries(prev.sources)) if (k !== "protomaps") sources[k] = v;
+      return { ...next, sources, layers };
     },
-    layers: list,
-  };
+  });
 }

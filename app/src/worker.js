@@ -12,7 +12,7 @@ const overview = {};                     // res -> decoded overview
 const packs = new Map();                 // region -> {pack, derived}, in least-recently-used order
 const pending = new Map();               // region -> promise (one request per pack at a time)
 
-const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf };
+const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf, example };
 
 self.onmessage = async (e) => {
   const { id, type, args } = e.data;
@@ -231,11 +231,12 @@ async function depression(region, i) {
         properties: { d: pk.cell_max_depth[r] } });
     }
   }
-  const chain = [lngLat(pk.low[i])];
+  const chain = [lngLat(pk.low[i])], chainIdx = [i];
   const seen = new Set([i]);
   let j = pk.target[i], leaves = j < 0;
   while (j >= 0 && !seen.has(j) && chain.length < 200) {
     chain.push(lngLat(pk.low[j]));
+    chainIdx.push(j);
     seen.add(j);
     if (pk.target[j] < 0) { leaves = true; break; }
     j = pk.target[j];
@@ -251,12 +252,12 @@ async function depression(region, i) {
     catchment: pk.catch[i], curveNumber: pk.cn[i], rainToFill: pk.rain_to_fill[i],
     fillsInYears: pk.fills_in_years[i], drained: (pk.flags[i] & 1) === 1, landlocked: (pk.flags[i] & 2) === 2,
     target: t, targetLowLngLat: t >= 0 ? lngLat(pk.low[t]) : null,
-    chainSteps: chain.length - 1, chainLeaves: leaves,
+    chainSteps: chain.length - 1, chainLeaves: leaves, chainIdx, cellCount: cells.length,
     upstream: up.length, receivesOutside,
     cells: { type: "FeatureCollection", features: cells },
     chain: { type: "Feature", geometry: { type: "LineString", coordinates: chain }, properties: {} },
     upstreamPoints: { type: "FeatureCollection", features: up.slice(0, 500).map((j) => ({
-      type: "Feature", geometry: { type: "LineString", coordinates: [lngLat(pk.low[j]), chain[0]] }, properties: {} })) },
+      type: "Feature", geometry: { type: "LineString", coordinates: [lngLat(pk.low[j]), chain[0]] }, properties: { i: j } })) },
   };
 }
 
@@ -267,6 +268,23 @@ async function findDepression(region, id) {
   const ids = v.pack.id;
   for (let i = 0; i < ids.length; i++) if (ids[i] === want) return i;
   return -1;
+}
+
+// A good depression to show in the guide: it overflows on through at least two more, others
+// overflow into it, and it is big enough to see; the nearest such one to a point
+async function example(region, lat, lon) {
+  const v = await getPack(region);
+  if (!v) return -1;
+  const pk = v.pack, up = upstreamOf(v);
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < pk.n; i++) {
+    const t = pk.target[i];
+    if (t < 0 || pk.target[t] < 0 || !up.has(i) || full(pk, i, pk.areas) < 20000) continue;
+    const [la, lo] = cellToLatLng(hex(pk.low[i]));
+    const d = (la - lat) ** 2 + ((lo - lon) * Math.cos(lat * Math.PI / 180)) ** 2;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
 }
 
 function regionOf(lat, lon) {

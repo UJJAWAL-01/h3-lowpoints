@@ -6,7 +6,8 @@ import { AUTO_LEVELS, BASEMAP_URL, DETAIL_LEVELS, DETAIL_ZOOM, HOME, LOCAL, MAX_
 import { DataClient } from "./data/client.js";
 import { RedirectSource } from "./data/redirects.js";
 import { addBaseLayers, addPackLayers, empty, removePackLayers, setVisible } from "./map/layers.js";
-import { basemapStyle } from "./map/style.js";
+import { basemapStyle, swapBasemap } from "./map/style.js";
+import { createGuide, seenGuide } from "./ui/guide.js";
 import * as f from "./ui/format.js";
 import * as panelView from "./ui/panel.js";
 import { setupSearch } from "./ui/search.js";
@@ -41,8 +42,11 @@ const client = new DataClient(new URL("worker.js", location.href).href,
 const warm = { overview4: client.call("overviewCells", 4, null), national: client.call("national") };
 warm.overview4.catch(() => {}); warm.national.catch(() => {});
 
+let basemapKind = "detailed";
+try { basemapKind = localStorage.getItem("lowpoints.basemap") === "quiet" ? "quiet" : "detailed"; } catch { /* default */ }
+
 const map = new maplibregl.Map({
-  container: "map", style: basemapStyle(), center: HOME.center, zoom: HOME.zoom,
+  container: "map", style: basemapStyle(basemapKind), center: HOME.center, zoom: HOME.zoom,
   minZoom: 1.6, maxZoom: 17.5, maxBounds: [[-150, 10], [-45, 60]], hash: "map",
   attributionControl: false, dragRotate: false, pitchWithRotate: false, touchPitch: false,
   renderWorldCopies: false, fadeDuration: 150, cancelPendingTileRequestsWhileZooming: true,
@@ -190,10 +194,24 @@ tip.hidden = true;
 document.body.appendChild(tip);
 let hovered = null;
 
+const LINE_LAYERS = ["spill-points", "spill-hit", "upstream-hit", "selection-fill"];
 function interactive() {
-  const ids = ["overview-fill"];
+  const ids = [...LINE_LAYERS, "overview-fill"];
   for (const r of state.regions.keys()) if (map.getLayer(`pk-${r}-fill`)) ids.push(`pk-${r}-fill`);
   return ids;
+}
+
+// What each mark on the map means, said when the pointer is on it
+function tipFor(feat) {
+  const p = feat.properties, id = feat.layer.id;
+  const share = (x) => f.pct(x, x < 0.01 ? 2 : 1);
+  if (id === "spill-points") return "Next depression on the overflow path. Click to open it.";
+  if (id === "spill-hit") return "Overflow path: when the selected depression is full, its water flows this way into the next depression, and on.";
+  if (id === "upstream-hit") return "This depression overflows into the selected one. Click to open it.";
+  if (id === "selection-fill") return "The selected depression. It covers every outlined hexagon.";
+  if (feat.source === "overview") return `${share(p.s)} of this hexagon is in depressions · ${f.int(p.c)} depressions`;
+  if (p.s != null) return `${share(p.s)} of this hexagon is in depressions · ${p.n} ${p.n === 1 ? "depression" : "depressions"}. Click for the largest.`;
+  return `Water ${f.depth(p.d).main} deep here when full${p.n > 1 ? ` · ${p.n} depressions meet here` : ""}. Click for details.`;
 }
 
 function setHover(feat) {
@@ -212,12 +230,7 @@ map.on("mousemove", (e) => {
   setHover(feat);
   map.getCanvas().style.cursor = feat ? "pointer" : "";
   if (!feat || matchMedia("(hover: none)").matches) { tip.hidden = true; return; }
-  const p = feat.properties;
-  tip.textContent = feat.source === "overview"
-    ? `${f.pct(p.s, p.s < 0.01 ? 2 : 1)} in depressions · ${f.int(p.c)} depressions`
-    : p.s != null
-    ? `${f.pct(p.s, p.s < 0.01 ? 2 : 1)} in depressions · ${p.n} ${p.n === 1 ? "depression" : "depressions"}`
-    : `${f.depth(p.d).main} deep when full${p.n > 1 ? ` · ${p.n} depressions` : ""}`;
+  tip.textContent = tipFor(feat);
   tip.style.left = `${e.originalEvent.clientX}px`;
   tip.style.top = `${e.originalEvent.clientY}px`;
   tip.hidden = false;
@@ -227,6 +240,12 @@ map.getCanvas().addEventListener("mouseleave", () => { setHover(null); tip.hidde
 map.on("click", (e) => {
   const feat = map.queryRenderedFeatures(e.point, { layers: interactive() })[0];
   if (!feat) { clearSelection(); return; }
+  const lid = feat.layer.id;
+  if ((lid === "spill-points" || lid === "upstream-hit") && state.selected && feat.properties.i != null) {
+    selectDepression(state.selected.region, Number(feat.properties.i));
+    return;
+  }
+  if (lid === "spill-hit" || lid === "selection-fill") return;     // explained by the tooltip and the panel
   if (feat.source === "overview") {
     selectCell(feat);
   } else {
@@ -257,7 +276,8 @@ async function selectDepression(region, index, { fly = false } = {}) {
     if (token !== selectToken) return;
     state.selected.data = d;
     map.getSource("selection").setData(d.cells);
-    const pts = d.chain.geometry.coordinates.slice(1).map((c) => ({ type: "Feature", geometry: { type: "Point", coordinates: c }, properties: {} }));
+    const pts = d.chain.geometry.coordinates.slice(1).map((c, k) => ({ type: "Feature", geometry: { type: "Point", coordinates: c },
+      properties: { i: d.chainIdx[k + 1] } }));
     map.getSource("spill").setData({ type: "FeatureCollection", features: d.chainSteps ? [d.chain, ...pts] : [] });
     map.getSource("upstream").setData(d.upstreamPoints);
     setParam("d", `${region}.${d.id}`);
@@ -363,6 +383,21 @@ $("levels").addEventListener("click", (e) => {
   renderLevels();
 });
 
+function setBasemapButton() {
+  const b = $("basemap");
+  b.setAttribute("aria-pressed", String(basemapKind === "quiet"));
+  b.title = basemapKind === "detailed" ? "Street map: detailed. Click for a quiet map" : "Street map: quiet. Click for a detailed map";
+  b.setAttribute("aria-label", b.title);
+}
+setBasemapButton();
+$("basemap").onclick = () => {
+  basemapKind = basemapKind === "detailed" ? "quiet" : "detailed";
+  try { localStorage.setItem("lowpoints.basemap", basemapKind); } catch { /* ignore */ }
+  swapBasemap(map, basemapKind);
+  setBasemapButton();
+  toast(basemapKind === "detailed" ? "Detailed street map" : "Quiet street map");
+};
+
 $("zoom-in").onclick = () => map.zoomIn();
 $("zoom-out").onclick = () => map.zoomOut();
 $("home").onclick = () => { clearSelection(); map.flyTo({ ...HOME, duration: reduced() ? 0 : 1200 }); };
@@ -440,4 +475,72 @@ window.addEventListener("resize", measure);
 renderLevels();
 measure();
 
-if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression };
+// ------------------------------------------------------------------ the guide
+const EXAMPLE = { region: "84446cbffffffff", lat: 29.7604, lon: -95.3698 };    // central Houston
+
+function selectionRect() {
+  const d = state.selected?.data;
+  if (!d || !d.cells.features.length) return null;
+  const c = map.getContainer().getBoundingClientRect();
+  const pts = [...d.cells.features.flatMap((ft) => ft.geometry.coordinates[0]), ...d.chain.geometry.coordinates]
+    .map((p) => map.project(p));
+  const x0 = Math.max(0, Math.min(...pts.map((p) => p.x))), x1 = Math.min(c.width, Math.max(...pts.map((p) => p.x)));
+  const y0 = Math.max(0, Math.min(...pts.map((p) => p.y))), y1 = Math.min(c.height, Math.max(...pts.map((p) => p.y)));
+  return new DOMRect(c.left + x0 - 12, c.top + y0 - 12, x1 - x0 + 24, y1 - y0 + 24);
+}
+
+async function showExample() {
+  if (!(state.selected?.data && state.selected.region === EXAMPLE.region)) {
+    const i = await client.call("example", EXAMPLE.region, EXAMPLE.lat, EXAMPLE.lon);
+    if (i < 0) return;
+    await selectDepression(EXAMPLE.region, i);
+  }
+  const d = state.selected?.data;
+  if (!d) return;
+  const pts = [...d.cells.features.flatMap((ft) => ft.geometry.coordinates[0]), ...d.chain.geometry.coordinates];
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  map.fitBounds([[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]],
+    { padding: fitPadding(), maxZoom: 15.5, duration: 0 });
+  await new Promise((r) => map.once("idle", r));
+}
+
+const guide = createGuide([
+  { title: "Welcome to Lowpoints",
+    text: "This map shows low ground where rain water collects, across the lower 48 US states. This short guide shows you how to use it. You can open it again any time with the Guide button." },
+  { title: "Find a place", target: () => $("search-box"),
+    text: "Type a city or town and pick it from the list. The search runs on your device: nothing you type is sent anywhere." },
+  { title: "The panel explains the map", target: () => $("panel"),
+    before: async () => { if (state.view !== "intro") clearSelection(); },
+    text: "It shows the key numbers and the legend. Darker hexagons have more low ground in them; zoomed right in, darker means deeper water when full." },
+  { title: "Choose the hexagon size", target: () => $("levels-desktop"), skip: () => sheet.phone,
+    text: "Auto picks the size from your zoom. Sizes 4 to 6 summarise large areas; 8 to 10 show single depressions. Click a number to choose one yourself." },
+  { title: "Click a hexagon", target: () => $("panel"), before: showExample,
+    text: "We opened a depression in Houston for you. The panel says how much water it holds, which storm fills it and where the water goes next: plain words first, exact numbers below." },
+  { title: "What the lines mean", target: selectionRect, before: showExample,
+    text: "Outlined hexagons: the selected depression (one depression can cover several hexagons). Blue arrows: where its water flows once it is full. Grey dotted lines: depressions that overflow into it. Point at any of them for a reminder; click a dot to follow the water." },
+  { title: "Tools", target: () => document.querySelector(".tools"),
+    text: "Zoom in and out, go to your location, see the whole country, switch the street map between detailed and quiet, switch metres and feet, and read About for sources and limits." },
+  { title: "Come back any time", target: () => $("guide-open"),
+    text: "Press Guide to see this again. In the panel, Copy link shares exactly what you are looking at." },
+]);
+$("guide-open").onclick = () => { hideInvite(); guide.start(); };
+
+function hideInvite() { document.querySelector(".invite")?.remove(); }
+map.once("idle", () => {
+  if (seenGuide() || START_VIEW) return;
+  const box = document.createElement("div");
+  box.className = "invite";
+  box.setAttribute("role", "status");
+  box.innerHTML = `<span>New here? A one-minute guide shows how to use the map.</span>
+    <button class="btn primary" data-i="go">Show me</button><button class="btn link" data-i="no">No thanks</button>`;
+  box.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-i]");
+    if (!b) return;
+    hideInvite();
+    if (b.dataset.i === "go") guide.start();
+    else { try { localStorage.setItem("lowpoints.guided", "1"); } catch { /* ignore */ } }
+  });
+  document.body.appendChild(box);
+});
+
+if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide };

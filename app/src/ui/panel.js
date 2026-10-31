@@ -77,6 +77,7 @@ export function depression(d) {
     <div class="row">${status}${shallow}</div>
     <p class="say">Water can stand up to <strong>${inline(deep)}</strong> deep over <strong>${inline(wide)}</strong>. ${fills}</p>
     <p class="say">${where}</p>
+    ${mapKey(d)}
     <dl class="facts">
       <dt>Depth when full</dt><dd>${both(deep)}</dd>
       <dt>Area when full</dt><dd>${both(wide)}</dd>
@@ -91,6 +92,16 @@ export function depression(d) {
     </dl>
     <p class="note">From the 30 m elevation model (vertical error about 0.5 to 1 m), with no storm drains, pipes or pumps.</p>
     <div class="row"><button class="btn" data-act="zoom-dep">Zoom to it</button><button class="btn" data-act="share">Copy link</button></div>`;
+}
+
+function mapKey(d) {
+  const rows = [`<li><i class="k k-sel" aria-hidden="true"></i><span><strong>Outlined hexagons:</strong> this depression.
+    ${d.cellCount > 1 ? `It is bigger than one hexagon, so it covers ${f.int(d.cellCount)} of them.` : "It fits in one hexagon."}</span></li>`];
+  if (d.chainSteps) rows.push(`<li><i class="k k-spill" aria-hidden="true"></i><span><strong>Blue arrows:</strong> where its water goes
+    once it is full, through ${d.chainSteps === 1 ? "the next depression" : `${d.chainSteps} depressions in turn`}${d.chainLeaves ? ", then beyond this area's data" : ""}. Click a dot to open that depression.</span></li>`);
+  if (d.upstream) rows.push(`<li><i class="k k-up" aria-hidden="true"></i><span><strong>Grey dotted lines:</strong> ${d.upstream === 1 ? "a depression" : `${f.int(d.upstream)} depressions`}
+    that overflow into this one. Click a line to open it.</span></li>`);
+  return `<div class="mapkey"><span class="label">On the map</span><ul>${rows.join("")}</ul></div>`;
 }
 
 export function loading(what) {

@@ -106,6 +106,44 @@ try {
     const c = await page.evaluate(() => { const m = window.__lowpoints.map; return [m.getCenter().lat, m.getCenter().lng, m.getZoom()]; });
     return { firstResult: first, centre: c.map((x) => Math.round(x * 100) / 100) };
   } });
+  for (const [name, w, h, mobile] of [["desktop_guide", 1440, 900, false], ["phone_guide", 390, 844, true]]) {
+    await run(name, { width: w, height: h, mobile, act: async (page) => {
+      const steps = [];
+      await page.click("#guide-open");
+      for (let k = 0; k < 9; k++) {
+        await page.waitForFunction(() => { const c = document.querySelector(".guide-card"); return !c || !c.classList.contains("busy"); }, { timeout: 60000 });
+        await new Promise((r) => setTimeout(r, 700));
+        const card = await page.$(".guide-card");
+        if (!card) break;
+        const title = await page.$eval("#guide-title", (e) => e.textContent);
+        steps.push(title);
+        await page.screenshot({ path: join(outDir, `${name}_${k + 1}.png`) });
+        await page.click(".guide-card [data-g=next]");
+      }
+      return { guideSteps: steps, guideClosed: !(await page.$(".guide-card")) };
+    } });
+  }
+  await run("desktop_basemap_swap", { width: 1440, height: 900, hash: "#map=14.2/29.7604/-95.3698", act: async (page) => {
+    const sel = await clickCentre(page);
+    await page.click("#basemap");
+    await new Promise((r) => setTimeout(r, 1500));
+    await settle(page);
+    const after = await page.evaluate(() => {
+      const m = window.__lowpoints.map, L = window.__lowpoints.state;
+      return { packLayers: [...L.regions.keys()].filter((r) => m.getLayer(`pk-${r}-fill`)).length,
+        selectionCells: m.getSource("selection")?._data?.features?.length ?? m.querySourceFeatures("selection").length,
+        hasRoadsPier: !!m.getLayer("roads_pier"), quiet: localStorage.getItem("lowpoints.basemap") };
+    });
+    await page.evaluate(() => localStorage.removeItem("lowpoints.basemap"));
+    return { selected: sel.id, ...after };
+  } });
+  await run("desktop_invite", { width: 1440, height: 900, act: async (page) => {
+    await page.evaluate(() => localStorage.removeItem("lowpoints.guided"));
+    await page.goto(`${base}`, { waitUntil: "domcontentloaded" }); await page.evaluate(() => { history.replaceState(null, "", location.pathname); }); await page.reload({ waitUntil: "domcontentloaded" });
+    await settle(page);
+    await new Promise((r) => setTimeout(r, 800));
+    return { inviteShown: !!(await page.$(".invite")) };
+  } });
   await run("desktop_about", { width: 1440, height: 900, act: async (page) => {
     await page.click("#about-open"); await new Promise((r) => setTimeout(r, 400));
     return { aboutOpen: await page.$eval("#about", (d) => d.open) };

@@ -38,9 +38,17 @@ export function addBaseLayers(map) {
   map.addLayer({ id: "spill-line", type: "line", source: "spill", layout: { "line-cap": "round", "line-join": "round" },
     paint: { "line-color": "#1d3f9e", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.6, 15, 3],
       "line-dasharray": [2, 1.4] } }, LABELS_FROM);
+  map.addLayer({ id: "spill-arrows", type: "symbol", source: "spill", filter: ["==", ["geometry-type"], "LineString"],
+    layout: { "symbol-placement": "line", "symbol-spacing": 90, "text-field": "→", "text-font": ["Noto Sans Medium"],
+      "text-size": 26, "text-keep-upright": false, "text-allow-overlap": true, "text-ignore-placement": true,
+      "text-rotation-alignment": "map" },
+    paint: { "text-color": "#1d3f9e", "text-halo-color": "#ffffff", "text-halo-width": 2 } });
   map.addLayer({ id: "spill-points", type: "circle", source: "spill", filter: ["==", ["geometry-type"], "Point"], paint: {
-    "circle-radius": 3.5, "circle-color": "#ffffff", "circle-stroke-color": "#1d3f9e", "circle-stroke-width": 2 } },
-    LABELS_FROM);
+    "circle-radius": 5, "circle-color": "#ffffff", "circle-stroke-color": "#1d3f9e", "circle-stroke-width": 2.5 } });
+  // wide invisible strips so the thin lines are easy to point at
+  map.addLayer({ id: "spill-hit", type: "line", source: "spill", filter: ["==", ["geometry-type"], "LineString"],
+    paint: { "line-color": "#000", "line-opacity": 0, "line-width": 16 } });
+  map.addLayer({ id: "upstream-hit", type: "line", source: "upstream", paint: { "line-color": "#000", "line-opacity": 0, "line-width": 14 } });
   map.addLayer({ id: "cellsel-line", type: "line", source: "cellsel", paint: {
     "line-color": "#121513", "line-width": 2.2 } }, LABELS_FROM);
 }
