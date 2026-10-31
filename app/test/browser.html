@@ -3,7 +3,8 @@
 <title>Explorer browser test</title>
 <pre id="out">running</pre>
 <script type="module">
-// Reads packs by range request from DATA (?data=URL, ?fallback=URL), runs the simulator and
+// Reads packs by range request from DATA (?data=, ?fallback=: URL templates with {file}, or a
+// folder URL, which gets "/{file}" added), runs the simulator and
 // compares with the library's reference values written by app/tools/check_sim.py.
 import { loadPack, httpRange } from "../src/pack.js";
 import { simulate } from "../src/sim.js";
@@ -11,8 +12,9 @@ import { parseRarity, returnPeriod } from "../src/rarity.js";
 import { gunzip } from "../src/pack.js";
 
 const q = new URLSearchParams(location.search);
-const hosts = [q.get("data"), q.get("fallback")].filter(Boolean);
-const refBase = q.get("ref") || hosts[0];
+const hosts = [q.get("data"), q.get("fallback")].filter(Boolean)
+  .map((h) => (h.includes("{file}") ? h : `${h}/{file}`));
+const refBase = q.get("ref");
 const out = document.getElementById("out");
 const log = { requests: 0, fallbacks: 0, hostUsed: [] };
 
@@ -21,7 +23,7 @@ async function fetchRange(path, start, length) {
   for (const h of hosts) {
     try {
       log.requests++;
-      const bytes = await httpRange(path.replace("{host}", h), start, length);
+      const bytes = await httpRange(h.replace("{file}", path), start, length);
       log.hostUsed.push(h);
       return bytes;
     } catch (e) { last = e; log.fallbacks++; }
@@ -34,7 +36,7 @@ async function fetchJson(name) {           // whole small files, with the same f
   for (const h of hosts) {
     try {
       log.requests++;
-      const r = await fetch(`${h}/${name}`);
+      const r = await fetch(h.replace("{file}", name));
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       log.hostUsed.push(h);
       return await r.json();
@@ -63,7 +65,7 @@ try {
   for (const c of cases.cases) {
     if (!packs[c.region]) {
       const t = performance.now();
-      packs[c.region] = await loadPack(index, c.region, "{host}", fetchRange);
+      packs[c.region] = await loadPack(index, c.region, "", (url, o, l) => fetchRange(url.replace(/^\//, ""), o, l));
       results[`load_ms_${c.name}`] = Math.round(performance.now() - t);
     }
     const r = simulate(packs[c.region], c.depth_mm, c.condition);
@@ -76,9 +78,9 @@ try {
   // rarity: the app's rule on the stored tables against the library's rule on the same tables
   const ri = await fetchJson("rarity_index.json");
   let rworst = 0;
-  for (const p of cases.rarity) {
+  for (const p of cases.rarity.slice(0, Number(q.get("rarity") || 1e9))) {
     const [off, len, n] = ri.regions[p.region];
-    const block = parseRarity(await gunzip(await fetchRange(`{host}/${ri.file}`, off, len)), n);
+    const block = parseRarity(await gunzip(await fetchRange(ri.file, off, len)), n);
     const at = block.cells.indexOf(BigInt("0x" + p.cell6));
     const yrs = returnPeriod(p.depth_mm, p.hours, block.depths.subarray(at * 70, at * 70 + 70));
     rworst = Math.max(rworst, Math.abs(yrs - p.app_python) / p.app_python);

@@ -24,7 +24,7 @@ const server = spawn(process.execPath, [join(here, "serve.mjs"), work, String(po
 await new Promise((r) => setTimeout(r, 800));
 
 const runs = process.argv[3]
-  ? [{ name: "hosts", data: process.argv[3], fallback: process.argv[4] || "" }]
+  ? [{ name: "hosts", data: process.argv[3], fallback: process.argv[4] || "", rarity: process.argv[5] || "" }]
   : [{ name: "local", data: local, fallback: "" },
      { name: "fallback", data: "http://127.0.0.1:9", fallback: local }];   // port 9: nothing listens
 
@@ -33,7 +33,7 @@ const report = {};
 try {
   for (const run of runs) {
     const page = await browser.newPage();
-    const q = new URLSearchParams({ data: run.data, fallback: run.fallback, ref: local });
+    const q = new URLSearchParams({ data: run.data, fallback: run.fallback, ref: local, rarity: run.rarity || "" });
     await page.goto(`${local}/site_test/test/browser.html?${q}`);
     await page.waitForFunction(() => document.getElementById("out").textContent.includes('"done"'),
       { timeout: 300000 });
