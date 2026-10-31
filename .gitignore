@@ -227,6 +227,10 @@ outputs/
 # generated data, downloads and large files (never commit these)
 data/
 *.tif
+# except the explorer's own code folder and its small shipped files (overview, place list)
+!app/src/data/
+!app/public/data/
+!docs/explorer/data/
 
 # but keep the demo maps under docs/
 !docs/**/*.html

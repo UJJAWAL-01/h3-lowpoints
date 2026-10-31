@@ -14,10 +14,14 @@ export let requests = 0;
 
 createServer((req, res) => {
   requests++;
-  const path = normalize(join(root, decodeURIComponent(new URL(req.url, "http://x").pathname)));
+  let path = normalize(join(root, decodeURIComponent(new URL(req.url, "http://x").pathname)));
   if (!path.startsWith(root)) { res.writeHead(403).end(); return; }
   let size;
-  try { size = statSync(path).size; } catch { res.writeHead(404).end(); return; }
+  try {
+    let st = statSync(path);
+    if (st.isDirectory()) { path = join(path, "index.html"); st = statSync(path); }
+    size = st.size;
+  } catch { res.writeHead(404).end(); return; }
   const headers = { "Content-Type": TYPES[extname(path)] || "application/octet-stream",
     "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Range", "Access-Control-Expose-Headers": "Content-Length, Content-Range" };
