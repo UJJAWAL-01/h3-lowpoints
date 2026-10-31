@@ -23,9 +23,11 @@ export function intro(nat, mode, res) {
     : "Zoom in, or find a place, to see single depressions. Click a hexagon for its numbers.";
   return `<h1>Where rain <em>water collects</em></h1>
     <p class="lede">Every closed depression on land in the lower 48 US states: low ground that water flows into but not out of.</p>
+    <p class="notice">For exploration and learning only. Not a flood map, forecast or advice. <button class="btn link" data-act="disclaimer">Disclaimer</button></p>
     ${n}
     ${legendHtml(res === 10 ? "depth" : "share", f.units.us)}
     <p class="note">${hint}</p>
+    ${source("cell")}
     ${foot()}`;
 }
 
@@ -49,7 +51,8 @@ export function overviewCell(p, res) {
       <dt>Cell</dt><dd><button class="copy" data-copy="${f.esc(p.h)}" title="Copy">${f.esc(p.h)}</button></dd>
     </dl>
     <p class="note">Counts are of depressions whose lowest point lies in this hexagon. Hexagons at coasts and borders are partly outside the data.</p>
-    <div class="row"><button class="btn primary" data-act="zoom-cell">Zoom in here</button></div>`;
+    <div class="row"><button class="btn primary" data-act="zoom-cell">Zoom in here</button></div>
+    ${source("cell")}`;
 }
 
 export function depression(d) {
@@ -91,7 +94,8 @@ export function depression(d) {
       <dt>Dataset id</dt><dd><button class="copy" data-copy="${f.esc(d.id)}" title="Copy">${f.esc(d.id)}</button></dd>
     </dl>
     <p class="note">From the 30 m elevation model (vertical error about 0.5 to 1 m), with no storm drains, pipes or pumps.</p>
-    <div class="row"><button class="btn" data-act="zoom-dep">Zoom to it</button><button class="btn" data-act="share">Copy link</button></div>`;
+    <div class="row"><button class="btn" data-act="zoom-dep">Zoom to it</button><button class="btn" data-act="share">Copy link</button></div>
+    ${source("depression")}`;
 }
 
 function mapKey(d) {
@@ -101,7 +105,31 @@ function mapKey(d) {
     once it is full, through ${d.chainSteps === 1 ? "the next depression" : `${d.chainSteps} depressions in turn`}${d.chainLeaves ? ", then beyond this area's data" : ""}. Click a dot to open that depression.</span></li>`);
   if (d.upstream) rows.push(`<li><i class="k k-up" aria-hidden="true"></i><span><strong>Grey dotted lines:</strong> ${d.upstream === 1 ? "a depression" : `${f.int(d.upstream)} depressions`}
     that overflow into this one. Click a line to open it.</span></li>`);
-  return `<div class="mapkey"><span class="label">On the map</span><ul>${rows.join("")}</ul></div>`;
+  const how = d.chainSteps || d.upstream ? `<details class="how"><summary>How are these lines worked out?</summary>
+    <p>They come from the elevation model, not from observed floods. The h3-lowpoints library
+    analysed the USGS 3DEP 30 m elevation model of the whole country: when a depression is full,
+    its water leaves at the lowest point of its rim and runs downhill, each step to the steepest
+    neighbouring cell (the standard D8 method), until it reaches another depression. That one is
+    next on the path.</p>
+    <p>For clarity the lines are drawn <strong>straight</strong> between the depressions' lowest
+    points; the real route follows the ground. Storm drains, pipes and culverts are not in the
+    elevation model, so in towns the water may really go elsewhere.</p>
+    <p><a href="../definition.html#catchments-and-spill" target="_blank" rel="noopener">The exact rules</a></p>
+  </details>` : "";
+  return `<div class="mapkey"><span class="label">On the map</span><ul>${rows.join("")}</ul>${how}</div>`;
+}
+
+// Where every number comes from, under every view
+export function source(kind) {
+  const what = kind === "depression"
+    ? "Computed by the open-source h3-lowpoints library from the USGS 3DEP 30 m elevation model, with land cover (Annual NLCD 2024), soils (USDA gNATSGO) and storms (NOAA Atlas 14)."
+    : "Summed from every depression in the national dataset, computed from the USGS 3DEP 30 m elevation model.";
+  return `<div class="source"><span class="label">Source</span>
+    <p>${what} Dataset version 0.3, <a href="https://doi.org/10.5281/zenodo.23731345" target="_blank" rel="noopener">doi:10.5281/zenodo.23731345</a>.</p>
+    <p><a href="../definition.html" target="_blank" rel="noopener">Method</a> ·
+      <a href="../limitations.html" target="_blank" rel="noopener">Limits</a> ·
+      <a href="../evidence.html" target="_blank" rel="noopener">Tested against floods</a> ·
+      <button class="btn link" data-act="disclaimer">Not advice: disclaimer</button></p></div>`;
 }
 
 export function loading(what) {

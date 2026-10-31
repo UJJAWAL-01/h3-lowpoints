@@ -71,14 +71,11 @@ export function swapBasemap(map, kind) {
     diff: false,
     transformStyle: (prev, next) => {
       if (!prev) return next;
-      const cut = prev.layers.findIndex((l) => l.id === OVERLAY_BEFORE);
-      const mine = prev.layers.map((l, i) => [l, i]).filter(([l]) => l.source && l.source !== "protomaps");
-      const low = mine.filter(([, i]) => i < cut).map(([l]) => l);
-      const high = mine.filter(([, i]) => i >= cut).map(([l]) => l);
+      const base = new Set(next.layers.map((l) => l.id));
+      const mine = prev.layers.filter((l) => !base.has(l.id) && l.source !== "protomaps");
       const layers = [];
       for (const l of next.layers) {
-        if (l.id === OVERLAY_BEFORE) layers.push(...low);
-        if (l.id === LABELS_FROM) layers.push(...high);
+        if (l.id === LABELS_FROM) layers.push(...mine);
         layers.push(l);
       }
       const sources = { ...next.sources };

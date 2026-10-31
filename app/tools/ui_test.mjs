@@ -144,6 +144,11 @@ try {
     await new Promise((r) => setTimeout(r, 800));
     return { inviteShown: !!(await page.$(".invite")) };
   } });
+  await run("desktop_disclaimer", { width: 1440, height: 900, act: async (page) => {
+    await page.click("#disclaimer-open"); await new Promise((r) => setTimeout(r, 600));
+    return { disclaimerVisible: await page.evaluate(() => { const r = document.getElementById("disclaimer").getBoundingClientRect();
+      return document.getElementById("about").open && r.top >= 0 && r.top < window.innerHeight; }) };
+  } });
   await run("desktop_about", { width: 1440, height: 900, act: async (page) => {
     await page.click("#about-open"); await new Promise((r) => setTimeout(r, 400));
     return { aboutOpen: await page.$eval("#about", (d) => d.open) };

@@ -60,6 +60,8 @@
   Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> ·
   <a href="https://protomaps.com" target="_blank" rel="noopener">Protomaps</a> ·
   Depressions <a href="https://doi.org/10.5281/zenodo.23731345" target="_blank" rel="noopener">CC BY 4.0</a>
+  · <button class="attrib-link" id="disclaimer-open">For exploration only: disclaimer</button>
+  <span class="credit">Contributed to the community by Ujjawal Patel</span>
 </div>
 <div class="progress" id="progress" aria-hidden="true"></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -69,6 +71,8 @@
     <div class="kicker"><span class="label">About this map</span>
       <button class="close" id="about-close" aria-label="Close"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.6"/></svg></button></div>
     <h2 id="about-title">Where rain <em>water collects</em></h2>
+    <p class="notice"><strong>For exploration and education only.</strong> Not a flood map, forecast,
+      warning or advice. <a href="#disclaimer" data-scroll="disclaimer">Read the disclaimer</a>.</p>
     <p>Rain that cannot flow away gathers in low ground: a hollow in a field, a dip in a street, a basin
       between buildings. Elevation models call these <strong>closed depressions</strong>. This map shows every
       one on land in the lower 48 states, found by the open-source
@@ -87,9 +91,40 @@
       <li>Features smaller than the 30 m elevation data can see, such as most street-scale dips.</li>
       <li>Rivers in flood, tides, snowmelt and frozen ground.</li>
     </ul>
+    <h3>How it is made</h3>
+    <ul>
+      <li><strong>Depressions</strong> are found in the USGS 3DEP 30 m elevation model of the lower 48
+        states by filling every pit to the level at which water would spill out (an exact
+        priority-flood fill), keeping those at least 0.5 m deep, with open water masked out.</li>
+      <li><strong>Overflow paths</strong> (the blue lines) follow the ground: water from a full depression
+        leaves at the lowest point of its rim and runs downhill, each step to the steepest neighbouring
+        cell, until it reaches the next depression. The map draws them straight between lowest points.</li>
+      <li><strong>The storm that fills each one</strong> compares the runoff from its land (SCS curve
+        numbers from Annual NLCD 2024 land cover and USDA gNATSGO soils) with the water it holds, for
+        NOAA Atlas 14 24-hour storms, counting overflow from upstream.</li>
+      <li>Every step is open source and checked; the code, the full dataset and its tests are public.
+        <a href="../definition.html" target="_blank" rel="noopener">Method</a> ·
+        <a href="../verification.html" target="_blank" rel="noopener">How results are checked</a></li>
+    </ul>
     <p>It is not a flood map or a warning. In an emergency, follow local officials. How well these
       depressions match real flood reports, including what did not work, is in the
       <a href="../evidence.html" target="_blank" rel="noopener">evidence</a>.</p>
+    <section class="disclaimer" id="disclaimer" aria-labelledby="disclaimer-title">
+      <h3 id="disclaimer-title">Disclaimer</h3>
+      <p><strong>For exploration and education only.</strong> Lowpoints shows features derived by computer
+        from public elevation, land-cover, soil and rainfall data, using methods with known limits. It is
+        not a flood map, a flood forecast or warning, a substitute for FEMA flood maps or local
+        floodplain information, or engineering, survey, legal, insurance or other professional advice.</p>
+      <p>Do not use it to make decisions about safety, property, insurance, lending, building, planning
+        or emergencies. Results can be wrong for any given place: the elevation data are 30 m, storm
+        drains, pipes and pumps are not included, and the data may not reflect current conditions.</p>
+      <p>The map and its data are provided "as is", without warranty of any kind, express or implied,
+        including accuracy, completeness or fitness for a particular purpose. To the extent permitted by
+        law, the author and contributors accept no liability for any loss or damage arising from the use
+        of, or reliance on, this map or its data. The software is licensed under Apache 2.0 and the data
+        under CC BY 4.0, each with its own disclaimer of warranty.</p>
+      <p><strong>In an emergency, follow local officials and the National Weather Service.</strong></p>
+    </section>
     <h3>Data and credits</h3>
     <ul>
       <li>Depressions: Closed depressions on land, lower 48 US states, on H3, version 0.3,

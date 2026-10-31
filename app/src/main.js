@@ -348,6 +348,7 @@ $("panel").addEventListener("click", async (e) => {
   const act = el.dataset.act;
   if (act === "close") clearSelection();
   else if (act === "about") openAbout();
+  else if (act === "disclaimer") openAbout("disclaimer");
   else if (act === "zoom-dep" && state.selected?.data) fitCells(state.selected.data.cells);
   else if (act === "zoom-cell" && state.cell) {
     const ring = state.cell.geometry.coordinates[0];
@@ -423,7 +424,15 @@ $("locate").onclick = () => {
   { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
 };
 
-function openAbout() { $("about").showModal(); }
+function openAbout(section) {
+  $("about").showModal();
+  if (section) requestAnimationFrame(() => $(section)?.scrollIntoView({ block: "start" }));
+}
+$("disclaimer-open").onclick = () => openAbout("disclaimer");
+$("about").addEventListener("click", (e) => {
+  const a = e.target.closest("[data-scroll]");
+  if (a) { e.preventDefault(); $(a.dataset.scroll)?.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" }); }
+});
 $("about-open").onclick = openAbout;
 $("about-close").onclick = () => $("about").close();
 $("about").addEventListener("click", (e) => { if (e.target === $("about")) $("about").close(); });
@@ -506,7 +515,7 @@ async function showExample() {
 
 const guide = createGuide([
   { title: "Welcome to Lowpoints",
-    text: "This map shows low ground where rain water collects, across the lower 48 US states. This short guide shows you how to use it. You can open it again any time with the Guide button." },
+    text: "This map shows low ground where rain water collects, across the lower 48 US states. It is for exploring and learning, not for safety or other decisions. This short guide shows you how to use it; open it again any time with the Guide button." },
   { title: "Find a place", target: () => $("search-box"),
     text: "Type a city or town and pick it from the list. The search runs on your device: nothing you type is sent anywhere." },
   { title: "The panel explains the map", target: () => $("panel"),

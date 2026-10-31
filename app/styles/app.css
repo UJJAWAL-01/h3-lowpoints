@@ -270,6 +270,26 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 
 .seg button.now:not([aria-pressed="true"]) { box-shadow: inset 0 -2px 0 var(--ink); }
 
+/* disclaimer */
+.notice { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-2); background: var(--paper);
+  border-left: 3px solid var(--ink); padding: 8px 10px; }
+.notice .btn.link { font-size: 14px; font-weight: 600; }
+.disclaimer { display: grid; gap: 8px; border: var(--rule); padding: 12px 14px; background: var(--paper); scroll-margin-top: 12px; }
+.disclaimer h3 { margin: 0; }
+.disclaimer p { font-size: 14px; }
+.attrib-link { border: 0; background: none; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.attrib-link:hover { color: var(--water); }
+
+/* where the numbers come from */
+.source { display: grid; gap: 4px; border-top: var(--rule-soft); padding-top: 10px; }
+.source p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+.source a { color: var(--muted); }
+.how { border-top: 1px solid var(--line); padding-top: 8px; }
+.how summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink); }
+.how p { margin: 8px 0 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
+.credit { color: var(--faint); }
+.credit::before { content: "·"; margin: 0 6px; color: var(--line); }
+
 /* the key to what a selection draws on the map */
 .mapkey { display: grid; gap: 6px; background: var(--paper); padding: 10px 12px; }
 .mapkey ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }

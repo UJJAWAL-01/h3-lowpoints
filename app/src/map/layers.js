@@ -1,6 +1,10 @@
 // Hexagon layers and their legends. One ink ramp for both scales; blue is kept for water.
 
-import { OVERLAY_BEFORE, LABELS_FROM } from "./style.js";
+import { LABELS_FROM } from "./style.js";
+
+// Hexagons sit above the whole street map (labels stay on top); the selection sits above the
+// hexagons. HEX_TOP is an invisible marker layer between the two, so packs loaded later go under it.
+export const HEX_TOP = "hex-top";
 
 export const INK = ["#e9ebe7", "#d1d5d1", "#b3b9b5", "#8f9692", "#69706c", "#454b48", "#202422"];
 
@@ -17,14 +21,15 @@ export function addBaseLayers(map) {
   map.addSource("overview", { type: "geojson", data: empty(), tolerance: 0.2 });
   map.addLayer({ id: "overview-fill", type: "fill", source: "overview", paint: {
     "fill-color": step("s", SHARE.breaks),
-    "fill-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0.92, 8, 0.8, 10, 0.7],
-    "fill-opacity-transition": { duration: 300 } } }, OVERLAY_BEFORE);
+    "fill-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0.9, 8, 0.84, 10, 0.82],
+    "fill-opacity-transition": { duration: 300 } } }, LABELS_FROM);
   map.addLayer({ id: "overview-line", type: "line", source: "overview", paint: {
     "line-color": "#f2f3f1", "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.3, 7, 0.8, 10, 1.2],
-    "line-opacity": 0.9 } }, OVERLAY_BEFORE);
+    "line-opacity": 0.9 } }, LABELS_FROM);
   map.addLayer({ id: "overview-hover", type: "line", source: "overview", paint: {
     "line-color": "#121513", "line-width": 1.6,
     "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0] } }, LABELS_FROM);
+  map.addLayer({ id: HEX_TOP, type: "background", paint: { "background-opacity": 0 } }, LABELS_FROM);
 
   for (const [id, props] of [["selection", {}], ["spill", {}], ["upstream", {}], ["cellsel", {}]]) {
     map.addSource(id, { type: "geojson", data: empty(), ...props });
@@ -59,14 +64,14 @@ export function addPackLayers(map, region) {
   map.addSource(src, { type: "geojson", data: empty(), tolerance: 0.1, buffer: 32 });
   map.addLayer({ id: `${src}-fill`, type: "fill", source: src, paint: {
     "fill-color": ["case", ["has", "s"], step("s", SHARE.breaks), step("d", DEPTH.breaks)],
-    "fill-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.72, 15, 0.62, 18, 0.5],
-    "fill-opacity-transition": { duration: 250 } } }, OVERLAY_BEFORE);
+    "fill-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.84, 15, 0.8, 18, 0.74],
+    "fill-opacity-transition": { duration: 250 } } }, HEX_TOP);
   map.addLayer({ id: `${src}-line`, type: "line", source: src, minzoom: 11.5, paint: {
     "line-color": "#f2f3f1", "line-width": ["interpolate", ["linear"], ["zoom"], 11.5, 0.3, 14, 0.8, 17, 1.2],
-    "line-opacity": 0.85 } }, OVERLAY_BEFORE);
+    "line-opacity": 0.85 } }, HEX_TOP);
   map.addLayer({ id: `${src}-hover`, type: "line", source: src, paint: {
     "line-color": "#121513", "line-width": 1.6,
-    "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0] } }, LABELS_FROM);
+    "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0] } }, HEX_TOP);
 }
 
 export function removePackLayers(map, region) {
