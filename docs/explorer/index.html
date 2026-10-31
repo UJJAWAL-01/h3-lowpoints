@@ -6,12 +6,13 @@
 <title>Lowpoints · where rain water collects in the US</title>
 <meta name="description" content="Explore every closed depression on land in the lower 48 US states, on H3 hexagons: how deep each fills, the rain that fills it, and where it overflows. Built with the open-source h3-lowpoints library.">
 <meta name="theme-color" content="#f2f3f1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://zenodo.org; base-uri 'self'; form-action 'none'">
 <meta property="og:title" content="Lowpoints · where rain water collects">
 <meta property="og:description" content="Every closed depression on land in the lower 48 US states, on H3 hexagons.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%23f2f3f1' stroke='%23121513' stroke-width='2'/%3E%3Cpath d='M9 18c3 4 11 4 14 0' fill='none' stroke='%231d3f9e' stroke-width='2.5'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/instrument-serif-latin-400-italic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=9a4521188b">
+<link rel="stylesheet" href="app.css?v=9db4b01928">
 </head>
 <body>
 <a class="skip" href="#search">Skip to place search</a>
@@ -103,12 +104,12 @@
         numbers from Annual NLCD 2024 land cover and USDA gNATSGO soils) with the water it holds, for
         NOAA Atlas 14 24-hour storms, counting overflow from upstream.</li>
       <li>Every step is open source and checked; the code, the full dataset and its tests are public.
-        <a href="../definition.html" target="_blank" rel="noopener">Method</a> ·
-        <a href="../verification.html" target="_blank" rel="noopener">How results are checked</a></li>
+        <a href="https://ujjawal-01.github.io/h3-lowpoints/definition.html" target="_blank" rel="noopener">Method</a> ·
+        <a href="https://ujjawal-01.github.io/h3-lowpoints/verification.html" target="_blank" rel="noopener">How results are checked</a></li>
     </ul>
     <p>It is not a flood map or a warning. In an emergency, follow local officials. How well these
       depressions match real flood reports, including what did not work, is in the
-      <a href="../evidence.html" target="_blank" rel="noopener">evidence</a>.</p>
+      <a href="https://ujjawal-01.github.io/h3-lowpoints/evidence.html" target="_blank" rel="noopener">evidence</a>.</p>
     <section class="disclaimer" id="disclaimer" aria-labelledby="disclaimer-title">
       <h3 id="disclaimer-title">Disclaimer</h3>
       <p><strong>For exploration and education only.</strong> Lowpoints shows features derived by computer
@@ -142,6 +143,6 @@
 </dialog>
 
 <noscript><p style="position:fixed;inset:auto 16px 16px;background:#fff;border:1px solid #121513;padding:12px">This map needs JavaScript.</p></noscript>
-<script type="module" src="app.js?v=9a4521188b"></script>
+<script type="module" src="app.js?v=9db4b01928"></script>
 </body>
 </html>

@@ -10,7 +10,10 @@ function expiry(final) {
 }
 
 export async function rangeFetch(url, start, length, signal) {
-  const init = { headers: { Range: `bytes=${start}-${start + length - 1}` }, signal, mode: "cors", credentials: "omit" };
+  // no-store: Chrome's cache can refuse overlapping range requests on one file
+  // (ERR_CACHE_OPERATION_NOT_SUPPORTED); the CDN still caches, and packs are kept in memory
+  const init = { headers: { Range: `bytes=${start}-${start + length - 1}` }, signal, mode: "cors", credentials: "omit",
+    cache: "no-store" };
   const hit = resolved.get(url);
   let r;
   if (hit && hit.until > Date.now()) {

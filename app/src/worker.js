@@ -42,8 +42,16 @@ const hex = (b) => b.toString(16);
 const ring = (h) => cellToBoundary(h, true);       // GeoJSON order, already closed
 
 // ------------------------------------------------------------------ national overview
-async function loadOverview(res) {
-  if (overview[res]) return overview[res];
+const overviewPending = {};
+function loadOverview(res) {
+  if (overview[res]) return Promise.resolve(overview[res]);
+  if (!overviewPending[res]) {
+    overviewPending[res] = readOverview(res).finally(() => { delete overviewPending[res]; });
+  }
+  return overviewPending[res];
+}
+
+async function readOverview(res) {
   const r = await fetch(`${local}overview_${res}.bin`);
   if (!r.ok) throw new Error(`overview ${res}: HTTP ${r.status}`);
   const raw = await gunzip(new Uint8Array(await r.arrayBuffer()));
@@ -128,7 +136,10 @@ async function overviewCells(res, box) {
 // ------------------------------------------------------------------ packs
 async function packIndex() {
   if (index) return index;
-  if (!indexPromise) indexPromise = hosts.json("index.json").then((j) => (index = j));
+  if (!indexPromise) {
+    indexPromise = hosts.json("index.json").then((j) => (index = j));
+    indexPromise.catch(() => { indexPromise = null; });       // retry on the next request
+  }
   return indexPromise;
 }
 
@@ -146,6 +157,7 @@ async function getPack(region) {
     if (!entry) return null;
     const bytes = await hosts.range(idx.file, entry[0], entry[1]);
     const pk = parsePack(await gunzip(bytes));
+    if (pk.header.region !== region) throw new Error(`pack mismatch: asked ${region}, got ${pk.header.region}`);
     const v = { pack: pk, levels: {}, upstream: null };
     packs.set(region, v);
     while (packs.size > MAX_PACKS) packs.delete(packs.keys().next().value);

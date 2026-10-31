@@ -4,10 +4,11 @@
 import { rangeFetch } from "./redirects.js";
 
 const TIMEOUT_MS = 20000;
+const RETRY_AFTER_MS = 5 * 60000;
 
 export class Hosts {
   constructor(hosts) {
-    this.hosts = hosts.map((h) => ({ ...h, down: false }));
+    this.hosts = hosts.map((h) => ({ ...h, downUntil: 0 }));
   }
 
   url(host, file) {
@@ -16,15 +17,16 @@ export class Hosts {
 
   async _try(fn) {
     let last;
-    const order = [...this.hosts.filter((h) => !h.down), ...this.hosts.filter((h) => h.down)];
+    const now = Date.now();
+    const order = [...this.hosts.filter((h) => h.downUntil <= now), ...this.hosts.filter((h) => h.downUntil > now)];
     for (const host of order) {
       try {
         const out = await fn(host);
-        host.down = false;
+        host.downUntil = 0;
         return out;
       } catch (e) {
         if (e.name === "AbortError" && e.byCaller) throw e;
-        host.down = true;
+        host.downUntil = Date.now() + RETRY_AFTER_MS;
         last = e;
       }
     }

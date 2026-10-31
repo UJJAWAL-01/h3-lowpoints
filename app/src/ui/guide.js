@@ -20,8 +20,16 @@ export function createGuide(steps, { onEnd } = {}) {
       else if (b.dataset.g === "back") go(i - 1, -1);
       else stop();
     });
-    window.addEventListener("resize", place);
+    window.addEventListener("resize", onResize);
     document.addEventListener("keydown", keys);
+  }
+
+  let resizeTimer = 0;
+  function onResize() {                       // jump (no slide), and again once panels have moved
+    if (card) card.style.transition = "none";
+    requestAnimationFrame(place);
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { place(); if (card) requestAnimationFrame(() => { if (card) card.style.transition = ""; }); }, 400);
   }
 
   function keys(e) {
@@ -75,6 +83,8 @@ export function createGuide(steps, { onEnd } = {}) {
     else if (r.right + 20 + cw < vw - 16) { x = r.right + 20; y = clamp(r.top, 16, vh - ch - 16); }
     else if (r.left - 20 - cw > 16) { x = r.left - 20 - cw; y = clamp(r.top, 16, vh - ch - 16); }
     else { x = clamp(r.left, 16, vw - cw - 16); y = r.bottom + 16 + ch < vh ? r.bottom + 16 : Math.max(16, r.top - ch - 16); }
+    x = clamp(x, 8, Math.max(8, vw - cw - 8));
+    y = clamp(y, 8, Math.max(8, vh - ch - 8));
     card.style.left = `${Math.round(x)}px`;
     card.style.top = `${Math.round(y)}px`;
   }
@@ -93,7 +103,7 @@ export function createGuide(steps, { onEnd } = {}) {
     document.body.classList.remove("guiding");
     for (const n of [card, spot, catcher]) n.remove();
     card = spot = catcher = null;
-    window.removeEventListener("resize", place);
+    window.removeEventListener("resize", onResize);
     document.removeEventListener("keydown", keys);
     try { localStorage.setItem("lowpoints.guided", "1"); } catch { /* ignore */ }
     if (lastFocus && lastFocus.focus) lastFocus.focus();

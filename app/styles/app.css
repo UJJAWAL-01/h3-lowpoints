@@ -310,6 +310,7 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .guide-card {
   position: fixed; z-index: 62; background: var(--card); border: var(--rule); padding: 16px 18px 16px;
   display: grid; gap: 10px; outline: none; transition: left .3s var(--ease), top .3s var(--ease);
+  max-height: calc(100dvh - 16px); overflow: auto;
 }
 .guide-card.busy { opacity: .7; }
 .guide-card h2 { font: 600 20px/1.25 var(--sans); margin: 0; }
@@ -331,3 +332,10 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
   .brand .tag { display: none; }
   .invite { bottom: calc(var(--sheet-peek, 140px) + 12px); }
 }
+
+.unsupported {
+  position: fixed; inset: 0; z-index: 100; background: var(--paper); display: grid; align-content: center;
+  justify-items: start; gap: 12px; padding: 24px max(24px, calc((100vw - 560px) / 2));
+}
+.unsupported h2 { font: 600 24px/1.25 var(--sans); margin: 0; }
+.unsupported p { margin: 0; max-width: 60ch; color: var(--ink-2); }

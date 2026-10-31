@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "axe-core": "4.14.0",
     "esbuild": "0.28.2",
     "puppeteer-core": "24.10.0"
   },

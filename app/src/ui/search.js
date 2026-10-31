@@ -5,6 +5,8 @@ import { LOCAL } from "../config.js";
 import { esc, int } from "./format.js";
 
 const MAX = 8;
+const STATES = new Set(("AL AZ AR CA CO CT DE DC FL GA ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM " +
+  "NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY").split(" "));
 let places = null, loading = null;
 
 const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
@@ -16,6 +18,7 @@ async function load() {
       if (!r.ok) throw new Error(`places: HTTP ${r.status}`);
       return r.json();
     }).then((rows) => (places = rows.map(([name, st, lat, lon, pop]) => ({ name, st, lat, lon, pop, key: norm(name) }))));
+    loading.catch(() => { loading = null; });
   }
   return loading;
 }
@@ -24,6 +27,11 @@ function find(q) {
   const qn = norm(q);
   if (!qn) return [];
   let name = qn, st = null;
+  if (/^[a-z]{2}$/.test(qn) && STATES.has(qn.toUpperCase())) {
+    const s = qn.toUpperCase();
+    const byState = places.filter((p) => p.st === s).slice(0, MAX);
+    if (byState.length) return byState;
+  }
   const m = /^(.*?)[ ,]+([a-z]{2})$/.exec(qn);          // "springfield il" or "springfield, il"
   if (m && m[1]) { name = m[1]; st = m[2].toUpperCase(); }
   const out = [];

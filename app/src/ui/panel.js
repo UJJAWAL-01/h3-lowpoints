@@ -33,7 +33,7 @@ export function intro(nat, mode, res) {
 
 function foot() {
   return `<div class="foot"><button class="btn link" data-act="about">About this map</button>
-    <a href="../evidence.html" target="_blank" rel="noopener">Evidence</a>
+    <a href="https://ujjawal-01.github.io/h3-lowpoints/evidence.html" target="_blank" rel="noopener">Evidence</a>
     <a href="https://github.com/UJJAWAL-01/h3-lowpoints" target="_blank" rel="noopener">The library</a></div>`;
 }
 
@@ -114,7 +114,7 @@ function mapKey(d) {
     <p>For clarity the lines are drawn <strong>straight</strong> between the depressions' lowest
     points; the real route follows the ground. Storm drains, pipes and culverts are not in the
     elevation model, so in towns the water may really go elsewhere.</p>
-    <p><a href="../definition.html#catchments-and-spill" target="_blank" rel="noopener">The exact rules</a></p>
+    <p><a href="https://ujjawal-01.github.io/h3-lowpoints/definition.html#catchments-and-spill" target="_blank" rel="noopener">The exact rules</a></p>
   </details>` : "";
   return `<div class="mapkey"><span class="label">On the map</span><ul>${rows.join("")}</ul>${how}</div>`;
 }
@@ -126,9 +126,9 @@ export function source(kind) {
     : "Summed from every depression in the national dataset, computed from the USGS 3DEP 30 m elevation model.";
   return `<div class="source"><span class="label">Source</span>
     <p>${what} Dataset version 0.3, <a href="https://doi.org/10.5281/zenodo.23731345" target="_blank" rel="noopener">doi:10.5281/zenodo.23731345</a>.</p>
-    <p><a href="../definition.html" target="_blank" rel="noopener">Method</a> ·
-      <a href="../limitations.html" target="_blank" rel="noopener">Limits</a> ·
-      <a href="../evidence.html" target="_blank" rel="noopener">Tested against floods</a> ·
+    <p><a href="https://ujjawal-01.github.io/h3-lowpoints/definition.html" target="_blank" rel="noopener">Method</a> ·
+      <a href="https://ujjawal-01.github.io/h3-lowpoints/limitations.html" target="_blank" rel="noopener">Limits</a> ·
+      <a href="https://ujjawal-01.github.io/h3-lowpoints/evidence.html" target="_blank" rel="noopener">Tested against floods</a> ·
       <button class="btn link" data-act="disclaimer">Not advice: disclaimer</button></p></div>`;
 }
 

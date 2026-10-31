@@ -29,6 +29,24 @@ const state = {
   cell: null,              // {props, res}
 };
 
+// ------------------------------------------------------------------ can this browser run it?
+function unsupported(why) {
+  const box = document.createElement("div");
+  box.className = "unsupported";
+  box.setAttribute("role", "alert");
+  box.innerHTML = `<h2>This map cannot run in this browser</h2><p>${why}</p>
+    <p>Please try a current version of Chrome, Edge, Firefox or Safari. The data can also be downloaded from
+    <a href="https://doi.org/10.5281/zenodo.23731345">Zenodo</a>.</p>`;
+  document.body.appendChild(box);
+}
+(() => {
+  const c = document.createElement("canvas");
+  const gl = c.getContext("webgl2") || c.getContext("webgl");
+  if (!gl) unsupported("It needs WebGL, which is turned off or not available on this device.");
+  else if (typeof DecompressionStream === "undefined" || typeof Worker === "undefined")
+    unsupported("It needs features that arrived in browsers in 2023 (compressed data streams).");
+})();
+
 // ------------------------------------------------------------------ map
 const START_VIEW = param("map");          // read before the map writes its own position
 maplibregl.setWorkerUrl(new URL("maplibre-gl-worker.js", location.href).href);
@@ -80,6 +98,7 @@ map.on("load", async () => {
 let moveTimer = 0;
 map.on("moveend", () => { clearTimeout(moveTimer); moveTimer = setTimeout(refresh, 120); });
 map.on("zoom", () => {
+  if (state.pinned != null && isDetail(state.pinned) !== isDetail(autoRes(map.getZoom()))) state.pinned = null;
   const want = targetRes();
   if (want !== state.res && (isDetail(want) !== isDetail(state.res) || Math.abs(want - state.res) >= 1)) {
     clearTimeout(moveTimer); moveTimer = setTimeout(refresh, 60);
@@ -108,8 +127,12 @@ async function refresh() {
       const res = targetRes();
       const prev = state.res;
       state.res = res;
-      if (isDetail(res)) await drawDetail(res, prev);
-      else await drawOverview(res);
+      try {
+        if (isDetail(res)) await drawDetail(res, prev);
+        else await drawOverview(res);
+      } catch (e) {
+        toast("The map could not update this view.", refresh);
+      }
       if ((isDetail(res) !== isDetail(prev) || (res === 10) !== (prev === 10)) && state.view === "intro") renderPanel();
       renderLevels();
     } while (again);
