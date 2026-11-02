@@ -7,6 +7,7 @@ import { DataClient } from "./data/client.js";
 import { RedirectSource } from "./data/redirects.js";
 import { addBaseLayers, addPackLayers, empty, removePackLayers, setVisible } from "./map/layers.js";
 import { basemapStyle, swapBasemap } from "./map/style.js";
+import { viewBox } from "./map/viewbox.js";
 import { createGuide, seenGuide } from "./ui/guide.js";
 import * as f from "./ui/format.js";
 import * as panelView from "./ui/panel.js";
@@ -122,18 +123,19 @@ function targetRes() {
   return auto;
 }
 
-function box() {
-  const b = map.getBounds();
-  return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
-}
+const box = () => viewBox(map);
 
 // ------------------------------------------------------------------ drawing what the view needs
-let refreshing = null, again = false;
+// A refresh asked for while one runs makes the running one stop waiting for packs of a level that
+// is no longer wanted (they still arrive and are kept, but nothing waits for them), so zooming
+// through the levels never queues up behind slow loads.
+let refreshing = null, again = false, superseded = null, supersede = () => {};
 async function refresh() {
-  if (refreshing) { again = true; return refreshing; }
+  if (refreshing) { again = true; supersede(); return refreshing; }
   refreshing = (async () => {
     do {
       again = false;
+      superseded = new Promise((r) => { supersede = r; });
       const res = targetRes();
       const prev = state.res;
       state.res = res;
@@ -186,10 +188,11 @@ async function drawDetail(res) {
   const todo = regions.filter((r) => state.regions.get(r) !== res);
   if (!todo.length) return;
   busy(+todo.length);
-  await Promise.all(todo.map(async (r) => {
+  const show = state.show;
+  const loads = Promise.all(todo.map(async (r) => {
     try {
-      const out = await client.call("pack", r, res, state.show);
-      if (state.res !== res) return;
+      const out = await client.call("pack", r, res, show);
+      if (state.res !== res || state.show !== show) return;
       if (out.empty) { state.regions.set(r, res); return; }
       addPackLayers(map, r);
       map.getSource(`pk-${r}`).setData(out.fc);
@@ -202,6 +205,7 @@ async function drawDetail(res) {
       toast("Some depressions could not load (both data hosts failed).", refresh);
     } finally { busy(-1); }
   }));
+  await Promise.race([loads, superseded]);
   prune(want);
 }
 

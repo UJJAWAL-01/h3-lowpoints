@@ -12,6 +12,8 @@
 
 import { HOURS, YEARS } from "../rarity.js";
 import * as f from "./format.js";
+import { viewBox } from "../map/viewbox.js";
+import { createRain, intensityOf } from "./rain.js";
 
 export const STEPS = 16;
 const PLAY_MS = 6400;                      // no rain to the whole storm (17 marks, 16 steps of rain)
@@ -84,9 +86,10 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
   let summary = null, readout = null, centre = null, lines = null, runToken = 0;
   let open = false;
   const listeners = new Set();
+  const rain = createRain(reduced);           // falling rain while it plays (decoration only)
 
   // ---------------------------------------------------------------- the view: what to run on
-  const box = () => { const b = map.getBounds(); return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]; };
+  const box = () => viewBox(map);
   const detail = () => isDetail(state.res);
 
   function ensureLines() {
@@ -192,6 +195,8 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     cancelAnimationFrame(easeFrame);
     if (pos >= STEPS - 1 - 1e-6) moveTo(-1);
     playing = true;
+    const total = storm.kind === "amount" ? storm.mm : centreDepth();
+    rain.start(intensityOf(Number.isFinite(total) ? total : 0, storm.hours));
     document.getElementById("panel-body")?.setAttribute("aria-busy", "true");
     renderTimeline();
     let last = performance.now();
@@ -213,6 +218,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     if (!playing) return;
     playing = false;
     cancelAnimationFrame(frame);
+    rain.stop();
     document.getElementById("panel-body")?.setAttribute("aria-busy", "false");
     writeLink();
     renderTimeline();

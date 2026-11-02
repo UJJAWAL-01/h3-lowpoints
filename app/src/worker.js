@@ -202,6 +202,17 @@ async function pack(region, level, mode = "all") {
   const v = await getPack(region);
   if (!v) return { region, empty: true };
   const ex = await extrasOf(v);
+  // the last two levels drawn for this pack are kept: zooming back and forth costs nothing
+  v.drawn = v.drawn || new Map();
+  const key = `${level}:${mode}:${ex ? 1 : 0}`;
+  if (v.drawn.has(key)) { const hit = v.drawn.get(key); v.drawn.delete(key); v.drawn.set(key, hit); return hit; }
+  const out = buildPack(v, ex, level, mode);
+  v.drawn.set(key, out);
+  while (v.drawn.size > 2) v.drawn.delete(v.drawn.keys().next().value);
+  return out;
+}
+
+function buildPack(v, ex, level, mode) {
   const L = levelCells(v, level, mode);
   // level 10: lowest ground in each hexagon above sea level = its depression's rim - the depth there
   let ground = null;
@@ -230,7 +241,7 @@ async function pack(region, level, mode = "all") {
       properties: p,
     };
   }
-  return { region, level, depressions: v.pack.n, fc: { type: "FeatureCollection", features } };
+  return { region: v.region, level, depressions: v.pack.n, fc: { type: "FeatureCollection", features } };
 }
 
 function upstreamOf(v) {

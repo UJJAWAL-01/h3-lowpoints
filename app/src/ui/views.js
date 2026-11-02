@@ -5,6 +5,7 @@ import { DEFAULT_EXAGGERATION, EXAGGERATIONS, SHARE_CAP, SHARE_M_PER_PCT, VIEWS 
 import { applyView, setColumnGlass, setExaggeration } from "../map/layers.js";
 import { WaterLayer } from "../map/water.js";
 import { WellsLayer } from "../map/wells.js";
+import { viewBox } from "../map/viewbox.js";
 
 const PITCH = 55;
 const LABEL = { flat: "Flat", columns: "Columns", wells: "Wells" };
@@ -16,7 +17,12 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
   let storm = null;                 // { storm, step, values: Map "region:level" -> Float32Array }
   const deps = new Map();           // region -> Int32Array: depression with most area, per drawn hexagon
   let selected = null;              // { region, index }
-  let exag = EXAGGERATIONS.includes(Number(param("x"))) ? Number(param("x")) : DEFAULT_EXAGGERATION;
+  // each 3D view keeps its own depth factor, both starting at x10 (a link's x= is for the view it opens)
+  const linked = EXAGGERATIONS.includes(Number(param("x"))) ? Number(param("x")) : DEFAULT_EXAGGERATION;
+  const factors = { columns: DEFAULT_EXAGGERATION, wells: DEFAULT_EXAGGERATION };
+  factors[view === "wells" ? "wells" : "columns"] = linked;
+  const factorKey = () => (view === "wells" ? "wells" : "columns");
+  let exag = factors[factorKey()];
   wells.exag = exag;
 
   const is3D = () => view !== "flat";
@@ -52,8 +58,13 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
 
   function render() {
     ensureLayer();
-    const sources = ["overview", ...drawn().map((r) => `pk-${r}`)];
+    // the overview's columns belong to the overview levels only (they are kilometres tall: at
+    // street scale they would stand over everything)
+    const detail = state.res >= 8;
+    const sources = detail ? drawn().map((r) => `pk-${r}`) : ["overview"];
     applyView(map, effective(), sources);
+    if (detail && map.getLayer("overview-col")) map.setLayoutProperty("overview-col", "visibility", "none");
+    if (!detail) for (const r of state.regions.keys()) for (const id of [`pk-${r}-col`, `pk-${r}-colw`]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", "none");
     wells.setVisible(effective() === "wells");
     if (effective() === "wells") updateWells();
     const kind = effective() === "columns" ? "columns" : "flat";
@@ -88,6 +99,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     const was3D = is3D();
     view = v;
     setParam("v", v === "flat" ? null : v);
+    applyFactor(factors[factorKey()]);
     interaction(is3D());
     if (v === "wells" && state.res !== 10) { goStreet(); watchSpeed(); }
     else if (is3D() && !was3D && map.getPitch() < 20) { tilt(PITCH, animate); watchSpeed(); }
@@ -109,13 +121,19 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
 
   function setFactor(x) {
     if (!EXAGGERATIONS.includes(x) || x === exag) return;
+    factors[factorKey()] = x;
+    applyFactor(x);
+    render();
+    onChange?.(view);
+  }
+
+  function applyFactor(x) {
+    setParam("x", x === DEFAULT_EXAGGERATION || view === "flat" ? null : String(x));
+    if (x === exag) return;
     exag = x;
-    setParam("x", x === DEFAULT_EXAGGERATION ? null : String(x));
     wells.exag = x; water.exag = x;
     setExaggeration(map, x, drawn().map((r) => `pk-${r}`));
     map.triggerRepaint();
-    render();
-    onChange?.(view);
   }
 
   document.getElementById("view-note")?.addEventListener("click", (e) => {
@@ -165,7 +183,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     if (wellsBusy || effective() !== "wells") return;
     wellsBusy = true;
     try {
-      const b = map.getBounds(), view = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+      const view = viewBox(map);
       const dx = (view[2] - view[0]) * 0.5, dy = (view[3] - view[1]) * 0.5;
       const want = [view[0] - dx, view[1] - dy, view[2] + dx, view[3] + dy];
       const regions = drawn();
@@ -191,7 +209,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
       do {
         waterAgain = false;
         const res = state.res;
-        const b = map.getBounds(), view = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+        const view = viewBox(map);
         const dx = (view[2] - view[0]) * 0.5, dy = (view[3] - view[1]) * 0.5;
         const want = [view[0] - dx, view[1] - dy, view[2] + dx, view[3] + dy];
         const regions = drawn();

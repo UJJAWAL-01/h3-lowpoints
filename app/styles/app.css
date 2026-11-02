@@ -442,3 +442,6 @@ body.storm-open .toast, body.storm-open .invite { bottom: calc(var(--bottom) + 4
 
 .phone-only { display: none; }
 @media (max-width: 719px) { .phone-only { display: block; } }
+
+/* falling rain while a storm plays (decoration; under the cards, over the map) */
+.rain { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; opacity: 0; transition: opacity .3s; }
