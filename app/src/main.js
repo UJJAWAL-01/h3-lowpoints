@@ -12,6 +12,7 @@ import * as f from "./ui/format.js";
 import * as panelView from "./ui/panel.js";
 import { setupSearch } from "./ui/search.js";
 import { setupSheet } from "./ui/sheet.js";
+import { createViews } from "./ui/views.js";
 
 const $ = (id) => document.getElementById(id);
 const isDetail = (res) => res >= 8;
@@ -66,12 +67,14 @@ try { basemapKind = localStorage.getItem("lowpoints.basemap") === "quiet" ? "qui
 const map = new maplibregl.Map({
   container: "map", style: basemapStyle(basemapKind), center: HOME.center, zoom: HOME.zoom,
   minZoom: 1.6, maxZoom: 17.5, maxBounds: [[-150, 10], [-45, 60]], hash: "map",
-  attributionControl: false, dragRotate: false, pitchWithRotate: false, touchPitch: false,
+  attributionControl: false, dragRotate: false, pitchWithRotate: true, touchPitch: false, maxPitch: 60,
   renderWorldCopies: false, fadeDuration: 150, cancelPendingTileRequestsWhileZooming: true,
   locale: { "ScrollZoomBlocker.CtrlMessage": "Use Ctrl + scroll to zoom the map" },
 });
 map.touchZoomRotate.disableRotation();
 map.keyboard.disableRotation();
+const views = createViews({ map, client, state, toast, reduced, param, setParam,
+  onChange: () => { if (state.view === "intro") renderPanel(); } });
 const scale = new maplibregl.ScaleControl({ maxWidth: 110, unit: f.units.us ? "imperial" : "metric" });
 map.addControl(scale, "bottom-left");
 
@@ -135,13 +138,14 @@ async function refresh() {
       }
       if ((isDetail(res) !== isDetail(prev) || (res === 10) !== (prev === 10)) && state.view === "intro") renderPanel();
       renderLevels();
+      views.afterRefresh();
     } while (again);
   })();
   try { await refreshing; } finally { refreshing = null; }
 }
 
 async function drawOverview(res) {
-  for (const r of state.regions.keys()) setVisible(map, [`pk-${r}-fill`, `pk-${r}-line`, `pk-${r}-hover`], false);
+  for (const r of state.regions.keys()) setVisible(map, packLayers(r), false);
   setVisible(map, ["overview-fill", "overview-line", "overview-hover"], true);
   const b = box();
   const key = res === 6 ? `6:${b.map((x) => Math.round(x * 2) / 2).join(",")}` : String(res);
@@ -167,10 +171,10 @@ async function drawDetail(res) {
   let shown = 0;
   for (const [r, lvl] of state.regions) {
     const on = want.has(r);
-    setVisible(map, [`pk-${r}-fill`, `pk-${r}-line`, `pk-${r}-hover`], on);
+    setVisible(map, on ? [`pk-${r}-fill`, `pk-${r}-line`, `pk-${r}-hover`] : packLayers(r), on);
     if (on && lvl === res) shown++;
   }
-  if (shown) setVisible(map, ["overview-fill", "overview-line", "overview-hover"], false);
+  if (shown) setVisible(map, OVERVIEW_LAYERS, false);
   const todo = regions.filter((r) => state.regions.get(r) !== res);
   if (!todo.length) return;
   busy(+todo.length);
@@ -181,9 +185,10 @@ async function drawDetail(res) {
       if (out.empty) { state.regions.set(r, res); return; }
       addPackLayers(map, r);
       map.getSource(`pk-${r}`).setData(out.fc);
+      views.drewPack(r, out.fc);
       setVisible(map, [`pk-${r}-fill`, `pk-${r}-line`, `pk-${r}-hover`], true);
       state.regions.set(r, res);
-      setVisible(map, ["overview-fill", "overview-line", "overview-hover"], false);
+      setVisible(map, OVERVIEW_LAYERS, false);
       if (!performance.getEntriesByName("lowpoints:first-pack").length) map.once("idle", () => performance.mark("lowpoints:first-pack"));
     } catch (e) {
       toast("Some depressions could not load (both data hosts failed).", refresh);
@@ -191,6 +196,9 @@ async function drawDetail(res) {
   }));
   prune(want);
 }
+
+const OVERVIEW_LAYERS = ["overview-fill", "overview-line", "overview-hover", "overview-col"];
+const packLayers = (r) => [`pk-${r}-fill`, `pk-${r}-line`, `pk-${r}-hover`, `pk-${r}-col`, `pk-${r}-colw`];
 
 function prune(want) {
   if (state.regions.size <= MAX_REGION_SOURCES) return;
@@ -219,8 +227,9 @@ let hovered = null;
 
 const LINE_LAYERS = ["spill-points", "spill-hit", "upstream-hit", "selection-fill"];
 function interactive() {
-  const ids = [...LINE_LAYERS, "overview-fill"];
-  for (const r of state.regions.keys()) if (map.getLayer(`pk-${r}-fill`)) ids.push(`pk-${r}-fill`);
+  const kind = views.effective === "columns" ? "col" : "fill";      // point at what is drawn
+  const ids = [...LINE_LAYERS, `overview-${kind}`];
+  for (const r of state.regions.keys()) if (map.getLayer(`pk-${r}-${kind}`)) ids.push(`pk-${r}-${kind}`);
   return ids;
 }
 
@@ -292,6 +301,7 @@ async function selectDepression(region, index, { fly = false } = {}) {
   map.getSource("cellsel").setData(empty());
   state.view = "depression";
   state.selected = { region, index, data: null };
+  views.select(region, index);
   $("panel-body").innerHTML = panelView.loading("Depression");
   sheet.set("half");
   try {
@@ -333,6 +343,7 @@ function clearSelection(render = true) {
   selectToken++;
   for (const s of ["selection", "spill", "upstream", "cellsel"]) map.getSource(s)?.setData(empty());
   state.selected = null; state.cell = null;
+  views.select(null);
   setParam("d", null);
   if (render) { state.view = "intro"; renderPanel(); sheet.set("peek"); }
 }
@@ -356,7 +367,7 @@ function renderPanel() {
   else if (state.view === "cell" && state.cell) body.innerHTML = panelView.overviewCell(state.cell.props, state.cell.res);
   else {
     const res = state.res ?? autoRes(map.getZoom());
-    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res);
+    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res, views.note());
   }
   measure();
 }
@@ -422,6 +433,10 @@ $("basemap").onclick = () => {
   toast(basemapKind === "detailed" ? "Detailed street map" : "Quiet street map");
 };
 
+$("views").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (b) views.set(b.dataset.view); });
+$("view3d").onclick = () => { views.set(views.next()); toast(`View: ${{ flat: "Flat", columns: "Columns", wells: "Wells" }[views.view]}`); };
+$("compass").onclick = () => map.easeTo({ bearing: 0, pitch: 0, duration: reduced() ? 0 : 700 });
+
 $("zoom-in").onclick = () => map.zoomIn();
 $("zoom-out").onclick = () => map.zoomOut();
 $("home").onclick = () => { clearSelection(); map.flyTo({ ...HOME, duration: reduced() ? 0 : 1200 }); };
@@ -475,9 +490,9 @@ document.addEventListener("keydown", (e) => {
 function reduced() { return matchMedia("(prefers-reduced-motion: reduce)").matches; }
 
 let toastTimer = 0;
-function toast(msg, retry) {
+function toast(msg, retry, label = "Retry") {
   const el = $("toast");
-  el.innerHTML = `${f.esc(msg)}${retry ? `<button type="button">Retry</button>` : ""}`;
+  el.innerHTML = `${f.esc(msg)}${retry ? `<button type="button">${f.esc(label)}</button>` : ""}`;
   if (retry) el.querySelector("button").onclick = () => { el.classList.remove("show"); retry(); };
   el.classList.add("show");
   clearTimeout(toastTimer);
@@ -546,6 +561,8 @@ const guide = createGuide([
     text: "It shows the key numbers and the legend. Darker hexagons have more low ground in them; zoomed right in, darker means deeper water when full." },
   { title: "Choose the hexagon size", target: () => $("levels-desktop"), skip: () => sheet.phone,
     text: "Auto picks the size from your zoom. Sizes 4 to 6 summarise large areas; 8 to 10 show single depressions. Click a number to choose one yourself." },
+  { title: "See it in 3D", target: () => (sheet.phone ? $("view3d") : $("views-desktop")),
+    text: "Columns raise each hexagon by how deep or how much; Wells sink each depression below the map at street scale. Heights are exaggerated, and the map says by how much. Drag with the right mouse button or two fingers to tilt and turn." },
   { title: "Click a hexagon", target: () => $("panel"), before: showExample,
     text: "We opened a depression in Houston for you. The panel says how much water it holds, which storm fills it and where the water goes next: plain words first, exact numbers below." },
   { title: "What the lines mean", target: selectionRect, before: showExample,
@@ -575,4 +592,4 @@ map.once("idle", () => {
   document.body.appendChild(box);
 });
 
-if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide };
+if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide, views };

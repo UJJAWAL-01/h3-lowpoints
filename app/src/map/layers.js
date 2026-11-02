@@ -29,6 +29,7 @@ export function addBaseLayers(map) {
   map.addLayer({ id: "overview-hover", type: "line", source: "overview", paint: {
     "line-color": "#121513", "line-width": 1.6,
     "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0] } }, LABELS_FROM);
+  map.addLayer(columnLayer("overview-col", "overview", step("s", SHARE.breaks)), LABELS_FROM);
   map.addLayer({ id: HEX_TOP, type: "background", paint: { "background-opacity": 0 } }, LABELS_FROM);
 
   for (const [id, props] of [["selection", {}], ["spill", {}], ["upstream", {}], ["cellsel", {}]]) {
@@ -72,12 +73,49 @@ export function addPackLayers(map, region) {
   map.addLayer({ id: `${src}-hover`, type: "line", source: src, paint: {
     "line-color": "#121513", "line-width": 1.6,
     "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0] } }, HEX_TOP);
+  map.addLayer(waterColumnLayer(`${src}-colw`, src), HEX_TOP);
+  map.addLayer(columnLayer(`${src}-col`, src, HEX_COLOUR), HEX_TOP);
 }
 
 export function removePackLayers(map, region) {
   const src = `pk-${region}`;
-  for (const id of [`${src}-hover`, `${src}-line`, `${src}-fill`]) if (map.getLayer(id)) map.removeLayer(id);
+  for (const id of [`${src}-col`, `${src}-colw`, `${src}-hover`, `${src}-line`, `${src}-fill`]) if (map.getLayer(id)) map.removeLayer(id);
   if (map.getSource(src)) map.removeSource(src);
+}
+
+// ------------------------------------------------------------------ 3D columns
+// Height from the worker (property hc, see heights.js); in a storm the blue water column (height in
+// feature-state "w", metres drawn) stands at the foot and the grey column starts on top of it.
+const HEX_COLOUR = ["case", ["has", "s"], step("s", SHARE.breaks), step("d", DEPTH.breaks)];
+const SELECTED = ["boolean", ["feature-state", "sel"], false];
+
+function columnLayer(id, source, colour) {
+  return { id, type: "fill-extrusion", source, layout: { visibility: "none" }, paint: {
+    "fill-extrusion-color": ["case", SELECTED, "#1f3a8a", colour],
+    "fill-extrusion-base": ["coalesce", ["feature-state", "w"], 0],
+    "fill-extrusion-height": ["max", ["get", "hc"], ["coalesce", ["feature-state", "w"], 0]],
+    "fill-extrusion-opacity": 0.94, "fill-extrusion-vertical-gradient": true } };
+}
+
+function waterColumnLayer(id, source) {
+  return { id, type: "fill-extrusion", source, layout: { visibility: "none" }, paint: {
+    "fill-extrusion-color": "#1d3f9e", "fill-extrusion-base": 0,
+    "fill-extrusion-height": ["coalesce", ["feature-state", "w"], 0], "fill-extrusion-opacity": 0.94 } };
+}
+
+// Which layers show for a view: flat fills, columns, or (wells) fills kept invisible for pointing
+export const FLAT_OPACITY = { overview: ["interpolate", ["linear"], ["zoom"], 3, 0.9, 8, 0.84, 10, 0.82],
+  pack: ["interpolate", ["linear"], ["zoom"], 10, 0.84, 15, 0.8, 18, 0.74] };
+
+export function applyView(map, view, sources) {
+  for (const src of sources) {
+    const kind = src === "overview" ? "overview" : "pack";
+    const col = view === "columns";
+    setVisible(map, [`${src}-col`], col);
+    if (kind === "pack") setVisible(map, [`${src}-colw`], col);
+    setVisible(map, [`${src}-line`], !col);                 // in Wells the outline is each opening's rim
+    if (map.getLayer(`${src}-fill`)) map.setPaintProperty(`${src}-fill`, "fill-opacity", col || view === "wells" ? 0 : FLAT_OPACITY[kind]);
+  }
 }
 
 export function setVisible(map, ids, on) {

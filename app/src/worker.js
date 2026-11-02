@@ -4,6 +4,7 @@
 
 import { cellArea, cellToBoundary, cellToLatLng, gridDisk, latLngToCell, polygonToCells } from "h3-js";
 import { Hosts } from "./data/hosts.js";
+import { columnHeight, mercX, mercY, mercZPerMetre } from "./map/heights.js";
 import { full, levelCells as groupCells, parentOf } from "./levels.js";
 import { gunzip, parsePack } from "./pack.js";
 import { YEARS, depthsAt, parseRarity, returnPeriod, stormDepths } from "./rarity.js";
@@ -19,7 +20,7 @@ const packs = new Map();                 // region -> {pack, derived}, in least-
 const pending = new Map();               // region -> promise (one request per pack at a time)
 
 const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf, example,
-  rarityAt, stormLevel, stormSummary, stormDepression };
+  rarityAt, stormLevel, stormSummary, stormDepression, wellMesh };
 
 self.onmessage = async (e) => {
   const { id, type, args } = e.data;
@@ -130,6 +131,7 @@ async function overviewCells(res, box) {
       properties: { h, s: o.depressed[i] / cellArea(h, "m2"), c,
         f: c ? o.fills2[i] / c : 0, l: c ? o.landlocked[i] / c : 0, v: o.volume[i], a: o.depressed[i] },
     };
+    features[k].properties.hc = Math.round(columnHeight(res, features[k].properties));
   }
   return { type: "FeatureCollection", features };
 }
@@ -200,13 +202,15 @@ async function pack(region, level) {
   const features = new Array(L.cell.length);
   for (let k = 0; k < L.cell.length; k++) {
     const h = hex(L.cell[k]);
+    const p = level === 10
+      ? { h, d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] }
+      : { h, s: L.area[k] / cellArea(h, "m2"), d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] };
+    p.hc = Math.round(columnHeight(level, p) * 10) / 10;            // column height in the 3D view (m)
     features[k] = {
       type: "Feature", id: k,
       geometry: { type: "Polygon", coordinates: [ring(h)] },
       // levels 8 and 9 are shaded by the share of the hexagon in depressions (s), level 10 by depth (d)
-      properties: level === 10
-        ? { h, d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] }
-        : { h, s: L.area[k] / cellArea(h, "m2"), d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] },
+      properties: p,
     };
   }
   return { region, level, depressions: v.pack.n, fc: { type: "FeatureCollection", features } };
@@ -435,4 +439,77 @@ async function stormDepression(region, i, storm) {
   const out = depressionSteps(run, i);
   out.rainMm = typeof run.rain === "number" ? run.rain : run.rain[i];
   return out;
+}
+
+// ------------------------------------------------------------------ wells (3D view, level 10)
+// Geometry of the wells for the level-10 hexagons of a region whose centre lies in box [w, s, e, n]:
+// all positions relative to the box centre in Mercator units (precise in float32), heights in
+// Mercator units per metre BEFORE exaggeration (the layer multiplies). Each hexagon's floor is its
+// depth when full (deepest point) below the level at which its depression overflows; walls stand
+// where neighbouring hexagons differ in depth (or border ground with no depression).
+//   open   [x, y] triangles: the hexagon openings
+//   pit    [x, y, z, shade] triangles: floors and walls (shade 0 light .. 1 dark)
+//   water  [x, y, floorDepthM, zPerMetre, k] triangles, k = the hexagon's index in pack(region, 10)
+async function wellMesh(region, box) {
+  const v = await getPack(region);
+  if (!v) return null;
+  const L = levelCells(v, 10);
+  if (!v.centres10) {
+    const c = new Float64Array(2 * L.cell.length);
+    L.cell.forEach((x, k) => { const [la, lo] = cellToLatLng(hex(x)); c[2 * k] = la; c[2 * k + 1] = lo; });
+    v.centres10 = c;
+  }
+  const C = v.centres10, [w, s, e, n] = box;
+  const ox = mercX((w + e) / 2), oy = mercY((s + n) / 2);
+  const pick = [];
+  for (let k = 0; k < L.cell.length; k++) {
+    const la = C[2 * k], lo = C[2 * k + 1];
+    if (la >= s && la <= n && lo >= w && lo <= e) pick.push(k);
+  }
+  const rings = pick.map((k) => cellToBoundary(hex(L.cell[k]), true).slice(0, -1));   // [lng, lat], open ring
+  const key = (a) => `${a[0].toFixed(9)},${a[1].toFixed(9)}`;
+  const edges = new Map();                     // edge -> [{t, a, b, depth}]
+  rings.forEach((ring, t) => {
+    for (let j = 0; j < ring.length; j++) {
+      const a = ring[j], b = ring[(j + 1) % ring.length];
+      const ka = key(a), kb = key(b), id = ka < kb ? ka + "|" + kb : kb + "|" + ka;
+      let list = edges.get(id);
+      if (!list) edges.set(id, (list = []));
+      list.push({ t, a, b });
+    }
+  });
+  const depthOf = (t) => L.depth[pick[t]];
+  const P = (lng, lat) => [mercX(lng) - ox, mercY(lat) - oy, mercZPerMetre(lat)];
+  const open = [], pit = [], water = [];
+  rings.forEach((ring, t) => {
+    const d = depthOf(t), k = pick[t], pts = ring.map(([lng, lat]) => P(lng, lat));
+    const floorShade = 0.5 + 0.4 * Math.min(d / 4, 1);       // floors darker than walls: a hollow
+    for (let j = 1; j + 1 < pts.length; j++) {
+      for (const q of [pts[0], pts[j], pts[j + 1]]) {
+        open.push(q[0], q[1]);
+        pit.push(q[0], q[1], -d * q[2], floorShade);
+        water.push(q[0], q[1], d, q[2], k);
+      }
+    }
+  });
+  for (const list of edges.values()) {
+    let top, bottom, deeper;
+    if (list.length === 1) { deeper = list[0]; top = 0; bottom = depthOf(deeper.t); }
+    else {
+      const [x, y] = list, dx = depthOf(x.t), dy = depthOf(y.t);
+      if (dx === dy) continue;
+      deeper = dx > dy ? x : y; top = Math.min(dx, dy); bottom = Math.max(dx, dy);
+    }
+    const a = P(...deeper.a), b = P(...deeper.b);
+    // light from the north-west; the wall faces into the deeper hexagon
+    const lat = (deeper.a[1] + deeper.b[1]) / 2;
+    const ex = (deeper.b[0] - deeper.a[0]) * Math.cos((lat * Math.PI) / 180), ey = deeper.b[1] - deeper.a[1];
+    const len = Math.hypot(ex, ey) || 1, nx = ey / len, ny = -ex / len;   // outward for a counter-clockwise ring
+    const lit = -(nx * -0.6 + ny * 0.8);                                   // inner face towards the light
+    const shade = 0.22 + 0.2 * lit;
+    const quad = [[a, top], [b, top], [b, bottom], [a, top], [b, bottom], [a, bottom]];
+    for (const [q, depth] of quad) pit.push(q[0], q[1], -depth * q[2], shade);
+  }
+  return { region, origin: [ox, oy], cells: pick.length, box,
+    open: new Float32Array(open), pit: new Float32Array(pit), water: new Float32Array(water) };
 }

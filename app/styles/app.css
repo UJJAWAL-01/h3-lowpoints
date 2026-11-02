@@ -339,3 +339,19 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 }
 .unsupported h2 { font: 600 24px/1.25 var(--sans); margin: 0; }
 .unsupported p { margin: 0; max-width: 60ch; color: var(--ink-2); }
+
+/* the view switch (Flat / Columns / Wells) and the note on heights */
+.views { position: fixed; z-index: 8; top: calc(var(--top) + 48px); right: var(--gutter-r); display: flex; align-items: stretch; }
+.views .label { align-self: center; padding: 0 10px 0 12px; }
+.view-note {
+  position: fixed; z-index: 8; top: calc(var(--top) + 96px); right: var(--gutter-r); max-width: 300px; margin: 0;
+  padding: 8px 11px; font-size: 13.5px; line-height: 1.45; color: var(--ink-2);
+}
+#view3d { display: none; }
+#compass[hidden] { display: none; }
+@media (max-width: 719px) {
+  .views { display: none; }
+  #view3d { display: grid; place-items: center; }
+  .view-note { top: auto; bottom: calc(var(--sheet-peek, 140px) + 12px); left: 12px; right: 64px; max-width: none; font-size: 13px; }
+  body.sheet-up .view-note { display: none; }
+}

@@ -7,7 +7,7 @@ const both = (x) => `${f.esc(x.main)}${x.alt ? ` <small>${f.esc(x.alt)}</small>`
 const inline = (x) => `${f.esc(x.main)}${x.alt ? ` (${f.esc(x.alt)})` : ""}`;
 const CLOSE = `<button class="close" data-act="close" aria-label="Close details"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.6"/></svg></button>`;
 
-export function intro(nat, mode, res) {
+export function intro(nat, mode, res, heightNote = "") {
   const n = nat
     ? `<div class="stats" role="list">
         <div role="listitem"><span class="label">Depressions</span><span class="v">${f.int(nat.depressions)}</span></div>
@@ -26,6 +26,7 @@ export function intro(nat, mode, res) {
     <p class="notice">For exploration and learning only. Not a flood map, forecast or advice. <button class="btn link" data-act="disclaimer">Disclaimer</button></p>
     ${n}
     ${legendHtml(res === 10 ? "depth" : "share", f.units.us)}
+    ${heightNote ? `<p class="note"><strong>3D:</strong> ${f.esc(heightNote)}</p>` : ""}
     <p class="note">${hint}</p>
     ${source("cell")}
     ${foot()}`;

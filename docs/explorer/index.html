@@ -12,7 +12,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%23f2f3f1' stroke='%23121513' stroke-width='2'/%3E%3Cpath d='M9 18c3 4 11 4 14 0' fill='none' stroke='%231d3f9e' stroke-width='2.5'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/instrument-serif-latin-400-italic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=e606e89797">
+<link rel="stylesheet" href="app.css?v=30bed7ab0a">
 </head>
 <body>
 <a class="skip" href="#search">Skip to place search</a>
@@ -43,14 +43,26 @@
   <div class="seg" id="levels" role="group" aria-labelledby="levels-label"></div>
 </div>
 
+<div class="views card" id="views-desktop">
+  <span class="label" id="views-label">View</span>
+  <div class="seg" id="views" role="group" aria-labelledby="views-label">
+    <button data-view="flat" aria-pressed="true" title="Flat map, seen from above">Flat</button>
+    <button data-view="columns" aria-pressed="false" title="3D columns: height = how deep or how much (exaggerated)">Columns</button>
+    <button data-view="wells" aria-pressed="false" title="3D wells: depressions sink below the map (exaggerated; street scale)">Wells</button>
+  </div>
+</div>
+<p class="view-note card" id="view-note" hidden role="status"></p>
+
 <div class="tools">
   <div class="stack card">
     <button id="zoom-in" aria-label="Zoom in" title="Zoom in"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    <button id="compass" aria-label="North up and look straight down" title="North up and look straight down" hidden><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="transition:transform .2s"><path d="M8 1.5l3 6.5H5z" fill="currentColor"/><path d="M8 14.5l3-6.5H5z" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
     <button id="zoom-out" aria-label="Zoom out" title="Zoom out"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M1 7h12" stroke="currentColor" stroke-width="1.6"/></svg></button>
   </div>
   <div class="stack card">
     <button id="locate" aria-label="Go to my location" title="Go to my location"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 0v3M8 13v3M0 8h3M13 8h3" stroke="currentColor" stroke-width="1.5"/></svg></button>
     <button id="home" aria-label="Show the whole country" title="Show the whole country"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l5.6 3.25v6.5L8 14.5l-5.6-3.25v-6.5z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+    <button id="view3d" aria-label="Switch the view" title="View: Flat" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l5.8 3.2v6.6L8 14.5l-5.8-3.2V4.7z M2.2 4.7L8 8l5.8-3.3 M8 8v6.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
     <button id="basemap" aria-label="Switch the street map" title="Street map: detailed or quiet"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l6.5 3.3L8 8.1 1.5 4.8z M1.5 8l6.5 3.3L14.5 8 M1.5 11.2l6.5 3.3 6.5-3.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
     <button id="units" aria-label="Switch units" title="Switch between metric and US units" class="mono">m</button>
     <button id="about-open" aria-label="About this map" title="About this map"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7v4.5" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="4.8" r="1" fill="currentColor"/></svg></button>
@@ -83,6 +95,9 @@
     <ul>
       <li>Across the country and at city scale, each hexagon says how much of its area lies in depressions.</li>
       <li>At street scale (the finest level), each hexagon is shaded by how deep water stands there when its depression is full.</li>
+      <li>Columns and Wells show the same numbers in 3D: columns rise, wells sink below the map. Their
+        heights are exaggerated, by a factor the map states (30 times at street scale). Drag with the
+        right mouse button, or two fingers, to tilt and turn; the compass button sets north up again.</li>
       <li>Click a hexagon to see its depression: how much it holds, the rain that fills it, how often that
         rain falls, and where it overflows.</li>
     </ul>
@@ -143,6 +158,6 @@
 </dialog>
 
 <noscript><p style="position:fixed;inset:auto 16px 16px;background:#fff;border:1px solid #121513;padding:12px">This map needs JavaScript.</p></noscript>
-<script type="module" src="app.js?v=e606e89797"></script>
+<script type="module" src="app.js?v=30bed7ab0a"></script>
 </body>
 </html>
