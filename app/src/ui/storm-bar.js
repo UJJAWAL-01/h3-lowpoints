@@ -123,18 +123,23 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
 
   // the figures for the view (on a new storm, and after the map moves)
   let figTimer = 0;
-  function refreshSoon() { clearTimeout(figTimer); figTimer = setTimeout(() => refreshFigures(runToken), 200); }
+  // after the map moved: the same storm, new figures for the view ("figures": the panel keeps its place)
+  function refreshSoon() { clearTimeout(figTimer); figTimer = setTimeout(() => refreshFigures(runToken, "figures"), 200); }
 
-  async function refreshFigures(token) {
+  let centreStale = false;                   // the view moved while playing: read the centre at stop
+  async function refreshFigures(token, kind = "storm") {
     if (!storm) return;
     const c = map.getCenter();
-    centre = { lat: c.lat, lon: c.lng };
     try {
-      [readout, timing] = await Promise.all([client.call("rarityAt", c.lat, c.lng, storm.hours, storm.kind === "amount" ? storm.mm : 0),
-        client.call("temporalAt", c.lat, c.lng, storm.hours)]);
-      tau = timed() ? tauOf(pos) : (pos + 1) / STEPS;
+      if (!playing) {
+        centre = { lat: c.lat, lon: c.lng };
+        [readout, timing] = await Promise.all([client.call("rarityAt", c.lat, c.lng, storm.hours, storm.kind === "amount" ? storm.mm : 0),
+          client.call("temporalAt", c.lat, c.lng, storm.hours)]);
+        tau = timed() ? tauOf(pos) : (pos + 1) / STEPS;
+        centreStale = false;
+      } else centreStale = true;
       if (token !== runToken) return;
-      if (!detail()) { summary = null; renderBar(); emit(); return; }
+      if (!detail()) { summary = null; renderBar(); emit(kind); return; }
       const b = box(), regions = await client.call("regionsIn", b, 0);
       const [sm, ln] = await Promise.all([client.call("stormSummary", regions, b, storm, state.show),
         client.call("stormLines", regions, b, storm, state.show)]);
@@ -151,7 +156,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
       if (token === runToken) toast(`The storm could not be run here (${String(e.message || e)}).`);
     }
     renderBar();
-    emit();
+    emit(kind);
   }
 
   // ---------------------------------------------------------------- the timeline
@@ -164,7 +169,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
 
   function moveTo(p, { fromPlay = false, t = null } = {}) {
     pos = Math.max(-1, Math.min(STEPS - 1, p));
-    tau = t != null ? t : timed() ? tauOf(pos) : (pos + 1) / STEPS;
+    tau = Math.max(0, Math.min(1, t != null ? t : timed() ? tauOf(pos) : (pos + 1) / STEPS));
     if (!fromPlay) stop();
     views.setStep(pos);                      // the GPU layers draw the blend
     const k = exact(pos);
@@ -237,6 +242,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     writeLink();
     renderTimeline();
     for (const fn of listeners) fn("step");
+    if (centreStale) refreshFigures(runToken, "figures");     // the view moved while it played
   }
 
   // ---------------------------------------------------------------- opening, choosing
@@ -296,12 +302,22 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     return readout.depths[YEARS.indexOf(storm.years)];
   };
 
+  // The card is rebuilt only when its controls change (another storm, kind, units, timing or
+  // not); otherwise its quick picks, readout and timeline are written in place, so moving the map
+  // while a storm plays never replaces the Play button or the slider under the visitor's hand.
+  function setHtml(html) {
+    if (el.dataset.skel === html) return false;
+    el.dataset.skel = html;
+    el.innerHTML = html;
+    return true;
+  }
+
   function renderBar() {
     if (!open) return;
     if (!detail()) {
-      el.innerHTML = `<div class="storm-head"><span class="label">Rain simulator</span>${closeBtn()}</div>
+      setHtml(`<div class="storm-head"><span class="label">Rain simulator</span>${closeBtn()}</div>
         <p class="storm-far">Storms run on single depressions. Zoom in to a city to run one.</p>
-        <div class="row"><button class="btn primary" data-st="zoom">Zoom in here</button></div>`;
+        <div class="row"><button class="btn primary" data-st="zoom">Zoom in here</button></div>`);
       measure();
       return;
     }
@@ -309,13 +325,13 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     const yearOpts = YEARS.map((y) => `<option value="${y}"${y === s.years ? " selected" : ""}>${f.int(y)}-year</option>`).join("");
     const hourOpts = HOURS.map((h) => `<option value="${h}"${h === s.hours ? " selected" : ""}>${h} hour${h === 1 ? "" : "s"}</option>`).join("");
     const unit = us() ? "in" : "mm";
-    const picks = readout?.covered
+    const picksHtml = readout?.covered
       ? [2, 10, 100].map((y) => {
         const d = readout.depths[YEARS.indexOf(y)];
         const on = rare && s.years === y && s.hours === 24;
         return `<button data-pick="${y}" aria-pressed="${on}" title="NOAA Atlas 14 at the centre of the view">${y}-yr 24 h <small>${f.esc(f.rain(d).main)}</small></button>`;
       }).join("") : "";
-    el.innerHTML = `<div class="storm-head"><span class="label" id="storm-label">Rain simulator</span>${closeBtn()}</div>
+    const built = setHtml(`<div class="storm-head"><span class="label" id="storm-label">Rain simulator</span>${closeBtn()}</div>
       <div class="storm-row">
         <div class="seg" role="group" aria-label="Choose the storm by">
           <button data-kind="rarity" aria-pressed="${rare}">How rare</button><button data-kind="amount" aria-pressed="${!rare}">How much</button></div>
@@ -326,16 +342,21 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
         <div class="seg" role="group" aria-label="Ground before the storm">${GROUNDS.map((g) =>
     `<button data-ground="${g}" aria-pressed="${g === s.condition}" title="${groundTitle(g)}">${GROUND_LABEL[g]}</button>`).join("")}</div>
       </div>
-      ${picks ? `<div class="storm-picks"><span class="label">Here</span>${picks}</div>` : ""}
-      <p class="storm-readout" id="storm-amount-note">${readoutText()}</p>
+      <div class="storm-picks"></div>
+      <p class="storm-readout" id="storm-amount-note"></p>
       <div class="storm-time">
         <button class="btn primary play" data-st="play">Play</button>
-        ${timed() ? `<input type="range" min="0" max="1000" step="1" value="${Math.round(tau * 1000)}" data-f="time" aria-label="Time into the storm">`
-    : `<input type="range" min="0" max="${STEPS}" step="0.01" value="${pos + 1}" data-f="step" aria-label="Rain fallen so far, in sixteenths of the storm">`}
+        ${timed() ? `<input type="range" min="0" max="1000" step="1" data-f="time" aria-label="Time into the storm">`
+    : `<input type="range" min="0" max="${STEPS}" step="0.01" data-f="step" aria-label="Rain fallen so far, in sixteenths of the storm">`}
         <span class="storm-now" aria-live="off"></span>
-      </div>`;
+      </div>`);
+    const pk = el.querySelector(".storm-picks"), rd = el.querySelector(".storm-readout");
+    const ph = picksHtml ? `<span class="label">Here</span>${picksHtml}` : "";
+    if (pk && pk.dataset.html !== ph) { pk.dataset.html = ph; pk.innerHTML = ph; pk.hidden = !ph; }
+    const rt = readoutText();
+    if (rd && rd.dataset.html !== rt) { rd.dataset.html = rt; rd.innerHTML = rt; }
     renderTimeline();
-    measure();
+    if (built) measure();
   }
 
   const closeBtn = () => `<button class="close" data-st="close" aria-label="Close the rain simulator"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.6"/></svg></button>`;
@@ -411,7 +432,9 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     else if (e.target.dataset.f === "time") { cancelAnimationFrame(easeFrame); const t = Number(e.target.value) / 1000; moveTo(posOf(t), { t }); }
   });
   // let go: ease to the nearest exact step (so a paused map shows a computed state, not a blend)
-  el.addEventListener("change", (e) => { if (e.target.dataset.f === "step" || e.target.dataset.f === "time") easeTo(Math.round(pos)); });
+  // in hours the slider stays where it is let go (an exact step can be hours away early in a storm,
+  // when little rain falls; the figures are those of the last exact step reached)
+  el.addEventListener("change", (e) => { if (e.target.dataset.f === "step") easeTo(Math.round(pos)); else if (e.target.dataset.f === "time") writeLink(); });
   el.addEventListener("keydown", (e) => {
     const r = e.target.dataset?.f === "step" || e.target.dataset?.f === "time";
     if (!r || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(e.key)) return;
@@ -423,7 +446,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     if (e.key === " " && e.target === el.querySelector('[data-f="step"]')) { e.preventDefault(); playing ? stop() : play(); }
   });
 
-  function emit() { for (const fn of listeners) fn("storm"); onChange?.(); }
+  function emit(kind = "storm") { for (const fn of listeners) fn(kind); onChange?.(); }
 
   function measure() {
     requestAnimationFrame(() => document.documentElement.style.setProperty("--storm-h", `${open ? Math.round(el.getBoundingClientRect().height) : 0}px`));

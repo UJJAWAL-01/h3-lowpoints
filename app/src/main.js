@@ -425,6 +425,15 @@ async function loadGauge() {
 stormBar.on((what) => {
   const body = $("panel-body");
   if (what === "storm") { state.gauge = null; renderPanel(); return; }
+  if (what === "figures") {                       // the same storm, the view moved
+    if (state.view !== "intro") return;           // a depression's gauge does not depend on the view
+    const panel = $("panel"), top = panel.scrollTop;
+    const open = [...body.querySelectorAll("details")].map((d) => d.open);
+    renderPanel();
+    body.querySelectorAll("details").forEach((d, k) => { if (open[k] != null) d.open = open[k]; });
+    panel.scrollTop = top;
+    return;
+  }
   // a step: write the figures in place (no re-render: no flicker, scroll kept)
   if (state.view === "intro") panelView.stormNumbers(body, stormCtx());
   else if (state.view === "depression" && gaugeData()) {

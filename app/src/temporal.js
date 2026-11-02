@@ -36,7 +36,7 @@ export function timeAt(curve, r) {
 
 // "35 min", "9 h 30 min", "3 days 4 h"
 export function duration(hours) {
-  const m = Math.round(hours * 60);
+  const m = Math.max(0, Math.round(hours * 60));
   if (m < 60) return `${m} min`;
   if (m < 48 * 60) { const h = Math.floor(m / 60), r = m % 60; return r ? `${h} h ${r} min` : `${h} h`; }
   const d = Math.floor(m / 1440), h = Math.round((m % 1440) / 60);

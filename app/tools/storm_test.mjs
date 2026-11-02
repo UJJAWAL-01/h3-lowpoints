@@ -268,6 +268,36 @@ try {
       && /^\d+ h( \d+ min)? of 24 h · \d+ mm of \d+ mm fallen/.test(R.check11.barText);
   }
 
+  // ---------------------------------------------------------------- 12. play stays smooth while the map moves (owner report)
+  await open("map=14.8/29.7604/-95.3698&s=r.10.24");
+  await settled(); await sleep(1500);
+  R.check12 = await page.evaluate(() => new Promise((res) => {
+    const L = window.__lowpoints, log = { cardRebuilt: 0, backJumps: 0, negative: 0, frames: 0 };
+    new MutationObserver((m) => { for (const x of m) if (x.type === "childList" && x.target.id === "storm") log.cardRebuilt++; })
+      .observe(document.getElementById("storm"), { childList: true });
+    const slider = document.querySelector('[data-f="time"], [data-f="step"]'), button = document.querySelector('[data-st="play"]');
+    let last = -1;
+    const watch = () => {
+      const t = L.stormBar.tau, text = L.stormBar.nowText();
+      if (t < last - 1e-9) log.backJumps++;
+      if (/-\d/.test(text)) log.negative++;
+      last = t; log.frames++;
+      if (L.stormBar.playing || log.frames < 5) requestAnimationFrame(watch);
+    };
+    button.click();
+    requestAnimationFrame(watch);
+    setTimeout(() => L.map.panBy([120, 60], { duration: 400 }), 1500);
+    setTimeout(() => L.map.zoomTo(L.map.getZoom() + 0.4, { duration: 400 }), 3200);
+    const done = () => {
+      log.sliderKept = document.querySelector('[data-f="time"], [data-f="step"]') === slider;
+      log.buttonKept = document.querySelector('[data-st="play"]') === button;
+      res(log);
+    };
+    const wait = () => (L.stormBar.playing ? setTimeout(wait, 100) : setTimeout(done, 600));
+    setTimeout(wait, 300);
+  }));
+  R.check12.ok = R.check12.cardRebuilt === 0 && R.check12.backJumps === 0 && R.check12.negative === 0 && R.check12.sliderKept && R.check12.buttonKept;
+
   // ---------------------------------------------------------------- 10. accessibility (axe) with the storm open
   const axe = readFileSync(join(here, "..", "node_modules", "axe-core", "axe.min.js"), "utf8");
   await page.evaluate(axe);                 // (the page's CSP blocks inline scripts; this runs it through the debugger)
@@ -287,7 +317,7 @@ try {
 R.pass = {
   1: !!R.check1 && R.check1.every((x) => x.ok), 2: !!R.check2 && R.check2.every((x) => x.ok), 3: !!R.check3 && R.check3.every((x) => x.ok),
   4: !!R.check4?.ok, 5: !!R.check5?.ok, 6: !!R.check6 && R.check6.length > 0 && R.check6.every((x) => x.ok), 7: !!R.check7?.ok,
-  8: !!R.check8?.ok, 9: !!R.check9?.ok, axe: !!R.check10?.ok, time: timing ? !!R.check11?.ok : "not run", noErrors: R.errors.length === 0,
+  8: !!R.check8?.ok, 9: !!R.check9?.ok, axe: !!R.check10?.ok, time: timing ? !!R.check11?.ok : "not run", smoothWhileMoving: !!R.check12?.ok, noErrors: R.errors.length === 0,
 };
 writeFileSync(join(out, "report.json"), JSON.stringify(R, null, 1));
 console.log(JSON.stringify({ pass: R.pass, errors: R.errors.slice(0, 5) }, null, 1));
