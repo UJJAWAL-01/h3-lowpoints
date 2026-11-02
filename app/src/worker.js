@@ -4,15 +4,22 @@
 
 import { cellArea, cellToBoundary, cellToLatLng, gridDisk, latLngToCell, polygonToCells } from "h3-js";
 import { Hosts } from "./data/hosts.js";
+import { full, levelCells as groupCells, parentOf } from "./levels.js";
 import { gunzip, parsePack } from "./pack.js";
+import { YEARS, depthsAt, parseRarity, returnPeriod, stormDepths } from "./rarity.js";
+import { STEPS, depressionSteps, levelWater, normaliseStorm, rangeCounts, runStorm, stormKey, stormRain,
+  summarise } from "./storm.js";
 
 const MAX_PACKS = 48;                    // decoded packs kept in memory (about 2-5 MB each)
+const MAX_RUNS = 2;                      // storms kept per pack (the current one and the last)
+const MAX_PATH = 200, MAX_PATH_PACKS = 4; // overflow path: steps, and extra packs it may load
 let hosts, local, index = null, indexPromise = null;
 const overview = {};                     // res -> decoded overview
 const packs = new Map();                 // region -> {pack, derived}, in least-recently-used order
 const pending = new Map();               // region -> promise (one request per pack at a time)
 
-const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf, example };
+const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf, example,
+  rarityAt, stormLevel, stormSummary, stormDepression };
 
 self.onmessage = async (e) => {
   const { id, type, args } = e.data;
@@ -31,12 +38,6 @@ function init(config) {
 }
 
 // ------------------------------------------------------------------ H3 helpers on BigInt cells
-const RES_SHIFT = 52n, RES_MASK = 0xfn << 52n;
-function parentOf(cell, res) {
-  const r = BigInt(res);
-  const unused = (1n << (3n * (15n - r))) - 1n;
-  return ((cell & ~RES_MASK) | (r << RES_SHIFT)) | unused;
-}
 const hex = (b) => b.toString(16);
 
 const ring = (h) => cellToBoundary(h, true);       // GeoJSON order, already closed
@@ -158,7 +159,7 @@ async function getPack(region) {
     const bytes = await hosts.range(idx.file, entry[0], entry[1]);
     const pk = parsePack(await gunzip(bytes));
     if (pk.header.region !== region) throw new Error(`pack mismatch: asked ${region}, got ${pk.header.region}`);
-    const v = { pack: pk, levels: {}, upstream: null };
+    const v = { region, pack: pk, levels: {}, areas: {}, upstream: null, ids: null, lowLL: null, runs: new Map() };
     packs.set(region, v);
     while (packs.size > MAX_PACKS) packs.delete(packs.keys().next().value);
     return v;
@@ -167,32 +168,29 @@ async function getPack(region) {
   try { return await p; } finally { pending.delete(region); }
 }
 
-const full = (pk, i, arr) => arr[i * 7 + pk.count[i] - 1];
-
 // Cells to draw at one level: deepest point, depressed area, the depression with most area there
 function levelCells(v, level) {
-  if (v.levels[level]) return v.levels[level];
-  const pk = v.pack, m = pk.cell.length;
-  const keys = new Map();
-  const out = { cell: [], depth: [], area: [], dep: [], depArea: [], n: [] };
-  for (let r = 0; r < m; r++) {
-    const c = level === 10 ? pk.cell[r] : parentOf(pk.cell[r], level);
-    const d = pk.cell_dep[r];
-    const a = pk.cell_share[r] * full(pk, d, pk.areas);
-    let k = keys.get(c);
-    if (k === undefined) {
-      k = out.cell.length;
-      keys.set(c, k);
-      out.cell.push(c); out.depth.push(0); out.area.push(0); out.dep.push(d); out.depArea.push(-1); out.n.push(new Set());
-    }
-    out.depth[k] = Math.max(out.depth[k], pk.cell_max_depth[r]);
-    out.area[k] += a;
-    out.n[k].add(d);
-    if (a > out.depArea[k]) { out.depArea[k] = a; out.dep[k] = d; }
-  }
-  out.n = out.n.map((s) => s.size);
-  v.levels[level] = out;
-  return out;
+  return v.levels[level] || (v.levels[level] = groupCells(v.pack, level));
+}
+
+function cellAreas(v, level) {
+  if (v.areas[level]) return v.areas[level];
+  const L = levelCells(v, level), a = new Float64Array(L.cell.length);
+  for (let k = 0; k < a.length; k++) a[k] = cellArea(hex(L.cell[k]), "m2");
+  return (v.areas[level] = a);
+}
+
+function indexOfId(v, id) {
+  if (!v.ids) { v.ids = new Map(); v.pack.id.forEach((x, i) => v.ids.set(x, i)); }
+  const i = v.ids.get(BigInt(id));
+  return i === undefined ? -1 : i;
+}
+
+function lowLatLng(v) {
+  if (v.lowLL) return v.lowLL;
+  const pk = v.pack, ll = new Float64Array(2 * pk.n);
+  for (let i = 0; i < pk.n; i++) { const [la, lo] = cellToLatLng(hex(pk.low[i])); ll[2 * i] = la; ll[2 * i + 1] = lo; }
+  return (v.lowLL = ll);
 }
 
 async function pack(region, level) {
@@ -243,28 +241,21 @@ async function depression(region, i) {
         properties: { d: pk.cell_max_depth[r] } });
     }
   }
-  const chain = [lngLat(pk.low[i])], chainIdx = [i];
-  const seen = new Set([i]);
-  let j = pk.target[i], leaves = j < 0;
-  while (j >= 0 && !seen.has(j) && chain.length < 200) {
-    chain.push(lngLat(pk.low[j]));
-    chainIdx.push(j);
-    seen.add(j);
-    if (pk.target[j] < 0) { leaves = true; break; }
-    j = pk.target[j];
-  }
+  const path = await overflowPath(v, i);
+  const chain = path.coords, chainIdx = path.idx, leaves = path.leaves;
   const up = upstreamOf(v).get(i) || [];
   let receivesOutside = false;
   for (let k = 0; k < pk.ext_dep.length; k++) if (pk.ext_dep[k] === i) { receivesOutside = true; break; }
   const [lat, lon] = cellToLatLng(hex(pk.low[i]));
-  const t = pk.target[i];
+  const t = chainIdx.length > 1 ? chainIdx[1] : -1;
   return {
     region, index: i, id: pk.id[i].toString(), low: hex(pk.low[i]), lat, lon,
     depth: full(pk, i, pk.depths), area: full(pk, i, pk.areas), volume: full(pk, i, pk.vols),
     catchment: pk.catch[i], curveNumber: pk.cn[i], rainToFill: pk.rain_to_fill[i],
     fillsInYears: pk.fills_in_years[i], drained: (pk.flags[i] & 1) === 1, landlocked: (pk.flags[i] & 2) === 2,
-    target: t, targetLowLngLat: t >= 0 ? lngLat(pk.low[t]) : null,
-    chainSteps: chain.length - 1, chainLeaves: leaves, chainIdx, cellCount: cells.length,
+    target: t, targetRegion: t >= 0 ? path.regions[1] : null, targetLowLngLat: t >= 0 ? chain[1] : null,
+    chainSteps: chain.length - 1, chainLeaves: leaves, chainIdx, chainRegions: path.regions, chainIds: path.ids,
+    chainOtherAreas: path.packs, chainCut: path.cut, cellCount: cells.length,
     upstream: up.length, receivesOutside,
     cells: { type: "FeatureCollection", features: cells },
     chain: { type: "Feature", geometry: { type: "LineString", coordinates: chain }, properties: {} },
@@ -301,4 +292,147 @@ async function example(region, lat, lon) {
 
 function regionOf(lat, lon) {
   return latLngToCell(lat, lon, 4);
+}
+
+// ------------------------------------------------------------------ overflow path, across packs
+// From depression i, follow where each full depression overflows, into neighbouring packs too
+// (format 2: target_id and target_region). Ends where the overflow leaves the map (spill_to 0),
+// or is cut after MAX_PATH steps or MAX_PATH_PACKS extra packs.
+async function overflowPath(v, i) {
+  const coords = [], idx = [], regions = [], ids = [], seen = new Set();
+  const others = new Set();
+  let cur = v, j = i, leaves = false, cut = false;
+  while (true) {
+    const pk = cur.pack, key = `${cur.region}.${j}`;
+    if (seen.has(key)) { cut = true; break; }         // never happens in valid data; guards a loop
+    seen.add(key);
+    coords.push(lngLat(pk.low[j])); idx.push(j); regions.push(cur.region); ids.push(pk.id[j].toString());
+    if (coords.length > MAX_PATH) { cut = true; break; }
+    if (pk.target[j] >= 0) { j = pk.target[j]; continue; }
+    if (!pk.target_region) { cut = true; break; }      // format 1: where it goes is not stored
+    const tr = pk.target_region[j];
+    if (!tr) { leaves = true; break; }                 // spill_to 0: leaves the map
+    const region = hex(tr);
+    if (!others.has(region) && others.size >= MAX_PATH_PACKS) { cut = true; break; }
+    let next;
+    try { next = await getPack(region); } catch { next = null; }
+    if (!next) { cut = true; break; }
+    const k = indexOfId(next, pk.target_id[j]);
+    if (k < 0) { cut = true; break; }
+    others.add(region);
+    cur = next; j = k;
+  }
+  return { coords, idx, regions, ids, leaves, cut, packs: others.size };
+}
+
+// ------------------------------------------------------------------ rarity tables (NOAA Atlas 14)
+let rarityIndex = null, rarityIndexPromise = null;
+const rarityBlocks = new Map(), rarityPending = new Map();
+
+async function getRarityIndex() {
+  if (rarityIndex) return rarityIndex;
+  if (!rarityIndexPromise) {
+    rarityIndexPromise = hosts.json("rarity_index.json").then((j) => (rarityIndex = j));
+    rarityIndexPromise.catch(() => { rarityIndexPromise = null; });
+  }
+  return rarityIndexPromise;
+}
+
+// { block, res } for a res-4 region, or { block: null } where there is no table
+async function rarityOf(region) {
+  if (rarityBlocks.has(region)) return rarityBlocks.get(region);
+  if (rarityPending.has(region)) return rarityPending.get(region);
+  const p = (async () => {
+    const ri = await getRarityIndex();
+    const entry = ri.regions[region];
+    let out = { block: null, res: ri.res || 7 };
+    if (entry) {
+      const [off, len, n] = entry;
+      out.block = parseRarity(await gunzip(await hosts.range(ri.file, off, len)), n);
+    }
+    rarityBlocks.set(region, out);
+    while (rarityBlocks.size > MAX_PACKS) rarityBlocks.delete(rarityBlocks.keys().next().value);
+    return out;
+  })();
+  rarityPending.set(region, p);
+  try { return await p; } finally { rarityPending.delete(region); }
+}
+
+// How rare `mm` in `hours` is at a point, and the depth of each return period's storm there
+async function rarityAt(lat, lon, hours, mm) {
+  const r = await rarityOf(latLngToCell(lat, lon, 4));
+  if (!r.block) return { covered: false, years: YEARS };
+  const table = depthsAt(r.block, BigInt("0x" + latLngToCell(lat, lon, r.res)));
+  if (!table || Array.from(table).some(Number.isNaN)) return { covered: false, years: YEARS };
+  const depths = stormDepths(table, hours);
+  return { covered: true, years: YEARS, depths, returnPeriod: mm > 0 ? returnPeriod(mm, hours, table) : null };
+}
+
+// ------------------------------------------------------------------ the storm on packs
+async function stormRun(region, stormIn) {
+  const storm = normaliseStorm(stormIn);
+  const v = await getPack(region);
+  if (!v) return null;
+  const key = stormKey(storm);
+  if (v.runs.has(key)) { const r = v.runs.get(key); v.runs.delete(key); v.runs.set(key, r); return r; }
+  const rarity = storm.kind === "rarity" ? await rarityOf(region) : null;
+  const rain = stormRain(v.pack, storm, rarity);
+  const t0 = performance.now();
+  const run = runStorm(v.pack, rain, storm.condition);
+  run.rain = rain;
+  run.ms = performance.now() - t0;
+  v.runs.set(key, run);
+  while (v.runs.size > MAX_RUNS) v.runs.delete(v.runs.keys().next().value);
+  return run;
+}
+
+// Water in every hexagon that pack() draws for this region and level, in the same order:
+// values[k * steps + s] (m of water at level 10, share under water at 8 and 9; NaN unknown)
+async function stormLevel(region, level, storm) {
+  const run = await stormRun(region, storm);
+  if (!run) return { region, level, empty: true };
+  const v = packs.get(region) || await getPack(region);
+  const values = levelWater(v.pack, levelCells(v, level), run, level, cellAreas(v, level));
+  return { region, level, steps: STEPS, values, ms: run.ms };
+}
+
+// The storm over the depressions whose lowest point is inside box [w, s, e, n], in these regions
+async function stormSummary(regions, box, stormIn) {
+  const storm = normaliseStorm(stormIn);
+  const [w, s, e, n] = box;
+  const total = { depressions: 0, unknown: 0, fill: 0, overflow: 0, holdWater: 0, wetAreaM2: 0, heldM3: 0,
+    first: [], range: {}, regions: 0, ms: 0 };
+  const firsts = [];
+  for (const region of regions) {
+    const run = await stormRun(region, storm);
+    if (!run) continue;
+    const v = await getPack(region), ll = lowLatLng(v);
+    const pick = (i) => ll[2 * i] >= s && ll[2 * i] <= n && ll[2 * i + 1] >= w && ll[2 * i + 1] <= e;
+    const sm = summarise(v.pack, run, pick);
+    for (const k of ["depressions", "unknown", "fill", "overflow", "holdWater", "wetAreaM2", "heldM3"]) total[k] += sm[k];
+    for (const f of sm.first) firsts.push({ ...f, region, id: v.pack.id[f.i].toString(), lngLat: [ll[2 * f.i + 1], ll[2 * f.i]] });
+    for (const cond of ["dry", "wet"]) {
+      if (cond === storm.condition) continue;
+      const rc = rangeCounts(v.pack, run.rain, cond, pick);
+      const t = total.range[cond] || (total.range[cond] = { fill: 0, overflow: 0 });
+      t.fill += rc.fill; t.overflow += rc.overflow;
+    }
+    total.regions++;
+    total.ms += run.ms;
+  }
+  total.range[storm.condition] = { fill: total.fill, overflow: total.overflow };
+  firsts.sort((a, b) => a.step - b.step || b.ratio - a.ratio || (a.id < b.id ? -1 : 1));
+  total.first = firsts.slice(0, 5);
+  total.steps = STEPS;
+  return total;
+}
+
+// One depression through the storm: how full at each step, how deep, when it overflows
+async function stormDepression(region, i, storm) {
+  const run = await stormRun(region, storm);
+  if (!run) throw new Error("no data for this area");
+  if (!(i >= 0 && i < run.n)) throw new Error("no such depression");
+  const out = depressionSteps(run, i);
+  out.rainMm = typeof run.rain === "number" ? run.rain : run.rain[i];
+  return out;
 }

@@ -265,7 +265,7 @@ map.on("click", (e) => {
   if (!feat) { clearSelection(); return; }
   const lid = feat.layer.id;
   if ((lid === "spill-points" || lid === "upstream-hit") && state.selected && feat.properties.i != null) {
-    selectDepression(state.selected.region, Number(feat.properties.i));
+    selectDepression(feat.properties.r || state.selected.region, Number(feat.properties.i));
     return;
   }
   if (lid === "spill-hit" || lid === "selection-fill") return;     // explained by the tooltip and the panel
@@ -300,7 +300,7 @@ async function selectDepression(region, index, { fly = false } = {}) {
     state.selected.data = d;
     map.getSource("selection").setData(d.cells);
     const pts = d.chain.geometry.coordinates.slice(1).map((c, k) => ({ type: "Feature", geometry: { type: "Point", coordinates: c },
-      properties: { i: d.chainIdx[k + 1] } }));
+      properties: { i: d.chainIdx[k + 1], r: d.chainRegions[k + 1] } }));
     map.getSource("spill").setData({ type: "FeatureCollection", features: d.chainSteps ? [d.chain, ...pts] : [] });
     map.getSource("upstream").setData(d.upstreamPoints);
     setParam("d", `${region}.${d.id}`);

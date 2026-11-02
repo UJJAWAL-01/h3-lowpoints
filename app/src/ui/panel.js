@@ -63,9 +63,9 @@ export function depression(d) {
   let where;
   if (d.target >= 0 && d.targetLowLngLat) {
     const dist = f.distance(f.metres([d.lon, d.lat], d.targetLowLngLat));
-    where = `When full, it overflows into another depression ${inline(dist)} to the ${f.compass([d.lon, d.lat], d.targetLowLngLat)}${d.chainSteps > 1 ? `, and on through ${d.chainSteps - 1} more` : ""}.`;
+    where = `When full, it overflows into another depression ${inline(dist)} to the ${f.compass([d.lon, d.lat], d.targetLowLngLat)}${d.chainSteps > 1 ? `, and on through ${d.chainSteps - 1} more` : ""}${d.chainCut ? ", then on further than is drawn" : d.chainLeaves ? ", then off the mapped land (into open water or past the edge of the data)" : ""}.`;
   } else {
-    where = "When full, it overflows beyond this area's data (into a neighbouring area, a stream, or off the map).";
+    where = "When full, its water leaves the mapped land: into open water (a river, lake or the sea) or past the edge of the data.";
   }
   const status = d.landlocked
     ? `<span class="badge solid" title="No sign of drainage in mapped lines: no stream, ditch or canal within 30 m of its lowest point, and no highway or ramp within 30 m of where it overflows. Not proof that none exists.">Landlocked</span>`
@@ -102,7 +102,7 @@ function mapKey(d) {
   const rows = [`<li><i class="k k-sel" aria-hidden="true"></i><span><strong>Outlined hexagons:</strong> this depression.
     ${d.cellCount > 1 ? `It is bigger than one hexagon, so it covers ${f.int(d.cellCount)} of them.` : "It fits in one hexagon."}</span></li>`];
   if (d.chainSteps) rows.push(`<li><i class="k k-spill" aria-hidden="true"></i><span><strong>Blue arrows:</strong> where its water goes
-    once it is full, through ${d.chainSteps === 1 ? "the next depression" : `${d.chainSteps} depressions in turn`}${d.chainLeaves ? ", then beyond this area's data" : ""}. Click a dot to open that depression.</span></li>`);
+    once it is full, through ${d.chainSteps === 1 ? "the next depression" : `${d.chainSteps} depressions in turn`}${d.chainCut ? ", then on further than is drawn" : d.chainLeaves ? ", then off the mapped land (into open water or past the edge of the data)" : ""}. Click a dot to open that depression.</span></li>`);
   if (d.upstream) rows.push(`<li><i class="k k-up" aria-hidden="true"></i><span><strong>Grey dotted lines:</strong> ${d.upstream === 1 ? "a depression" : `${f.int(d.upstream)} depressions`}
     that overflow into this one. Click a line to open it.</span></li>`);
   const how = d.chainSteps || d.upstream ? `<details class="how"><summary>How are these lines worked out?</summary>

@@ -45,17 +45,18 @@ export function runoffMm(rain, cn) {
   return excess > 0 ? (excess * excess) / (excess + s) : 0;
 }
 
-// storms._stage: (depth at the lowest point, wet area) of a depression holding `s` m3
-export function stage(s, vols, depths, areas, count) {
+// storms._stage: (depth at the lowest point, wet area) of a depression holding `s` m3; its levels
+// are vols/depths/areas[at .. at + count - 1] (at: the offset of its row in the pack's tables)
+export function stage(s, vols, depths, areas, count, at = 0) {
   if (!(s > 0)) return Number.isNaN(s) ? [NaN, NaN] : [0, 0];
-  const last = count - 1;
+  const last = at + count - 1;
   if (s >= vols[last]) return [depths[last], areas[last]];
-  if (s < vols[0]) {
-    const k = Math.max((areas[0] * depths[0]) / vols[0], 1);
-    const r = s / vols[0];
-    return [depths[0] * r ** (1 / k), areas[0] * r ** ((k - 1) / k)];
+  if (s < vols[at]) {
+    const k = Math.max((areas[at] * depths[at]) / vols[at], 1);
+    const r = s / vols[at];
+    return [depths[at] * r ** (1 / k), areas[at] * r ** ((k - 1) / k)];
   }
-  let j = 1;
+  let j = at + 1;
   while (vols[j] < s) j++;
   const r = s / vols[j - 1];
   const k = Math.log(vols[j] / vols[j - 1]) / Math.log(depths[j] / depths[j - 1]);
@@ -106,8 +107,7 @@ export function simulate(pack, rain, condition = "average") {
   for (let i = 0; i < n; i++) {
     const at = i * rows, volume = pack.vols[at + pack.count[i] - 1];
     store[i] = Number.isNaN(inflow[i]) ? NaN : Math.min(inflow[i], volume);
-    [depth[i], area[i]] = stage(store[i], pack.vols.subarray(at, at + rows),
-      pack.depths.subarray(at, at + rows), pack.areas.subarray(at, at + rows), pack.count[i]);
+    [depth[i], area[i]] = stage(store[i], pack.vols, pack.depths, pack.areas, pack.count[i], at);
   }
   const m = pack.cell.length, cellWet = new Float64Array(m);
   for (let r = 0; r < m; r++) cellWet[r] = area[pack.cell_dep[r]] * pack.cell_share[r];
