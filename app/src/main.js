@@ -655,7 +655,7 @@ const guide = createGuide([
     before: async () => { if (state.view !== "intro") clearSelection(); if (!isDetail(state.res)) await showExample(); clearSelection(); if (!stormBar.active) stormBar.open(); await new Promise((r) => setTimeout(r, 400)); },
     text: "The raindrop opens the rain simulator. Choose a storm by how rare it is (the 10-year storm, from NOAA Atlas 14 for this place) or by how much rain, how long it lasts, and how wet the ground was before." },
   { title: "Watch it fill", target: () => $("storm"),
-    text: "Press Play: rain falls from none to the whole storm and the depressions fill, deeper blue for deeper water. The slider is rain fallen so far, not time. Overflowing depressions send thin blue lines to the next one." },
+    text: "Press Play: rain falls from none to the whole storm and the depressions fill, deeper blue for deeper water. The slider runs through the storm's hours, with the rain fallen so far; rain comes as it does in this region's storms (NOAA Atlas 14), most of it in the middle. Overflowing depressions send thin blue lines to the next one." },
   { title: "What the storm did", target: () => $("panel"),
     text: "The panel counts what is full, what overflows and how much water is held in this view, at the point the slider is on. Click a depression for its own gauge. What the model leaves out (drains, pumps, soaking in) is listed under the figures." },
   { title: "Tools", target: () => document.querySelector(".tools"),

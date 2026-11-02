@@ -12,7 +12,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%23f2f3f1' stroke='%23121513' stroke-width='2'/%3E%3Cpath d='M9 18c3 4 11 4 14 0' fill='none' stroke='%231d3f9e' stroke-width='2.5'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/instrument-serif-latin-400-italic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=c41cfcf821">
+<link rel="stylesheet" href="app.css?v=6167394fb2">
 </head>
 <body>
 <a class="skip" href="#search">Skip to place search</a>
@@ -105,8 +105,10 @@
       <li>The raindrop opens the <strong>rain simulator</strong>: choose a storm by how rare it is (NOAA Atlas 14
         for each depression's own location) or by how much rain, how long it lasts, and how wet the ground was
         before. Play shows rain falling from none to the whole storm and the depressions filling and overflowing
-        into one another, with water from neighbouring areas included. The storm is treated as a total, so the
-        timeline is rain fallen, not time. It is computed in 16 exact steps with the same equations as the
+        into one another, with water from neighbouring areas included. The timeline runs in hours: what a depression
+        holds depends only on the rain fallen so far, and NOAA Atlas 14's median pattern for the region says when
+        that rain has fallen (rain reaches each depression as it falls, so times are the earliest possible; where
+        NOAA has no pattern, the timeline is rain fallen). It is computed in 16 exact steps with the same equations as the
         library; while it plays the map blends smoothly between them, and every number shown is an exact step.</li>
     </ul>
     <h3>What it does not include</h3>
@@ -169,6 +171,6 @@
 </dialog>
 
 <noscript><p style="position:fixed;inset:auto 16px 16px;background:#fff;border:1px solid #121513;padding:12px">This map needs JavaScript.</p></noscript>
-<script type="module" src="app.js?v=c41cfcf821"></script>
+<script type="module" src="app.js?v=6167394fb2"></script>
 </body>
 </html>

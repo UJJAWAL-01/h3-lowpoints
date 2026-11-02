@@ -105,8 +105,10 @@
       <li>The raindrop opens the <strong>rain simulator</strong>: choose a storm by how rare it is (NOAA Atlas 14
         for each depression's own location) or by how much rain, how long it lasts, and how wet the ground was
         before. Play shows rain falling from none to the whole storm and the depressions filling and overflowing
-        into one another, with water from neighbouring areas included. The storm is treated as a total, so the
-        timeline is rain fallen, not time. It is computed in 16 exact steps with the same equations as the
+        into one another, with water from neighbouring areas included. The timeline runs in hours: what a depression
+        holds depends only on the rain fallen so far, and NOAA Atlas 14's median pattern for the region says when
+        that rain has fallen (rain reaches each depression as it falls, so times are the earliest possible; where
+        NOAA has no pattern, the timeline is rain fallen). It is computed in 16 exact steps with the same equations as the
         library; while it plays the map blends smoothly between them, and every number shown is an exact step.</li>
     </ul>
     <h3>What it does not include</h3>

@@ -55,14 +55,14 @@ try {
       slowFrames: slow,
       ourCodePerFrameMs: { median: +(ticks[ticks.length >> 1] || 0).toFixed(2), max: +(ticks[ticks.length - 1] || 0).toFixed(2), n: ticks.length },
       labels: [t.steps[5], t.steps[Math.floor(t.steps.length / 2)], t.steps[t.steps.length - 1]] };
-    await page.evaluate(() => window.__lowpoints && document.querySelector('[data-f="step"]') && (document.querySelector('[data-f="step"]').value = "6"));
-    await page.evaluate(() => { const r = document.querySelector('[data-f="step"]'); r.value = "6.5"; r.dispatchEvent(new Event("input", { bubbles: true })); });
+    // the middle of the storm, between two exact steps (the map blends them)
+    await page.evaluate(() => { const b = window.__lowpoints.stormBar; b.setStep(5); });
     await sleep(800);
     await shot(`${view}_mid`);
   }
   // more states: a depression's gauge, city scale, an amount storm, a phone, Seattle (no Atlas 14)
   await page.evaluate(() => window.__lowpoints.views.set("flat")); await sleep(1500);
-  await page.evaluate(() => { const r = document.querySelector('[data-f="step"]'); r.value = "9"; r.dispatchEvent(new Event("change", { bubbles: true })); });
+  await page.evaluate(() => window.__lowpoints.stormBar.setStep(8));
   await sleep(800);
   const first = await page.$('[data-act="open-dep"]');
   if (first) { await first.click(); await page.waitForFunction(() => document.querySelector("[data-gauge-body]"), { timeout: 30000 }).catch(() => {}); await sleep(1500); }

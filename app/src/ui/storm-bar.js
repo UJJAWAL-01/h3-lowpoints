@@ -2,8 +2,12 @@
 // and the timeline. The engine (worker) runs each storm in 16 exact steps; this file chooses the
 // storm, plays the steps, keeps the link up to date and asks the worker for the view's figures.
 //
-// The timeline is rain fallen, not time: storms are totals in this model (how the rain is spread
-// over the hours does not change what is held), so it never says when water arrives.
+// What a depression holds depends only on the rain fallen so far (storm totals: how the rain is
+// spread over the hours does not change what is held at the end).
+//
+// Time: where NOAA Atlas 14 has a temporal distribution for the place (its median curve, as the
+// library), the timeline runs in hours: at each moment the map shows the state at the rain fallen
+// by then (temporal.js). Elsewhere it runs in rain fallen.
 //
 // Smooth play: the playhead runs continuously from "no rain yet" (-1) to the whole storm (15). The
 // map blends the water between the two exact steps on either side (GPU, drawing only); the figures
@@ -14,6 +18,7 @@ import { HOURS, YEARS } from "../rarity.js";
 import * as f from "./format.js";
 import { viewBox } from "../map/viewbox.js";
 import { createRain, intensityOf } from "./rain.js";
+import { duration, rainAt, timeAt } from "../temporal.js";
 
 export const STEPS = 16;
 const PLAY_MS = 6400;                      // no rain to the whole storm (17 marks, 16 steps of rain)
@@ -83,6 +88,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
   const el = document.getElementById("storm");
   let storm = null, step = STEPS - 1, playing = false, frame = 0;
   let pos = STEPS - 1;                       // the playhead, -1 .. 15, fractional while it moves
+  let timing = null, tau = 1;                // NOAA timing at the view centre; time share of the storm
   let summary = null, readout = null, centre = null, lines = null, runToken = 0;
   let open = false;
   const listeners = new Set();
@@ -124,7 +130,9 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     const c = map.getCenter();
     centre = { lat: c.lat, lon: c.lng };
     try {
-      readout = await client.call("rarityAt", c.lat, c.lng, storm.hours, storm.kind === "amount" ? storm.mm : 0);
+      [readout, timing] = await Promise.all([client.call("rarityAt", c.lat, c.lng, storm.hours, storm.kind === "amount" ? storm.mm : 0),
+        client.call("temporalAt", c.lat, c.lng, storm.hours)]);
+      tau = timed() ? tauOf(pos) : (pos + 1) / STEPS;
       if (token !== runToken) return;
       if (!detail()) { summary = null; renderBar(); emit(); return; }
       const b = box(), regions = await client.call("regionsIn", b, 0);
@@ -147,11 +155,16 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
   }
 
   // ---------------------------------------------------------------- the timeline
+  const timed = () => !!timing?.covered;
+  const posOf = (t) => rainAt(timing.curves.all, t) * STEPS - 1;          // time share -> playhead
+  const tauOf = (p) => timeAt(timing.curves.all, (p + 1) / STEPS);        // playhead -> time share
+
   // exact step at a playhead position: the last one reached (-1 = before any rain)
   const exact = (p) => Math.floor(p + 1e-6);
 
-  function moveTo(p, { fromPlay = false } = {}) {
+  function moveTo(p, { fromPlay = false, t = null } = {}) {
     pos = Math.max(-1, Math.min(STEPS - 1, p));
+    tau = t != null ? t : timed() ? tauOf(pos) : (pos + 1) / STEPS;
     if (!fromPlay) stop();
     views.setStep(pos);                      // the GPU layers draw the blend
     const k = exact(pos);
@@ -193,7 +206,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     if (!storm || !summary) return;
     if (reduced()) { setStep(STEPS - 1); return; }
     cancelAnimationFrame(easeFrame);
-    if (pos >= STEPS - 1 - 1e-6) moveTo(-1);
+    if (pos >= STEPS - 1 - 1e-6) moveTo(-1, { t: 0 });
     playing = true;
     const total = storm.kind === "amount" ? storm.mm : centreDepth();
     rain.start(intensityOf(Number.isFinite(total) ? total : 0, storm.hours));
@@ -204,10 +217,11 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
       if (!playing) return;
       const dt = Math.min(now - last, 250);               // on time on slow devices; a stalled tab does not jump ahead
       last = now;
-      const p = pos + (dt / PLAY_MS) * STEPS;
-      if (p >= STEPS - 1) { moveTo(STEPS - 1, { fromPlay: true }); stop(); writeLink(); return; }
+      // in hours where NOAA has a curve (the rain comes as it does in a real storm), else in rain
+      const t = Math.min(1, tau + dt / PLAY_MS), p = timed() ? posOf(t) : t * STEPS - 1;
+      if (t >= 1) { moveTo(STEPS - 1, { fromPlay: true, t: 1 }); stop(); writeLink(); return; }
       const t0 = performance.now();
-      moveTo(p, { fromPlay: true });
+      moveTo(p, { fromPlay: true, t });
       if (window.__lowpoints) (window.__stormTicks ||= []).push(performance.now() - t0);   // test builds only read it
       frame = requestAnimationFrame(tick);
     };
@@ -316,7 +330,8 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
       <p class="storm-readout" id="storm-amount-note">${readoutText()}</p>
       <div class="storm-time">
         <button class="btn primary play" data-st="play">Play</button>
-        <input type="range" min="0" max="${STEPS}" step="0.01" value="${pos + 1}" data-f="step" aria-label="Rain fallen so far, in sixteenths of the storm">
+        ${timed() ? `<input type="range" min="0" max="1000" step="1" value="${Math.round(tau * 1000)}" data-f="time" aria-label="Time into the storm">`
+    : `<input type="range" min="0" max="${STEPS}" step="0.01" value="${pos + 1}" data-f="step" aria-label="Rain fallen so far, in sixteenths of the storm">`}
         <span class="storm-now" aria-live="off"></span>
       </div>`;
     renderTimeline();
@@ -350,8 +365,8 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
 
   function renderTimeline() {
     if (!open || !detail()) return;
-    const range = el.querySelector('[data-f="step"]'), now = el.querySelector(".storm-now"), btn = el.querySelector('[data-st="play"]');
-    if (range && document.activeElement !== range) range.value = String(pos + 1);
+    const range = el.querySelector('[data-f="step"], [data-f="time"]'), now = el.querySelector(".storm-now"), btn = el.querySelector('[data-st="play"]');
+    if (range && document.activeElement !== range) range.value = String(range.dataset.f === "time" ? Math.round(tau * 1000) : pos + 1);
     const text = nowText();                          // written only when it changes (every frame while playing)
     if (range && !playing && range.getAttribute("aria-valuetext") !== text) range.setAttribute("aria-valuetext", text);
     if (now && now.textContent !== text) now.textContent = text;
@@ -363,7 +378,8 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     const d = storm.kind === "amount" ? storm.mm : centreDepth();
     if (Number.isFinite(d)) {
       const so = f.rain(fallen(d, pos)), all = f.rain(d);
-      return `Rain so far: ${so.main} of ${all.main}${storm.kind === "rarity" ? " (centre of the view)" : ""}`;
+      const time = timed() ? `${duration(tau * storm.hours)} of ${duration(storm.hours)} · ` : "";
+      return `${time}${time ? "" : "Rain so far: "}${so.main} of ${all.main}${time ? " fallen" : ""}${storm.kind === "rarity" ? " (centre of the view)" : ""}`;
     }
     return `Rain so far: ${Math.round(((pos + 1) / STEPS) * 100)}% of the storm`;
   }
@@ -390,10 +406,14 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
       choose({ mm: Math.round(mm * 10) / 10 });
     }
   });
-  el.addEventListener("input", (e) => { if (e.target.dataset.f === "step") { cancelAnimationFrame(easeFrame); moveTo(Number(e.target.value) - 1); } });
-  el.addEventListener("change", (e) => { if (e.target.dataset.f === "step") easeTo(Math.round(Number(e.target.value) - 1)); });
+  el.addEventListener("input", (e) => {
+    if (e.target.dataset.f === "step") { cancelAnimationFrame(easeFrame); moveTo(Number(e.target.value) - 1); }
+    else if (e.target.dataset.f === "time") { cancelAnimationFrame(easeFrame); const t = Number(e.target.value) / 1000; moveTo(posOf(t), { t }); }
+  });
+  // let go: ease to the nearest exact step (so a paused map shows a computed state, not a blend)
+  el.addEventListener("change", (e) => { if (e.target.dataset.f === "step" || e.target.dataset.f === "time") easeTo(Math.round(pos)); });
   el.addEventListener("keydown", (e) => {
-    const r = e.target.dataset?.f === "step";
+    const r = e.target.dataset?.f === "step" || e.target.dataset?.f === "time";
     if (!r || !["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(e.key)) return;
     e.preventDefault();                                       // keys move by whole exact steps
     const k = { Home: -1, End: STEPS - 1 }[e.key] ?? step + (["ArrowLeft", "ArrowDown", "PageDown"].includes(e.key) ? -1 : 1) * (e.key.startsWith("Page") ? 4 : 1);
@@ -430,6 +450,6 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     get active() { return open && !!storm; }, get storm() { return storm; }, get step() { return step; }, get pos() { return pos; },
     get summary() { return summary; }, get readout() { return readout; }, get playing() { return playing; },
-    get lines() { return lines; }, centreDepth, nowText, readoutText,
+    get lines() { return lines; }, get timing() { return timing; }, get tau() { return tau; }, centreDepth, nowText, readoutText,
   };
 }

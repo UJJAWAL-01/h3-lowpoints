@@ -5,6 +5,7 @@ import { legendHtml } from "../map/layers.js";
 import * as f from "./format.js";
 import { WATER } from "../map/water.js";
 import { STEPS, fallen } from "./storm-bar.js";
+import { duration, timeAt } from "../temporal.js";
 
 const both = (x) => `${f.esc(x.main)}${x.alt ? ` <small>${f.esc(x.alt)}</small>` : ""}`;
 const inline = (x) => `${f.esc(x.main)}${x.alt ? ` (${f.esc(x.alt)})` : ""}`;
@@ -266,7 +267,8 @@ function assumptions(c) {
   const g = c.storm.condition;
   return `<details class="how"><summary>What this assumes</summary>
     <ul class="assume">
-      <li>The storm is a total: how its rain is spread over the hours does not change what is held, so the timeline is rain fallen, not time.</li>
+      <li>What a depression holds depends only on the rain fallen so far. The hours follow NOAA Atlas 14's median pattern of how rain builds up in this region's storms (1- to 3-hour storms use its 6-hour pattern and 48-hour storms its 24-hour one, as the library does); where NOAA has no pattern, the timeline is rain fallen, not time.</li>
+      <li>Rain reaches each depression as it falls (no travel time over the ground), so times are the earliest it can fill.</li>
       <li>Runoff by the SCS curve number method for ${g} ground before the storm (land cover Annual NLCD 2024, soils USDA gNATSGO). Water from neighbouring areas is included.</li>
       <li>No storm drains, sewers or pumps, and no water soaking away once it is in a depression.</li>
       <li>Likely drained depressions fill like the rest${c.show === "undrained" ? "; hiding them takes them off the map and out of these counts, not out of the flow" : ""}.</li>
@@ -289,11 +291,27 @@ export function gaugeBody(g, c) {
   const so = f.rain(fallen(g.rainMm, k)), all = f.rain(g.rainMm);
   const surface = st.depth > 0 && Number.isFinite(g.groundM)
     ? `; water surface ${f.esc(f.elevation(g.groundM + st.depth).main)} above sea level${Number.isFinite(g.rimM) ? ` (rim ${f.esc(f.elevation(g.rimM).main)})` : ""}` : "";
-  const fills = g.fillStep >= 0
+  const fills = g.fillShare != null ? fillTime(g, c) : g.fillStep >= 0
     ? `${g.fillStep === 0 ? `Full within the first ${f.esc(f.rain(fallen(g.rainMm, 0)).main)} of rain here` : `Full once ${f.esc(f.rain(fallen(g.rainMm, g.fillStep - 1)).main)} to ${f.esc(f.rain(fallen(g.rainMm, g.fillStep)).main)} has fallen here`}${g.spillStep >= 0 ? ", and then it overflows" : ""}.`
     : `Not full by the end of the storm: it holds ${f.pct(g.steps[STEPS - 1].full, 0)} of what it can.`;
   return `<div class="meter" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(pct * 100)}" aria-label="How full">
       <span style="width:${(pct * 100).toFixed(1)}%"></span></div>
     <p class="say"><strong>${f.pct(pct, 0)} full</strong> after ${f.esc(so.main)} of ${f.esc(all.main)} here: ${st.depth > 0 ? `${f.esc(f.depth(st.depth).main)} deep at its lowest point${surface}` : "dry"}${st.overflowing ? "; <strong>overflowing</strong>" : ""}.</p>
     <p class="note">${fills}</p>`;
+}
+
+// When it fills: the exact rain share (worker fillShare), turned into hours on NOAA's curve for its
+// location: the typical (median of all storms) and the range over storms by the quarter with most rain
+function fillTime(g, c) {
+  const mm = f.rain(g.rainMm * g.fillShare).main, hours = c.storm.hours, t = g.temporal;
+  const over = g.spillStep >= 0 ? " Then it overflows." : "";
+  if (!t || !t.covered) return `Full once ${f.esc(mm)} has fallen here. When that is cannot be said here (no NOAA Atlas 14 timing for this place).${over}`;
+  const at = (k) => timeAt(t.curves[k], g.fillShare) * hours;
+  const quarters = ["first", "second", "third", "fourth"].map(at);
+  const lo = Math.min(...quarters), hi = Math.max(...quarters);
+  // the range over NOAA's four groups of storms (by the quarter with most rain): which group gives
+  // which end is not claimed
+  const range = hi - lo >= 1 / 60 ? ` In real storms it varies: from ${f.esc(duration(lo))} to ${f.esc(duration(hi))}, depending on when in the storm the heaviest rain falls.` : "";
+  return `Full after about <strong>${f.esc(duration(at("all")))}</strong> of a typical ${hours}-hour storm here, once ${f.esc(mm)} has fallen.${range}${over}
+    <small class="why">Earliest possible: rain reaches it as it falls. Timing: NOAA Atlas 14${t.published !== hours ? ` ${t.published}-hour pattern, stretched to ${hours} hours` : ""}, region ${f.esc(t.name)}.</small>`;
 }

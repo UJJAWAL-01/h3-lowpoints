@@ -2,11 +2,13 @@
 // It reads the national overview and the data packs, builds the hexagons to draw, and answers
 // questions about single depressions. The page talks to it through src/data/client.js.
 
-import { cellArea, cellToBoundary, cellToLatLng, gridDisk, latLngToCell, polygonToCells } from "h3-js";
+import { cellArea, cellToBoundary, cellToChildren, cellToLatLng, cellToParent, gridDisk, latLngToCell, polygonToCells } from "h3-js";
 import { Hosts } from "./data/hosts.js";
 import { columnHeight, depthClass, mercX, mercY, mercZPerMetre } from "./map/heights.js";
 import { full, levelCells as groupCells, parentOf } from "./levels.js";
 import { gunzip, parsePack } from "./pack.js";
+import { simulate } from "./sim.js";
+import { nearestHours, regionAt } from "./temporal.js";
 import { YEARS, depthsAt, parseRarity, returnPeriod, stormDepths } from "./rarity.js";
 import { STEPS, depressionSteps, levelWater, normaliseStorm, rangeCounts, runStorm, stormKey, stormRain,
   summarise } from "./storm.js";
@@ -20,7 +22,7 @@ const packs = new Map();                 // region -> {pack, derived}, in least-
 const pending = new Map();               // region -> promise (one request per pack at a time)
 
 const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf, example,
-  rarityAt, stormLevel, stormSummary, stormDepression, stormLines, waterMesh, wellMesh, nearestDepression };
+  rarityAt, temporalAt, stormLevel, stormSummary, stormDepression, stormLines, waterMesh, wellMesh, nearestDepression };
 
 self.onmessage = async (e) => {
   const { id, type, args } = e.data;
@@ -481,7 +483,42 @@ async function stormDepression(region, i, storm) {
   // lowest ground above sea level (NAVD 88), so each step's water surface = ground + depth there
   out.groundM = ex ? ex.rim[i] - full(v.pack, i, v.pack.depths) : NaN;
   out.rimM = ex ? ex.rim[i] : NaN;
+  // the exact share of the storm's rain that fills it, and when that rain has fallen here
+  out.fillShare = fillShare(v, run, i, storm);
+  const [la, lo] = cellToLatLng(hex(v.pack.low[i]));
+  out.temporal = await temporalAt(la, lo, normaliseStorm(storm).hours);
   return out;
+}
+
+// The share of the storm's rain (0..1) at which depression i is full: between the exact steps on
+// either side of its fill step, by bisection on the same simulation (16 halvings: 1/16 of the
+// storm / 65,536). null when it does not fill.
+const FILLED = 1 - 1e-9;
+function fillShare(v, run, i, stormIn) {
+  if (run.fillStep[i] < 0) return null;
+  const storm = normaliseStorm(stormIn), vol = run.volume[i];
+  let lo = run.fillStep[i] / STEPS, hi = (run.fillStep[i] + 1) / STEPS;
+  const full = (share) => {
+    const rain = typeof run.rain === "number" ? run.rain * share : run.rain.map((x) => x * share);
+    return simulate(v.pack, rain, storm.condition).store[i] >= vol * FILLED;
+  };
+  for (let k = 0; k < 16; k++) { const m = (lo + hi) / 2; if (full(m)) hi = m; else lo = m; }
+  return hi;
+}
+
+// ------------------------------------------------------------------ when the rain falls (NOAA Atlas 14)
+let temporalData = null, temporalPromise = null;
+async function temporalAt(lat, lon, hours) {
+  if (!temporalData) {
+    temporalPromise = temporalPromise || fetch(`${local}temporal.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    temporalData = await temporalPromise;
+    if (!temporalData) { temporalPromise = null; return { covered: false, reason: "no data" }; }
+  }
+  const r5 = latLngToCell(lat, lon, 5), r4 = cellToParent(r5, 4);    // (a point's res-5 cell is not always in its res-4 cell)
+  const name = regionAt(temporalData, r4, r5, cellToChildren(r4, 5));
+  if (!name) return { covered: false, reason: "no region" };
+  const published = nearestHours(hours);
+  return { covered: true, name, hours, published, curves: temporalData.curves[name][String(published)] };
 }
 
 // Overflow lines for a storm: from each depression in the box [w, s, e, n] that overflows, to the one

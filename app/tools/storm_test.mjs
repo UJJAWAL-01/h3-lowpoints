@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const [casesFile, dataDir, outArg] = process.argv.slice(2);
+const [casesFile, dataDir, outArg, timingFile] = process.argv.slice(2);
 const out = resolve(outArg);
 mkdirSync(out, { recursive: true });
+const timing = timingFile ? JSON.parse(readFileSync(timingFile, "utf8")) : null;   // app/tools/timing_cases.py
 const cases = JSON.parse(readFileSync(casesFile, "utf8").replace(/: Infinity/g, ": 1e999").replace(/: NaN/g, ": null"));   // Python writes Infinity (rarer than 1,000 years)
 const CHROME = ["C:/Program Files/Google/Chrome/Application/chrome.exe"].find(existsSync);
 const app = spawn(process.execPath, [join(here, "serve.mjs"), join(here, "..", "..", "docs"), "8772"], { stdio: "ignore" });
@@ -110,17 +111,19 @@ try {
   // pixels: a wet and a dry hexagon in view, read from the map's frame
   // pixels: the wettest hexagon in view, read from the map's frame before the rain and at the end
   R.check4.pixels = await page.evaluate(async () => {
-    const L = window.__lowpoints, map = L.map, res = L.state.res, r = [...L.views.water.waters.keys()][0];
-    const lv = await L.client.call("stormLevel", r, res, L.stormBar.storm, L.state.show);
-    const pk = await L.client.call("pack", r, res, L.state.show);
+    const L = window.__lowpoints, map = L.map, res = L.state.res;
     const c = map.getCanvas(), W = c.clientWidth, H = c.clientHeight;
     let best = null;
+    for (const r of L.views.water.waters.keys()) {
+    const lv = await L.client.call("stormLevel", r, res, L.stormBar.storm, L.state.show);
+    const pk = await L.client.call("pack", r, res, L.state.show);
     for (const ft of pk.fc.features) {
       const v = lv.values[ft.id * 16 + 15], ring = ft.geometry.coordinates[0];
       const cx = ring.slice(0, 6).reduce((a, p) => a + p[0], 0) / 6, cy = ring.slice(0, 6).reduce((a, p) => a + p[1], 0) / 6;
       const p = map.project([cx, cy]);
       if (p.x < 420 || p.x > W - 80 || p.y < 140 || p.y > H - 280) continue;
       if (!best || v > best.v) best = { p, v };
+    }
     }
     const read = (pt) => new Promise((res2) => {
       map.once("render", () => {
@@ -149,7 +152,7 @@ try {
     return outL;
   });
   R.check5.labels = labels.map(([k, text, d]) => {
-    const want = Math.round((d * (k + 1)) / 16), got = Number(text.match(/: ([\d,]+) mm/)[1].replace(/,/g, ""));
+    const want = Math.round((d * (k + 1)) / 16), got = Number(text.match(/([\d,]+) mm of/)[1].replace(/,/g, ""));
     return { step: k, text, ok: Math.abs(got - want) <= 1 };
   });
   const t0 = Date.now();
@@ -230,11 +233,40 @@ try {
   // ---------------------------------------------------------------- 9. wording
   R.check9 = await page.evaluate(() => {
     const t = document.getElementById("panel-body").innerHTML;
-    const need = ["storm is a total", "rain fallen, not time", "No storm drains", "soaking away", "ground before the storm",
+    const need = ["depends only on the rain fallen so far", "NOAA Atlas 14's median pattern", "earliest it can fill", "No storm drains", "soaking away", "ground before the storm",
       "30 m elevation model", "Likely drained depressions fill like the rest", "16 exact steps", "evidence.html", 'data-act="disclaimer"'];
     return { missing: need.filter((s) => !t.includes(s)) };
   });
   R.check9.ok = R.check9.missing.length === 0;
+
+  // ---------------------------------------------------------------- 11. the timeline in hours (owner request, NOAA Atlas 14)
+  if (timing) {
+    R.check11 = { curvesWorst: timing.curvesWorst };
+    const names = await page.evaluate(async (pts) => Promise.all(pts.map((p) => window.__lowpoints.client.call("temporalAt", p.lat, p.lon, 24)
+      .then((t) => (t.covered ? t.name : null)))), timing.lookup);
+    R.check11.lookupMismatch = names.filter((n, k) => n !== timing.lookup[k].name).length;
+    const dur = (h) => { const m = Math.round(h * 60); if (m < 60) return `${m} min`; if (m < 2880) { const a = Math.floor(m / 60), r = m % 60; return r ? `${a} h ${r} min` : `${a} h`; } return null; };
+    await open("map=15/29.7604/-95.3698&s=r.10.24");
+    await settled(); await sleep(800);
+    R.check11.fills = [];
+    for (const c of timing.fills) {
+      const i = await call("findDepression", c.region, c.id);
+      await page.evaluate((r, k) => window.__lowpoints.selectDepression(r, k), c.region, i);
+      await page.waitForFunction(() => document.querySelector("[data-gauge-body]") && /Full after|Full once|Not full/.test(document.querySelector("[data-gauge-body]").innerText), { timeout: 30000, polling: 200 }).catch(() => {});
+      const got = await page.evaluate(async (r, k, st) => ({ g: await window.__lowpoints.client.call("stormDepression", r, k, st),
+        text: document.querySelector("[data-gauge-body]")?.innerText || "" }), c.region, i, timing.storm);
+      const okShare = Math.abs(got.g.fillShare - c.share) <= 2e-6;
+      const want = [c.hours.all - 1 / 60, c.hours.all, c.hours.all + 1 / 60].map(dur);
+      const okTime = want.some((w) => got.text.includes(`Full after about ${w}`));
+      const qs = ["first", "second", "third", "fourth"].map((q) => c.hours[q]);
+      const okRange = got.text.includes(`from ${dur(Math.min(...qs))} to ${dur(Math.max(...qs))}, depending on when`);
+      R.check11.fills.push({ id: c.id, share: got.g.fillShare, want: c.share, okShare, okTime, okRange, wantTime: want[1] });
+    }
+    await page.evaluate(() => window.__lowpoints.stormBar.setStep(7));
+    R.check11.barText = await page.evaluate(() => window.__lowpoints.stormBar.nowText());
+    R.check11.ok = timing.curvesWorst < 1e-5 && R.check11.lookupMismatch === 0 && R.check11.fills.every((x) => x.okShare && x.okTime && x.okRange)
+      && /^\d+ h( \d+ min)? of 24 h · \d+ mm of \d+ mm fallen/.test(R.check11.barText);
+  }
 
   // ---------------------------------------------------------------- 10. accessibility (axe) with the storm open
   const axe = readFileSync(join(here, "..", "node_modules", "axe-core", "axe.min.js"), "utf8");
@@ -255,7 +287,7 @@ try {
 R.pass = {
   1: !!R.check1 && R.check1.every((x) => x.ok), 2: !!R.check2 && R.check2.every((x) => x.ok), 3: !!R.check3 && R.check3.every((x) => x.ok),
   4: !!R.check4?.ok, 5: !!R.check5?.ok, 6: !!R.check6 && R.check6.length > 0 && R.check6.every((x) => x.ok), 7: !!R.check7?.ok,
-  8: !!R.check8?.ok, 9: !!R.check9?.ok, axe: !!R.check10?.ok, noErrors: R.errors.length === 0,
+  8: !!R.check8?.ok, 9: !!R.check9?.ok, axe: !!R.check10?.ok, time: timing ? !!R.check11?.ok : "not run", noErrors: R.errors.length === 0,
 };
 writeFileSync(join(out, "report.json"), JSON.stringify(R, null, 1));
 console.log(JSON.stringify({ pass: R.pass, errors: R.errors.slice(0, 5) }, null, 1));
