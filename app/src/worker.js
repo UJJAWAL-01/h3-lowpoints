@@ -20,7 +20,7 @@ const packs = new Map();                 // region -> {pack, derived}, in least-
 const pending = new Map();               // region -> promise (one request per pack at a time)
 
 const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf, example,
-  rarityAt, stormLevel, stormSummary, stormDepression, wellMesh, nearestDepression };
+  rarityAt, stormLevel, stormSummary, stormDepression, stormLines, waterMesh, wellMesh, nearestDepression };
 
 self.onmessage = async (e) => {
   const { id, type, args } = e.data;
@@ -423,17 +423,25 @@ async function stormLevel(region, level, storm, mode = "all") {
 async function stormSummary(regions, box, stormIn, mode = "all") {
   const storm = normaliseStorm(stormIn);
   const [w, s, e, n] = box;
-  const total = { depressions: 0, unknown: 0, fill: 0, overflow: 0, holdWater: 0, wetAreaM2: 0, heldM3: 0,
-    first: [], range: {}, regions: 0, ms: 0 };
+  const total = { depressions: 0, unknown: 0, fill: 0, fillLikelyDrained: 0, overflow: 0, holdWater: 0, wetAreaM2: 0,
+    heldM3: 0, rainMin: NaN, rainMax: NaN, first: [], range: {}, regions: 0, ms: 0,
+    byStep: Array.from({ length: STEPS }, () => ({ fill: 0, overflow: 0, holdWater: 0, wetAreaM2: 0, heldM3: 0 })) };
   const firsts = [];
   for (const region of regions) {
     const run = await stormRun(region, storm);
     if (!run) continue;
     const v = await getPack(region), ll = lowLatLng(v);
-    const hide = mode === "undrained" ? (await extrasOf(v), hidden(v)) : null;
+    await extrasOf(v);
+    const likely = hidden(v);                       // drained flag or a road feature
+    const hide = mode === "undrained" ? likely : null;
     const pick = (i) => (!hide || !hide[i]) && ll[2 * i] >= s && ll[2 * i] <= n && ll[2 * i + 1] >= w && ll[2 * i + 1] <= e;
-    const sm = summarise(v.pack, run, pick);
-    for (const k of ["depressions", "unknown", "fill", "overflow", "holdWater", "wetAreaM2", "heldM3"]) total[k] += sm[k];
+    const sm = summarise(v.pack, run, pick, (i) => likely[i] === 1, run.rain);
+    for (const k of ["depressions", "unknown", "fill", "fillLikelyDrained", "overflow", "holdWater", "wetAreaM2", "heldM3"]) total[k] += sm[k];
+    sm.steps.forEach((t, k) => { for (const x in t) total.byStep[k][x] += t[x]; });
+    if (Number.isFinite(sm.rainMin)) {
+      total.rainMin = Number.isFinite(total.rainMin) ? Math.min(total.rainMin, sm.rainMin) : sm.rainMin;
+      total.rainMax = Number.isFinite(total.rainMax) ? Math.max(total.rainMax, sm.rainMax) : sm.rainMax;
+    }
     for (const f of sm.first) firsts.push({ ...f, region, id: v.pack.id[f.i].toString(), lngLat: [ll[2 * f.i + 1], ll[2 * f.i]] });
     for (const cond of ["dry", "wet"]) {
       if (cond === storm.condition) continue;
@@ -445,7 +453,7 @@ async function stormSummary(regions, box, stormIn, mode = "all") {
     total.ms += run.ms;
   }
   total.range[storm.condition] = { fill: total.fill, overflow: total.overflow };
-  firsts.sort((a, b) => a.step - b.step || b.ratio - a.ratio || (a.id < b.id ? -1 : 1));
+  firsts.sort((a, b) => a.step - b.step || b.volume - a.volume || (a.id < b.id ? -1 : 1));
   total.first = firsts.slice(0, 5);
   total.steps = STEPS;
   return total;
@@ -458,7 +466,84 @@ async function stormDepression(region, i, storm) {
   if (!(i >= 0 && i < run.n)) throw new Error("no such depression");
   const out = depressionSteps(run, i);
   out.rainMm = typeof run.rain === "number" ? run.rain : run.rain[i];
+  const v = packs.get(region) || await getPack(region), ex = await extrasOf(v);
+  // lowest ground above sea level (NAVD 88), so each step's water surface = ground + depth there
+  out.groundM = ex ? ex.rim[i] - full(v.pack, i, v.pack.depths) : NaN;
+  out.rimM = ex ? ex.rim[i] : NaN;
   return out;
+}
+
+// Overflow lines for a storm: from each depression in the box [w, s, e, n] that overflows, to the one
+// it overflows into, with the step at which it starts (s) and how much leaves it by the end (q, m3).
+// Straight between lowest points. A target in a pack this worker has not loaded is left out.
+const MAX_LINES = 2000;
+async function stormLines(regions, box, stormIn, mode = "all") {
+  const storm = normaliseStorm(stormIn);
+  const [w, s, e, n] = box, lines = [];
+  for (const region of regions) {
+    const run = await stormRun(region, storm);
+    if (!run) continue;
+    const v = await getPack(region), pk = v.pack, ll = lowLatLng(v);
+    const hide = mode === "undrained" ? (await extrasOf(v), hidden(v)) : null;
+    for (let i = 0; i < pk.n; i++) {
+      if (run.spillStep[i] < 0 || (hide && hide[i])) continue;
+      const la = ll[2 * i], lo = ll[2 * i + 1];
+      if (la < s || la > n || lo < w || lo > e) continue;
+      let to = null;
+      if (pk.target[i] >= 0) to = [ll[2 * pk.target[i] + 1], ll[2 * pk.target[i]]];
+      else if (pk.target_region && pk.target_region[i]) {
+        const other = packs.get(hex(pk.target_region[i]));
+        const k = other ? indexOfId(other, pk.target_id[i]) : -1;
+        if (k >= 0) { const o = lowLatLng(other); to = [o[2 * k + 1], o[2 * k]]; }
+      }
+      if (!to) continue;                                   // leaves the data, or its pack is not loaded
+      lines.push({ type: "Feature", geometry: { type: "LineString", coordinates: [[lo, la], to] },
+        properties: { s: run.spillStep[i], q: Math.max(run.inflow[i] - run.volume[i], 0) } });
+    }
+  }
+  lines.sort((a, b) => b.properties.q - a.properties.q);
+  return { type: "FeatureCollection", features: lines.slice(0, MAX_LINES).map((ft, k) => ({ ...ft, id: k })), total: lines.length };
+}
+
+// Hexagon centres of a level (for picking those near the view), cached per level and filter
+function centresOf(v, level, mode) {
+  v.centresBy = v.centresBy || {};
+  const key = `${level}:${mode}`;
+  if (v.centresBy[key]) return v.centresBy[key];
+  const L = levelCells(v, level, mode), c = new Float64Array(2 * L.cell.length);
+  L.cell.forEach((x, k) => { const [la, lo] = cellToLatLng(hex(x)); c[2 * k] = la; c[2 * k + 1] = lo; });
+  return (v.centresBy[key] = c);
+}
+
+// The water layer: triangles of the hexagons of pack(region, level) whose centre lies in box,
+// 6 numbers per corner: x, y (Mercator, from the box centre), the hexagon's index k (its row in
+// stormLevel's values), then for kind "columns": 1 at the top / 0 at the foot, Mercator units per
+// metre, wall light. Columns are inset a little so the water stands inside the see-through column.
+const INSET = 0.86;
+async function waterMesh(region, level, box, mode = "all", kind = "flat") {
+  const v = await getPack(region);
+  if (!v) return null;
+  if (mode !== "all") await extrasOf(v);
+  const L = levelCells(v, level, mode), C = centresOf(v, level, mode), [w, s, e, n] = box;
+  const ox = mercX((w + e) / 2), oy = mercY((s + n) / 2), tri = [];
+  for (let k = 0; k < L.cell.length; k++) {
+    const la = C[2 * k], lo = C[2 * k + 1];
+    if (la < s || la > n || lo < w || lo > e) continue;
+    const cx = mercX(lo) - ox, cy = mercY(la) - oy, zpm = mercZPerMetre(la);
+    let pts = cellToBoundary(hex(L.cell[k]), true).slice(0, -1).map(([x, y]) => [mercX(x) - ox, mercY(y) - oy]);
+    if (kind === "columns") pts = pts.map(([x, y]) => [cx + (x - cx) * INSET, cy + (y - cy) * INSET]);
+    const put = (q, top, light) => tri.push(q[0], q[1], k, top, zpm, light);
+    for (let j = 1; j + 1 < pts.length; j++) for (const q of [pts[0], pts[j], pts[j + 1]]) put(q, 1, 1);
+    if (kind !== "columns") continue;
+    for (let j = 0; j < pts.length; j++) {
+      const a = pts[j], b = pts[(j + 1) % pts.length];
+      // outward normal (screen y points south in Mercator); light from the north-west, as the wells
+      const ex = b[0] - a[0], ey = b[1] - a[1], len = Math.hypot(ex, ey) || 1, nx = -ey / len, ny = ex / len;   // ring turns clockwise once y points south
+      const light = 0.72 + 0.28 * Math.min(Math.max(0.5 + 0.5 * (nx * -0.6 + ny * -0.8), 0), 1);
+      for (const [q, top] of [[a, 0], [b, 0], [b, 1], [a, 0], [b, 1], [a, 1]]) put(q, top, light);
+    }
+  }
+  return { region, level, mode, kind, origin: [ox, oy], box, tri: new Float32Array(tri) };
 }
 
 // ------------------------------------------------------------------ wells (3D view, level 10)
@@ -476,14 +561,7 @@ async function wellMesh(region, box, mode = "all") {
   if (!v) return null;
   if (mode !== "all") await extrasOf(v);
   const L = levelCells(v, 10, mode);
-  v.centresBy = v.centresBy || {};
-  v.centres10 = v.centresBy[mode];
-  if (!v.centres10) {
-    const c = new Float64Array(2 * L.cell.length);
-    L.cell.forEach((x, k) => { const [la, lo] = cellToLatLng(hex(x)); c[2 * k] = la; c[2 * k + 1] = lo; });
-    v.centres10 = v.centresBy[mode] = c;
-  }
-  const C = v.centres10, [w, s, e, n] = box;
+  const C = centresOf(v, 10, mode), [w, s, e, n] = box;
   const ox = mercX((w + e) / 2), oy = mercY((s + n) / 2);
   const pick = [];
   for (let k = 0; k < L.cell.length; k++) {

@@ -117,10 +117,15 @@ export function applyView(map, view, sources) {
     const kind = src === "overview" ? "overview" : "pack";
     const col = view === "columns";
     setVisible(map, [`${src}-col`], col);
-    if (kind === "pack") setVisible(map, [`${src}-colw`], col);
+    if (kind === "pack") setVisible(map, [`${src}-colw`], false);   // storm water: the water layer (water.js)
     setVisible(map, [`${src}-line`], !col);                 // in Wells the outline is each opening's rim
     if (map.getLayer(`${src}-fill`)) map.setPaintProperty(`${src}-fill`, "fill-opacity", col || view === "wells" ? 0 : FLAT_OPACITY[kind]);
   }
+}
+
+// During a storm the columns turn see-through, so the water rising inside them shows
+export function setColumnGlass(map, on, sources) {
+  for (const src of sources) if (map.getLayer(`${src}-col`)) map.setPaintProperty(`${src}-col`, "fill-extrusion-opacity", on ? 0.32 : 0.94);
 }
 
 // the visitor's depth factor (x1, x5, x10): level-10 columns of every pack source

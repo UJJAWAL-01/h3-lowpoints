@@ -12,6 +12,7 @@ import * as f from "./ui/format.js";
 import * as panelView from "./ui/panel.js";
 import { setupSearch } from "./ui/search.js";
 import { setupSheet } from "./ui/sheet.js";
+import { createStormBar } from "./ui/storm-bar.js";
 import { createViews } from "./ui/views.js";
 
 const $ = (id) => document.getElementById(id);
@@ -29,6 +30,7 @@ const state = {
   selected: null,          // {region, index, data}
   cell: null,              // {props, res}
   show: "all",             // all | undrained (hide likely drained)
+  gauge: null,             // {key, data}: the selected depression in the storm
 };
 
 // ------------------------------------------------------------------ can this browser run it?
@@ -77,6 +79,8 @@ map.touchZoomRotate.disableRotation();
 map.keyboard.disableRotation();
 const views = createViews({ map, client, state, toast, reduced, param, setParam,
   onChange: () => { if (state.view === "intro") renderPanel(); } });
+const stormBar = createStormBar({ map, client, state, views, toast, reduced, param, setParam, isDetail,
+  onDetail: () => map.easeTo({ zoom: Math.max(map.getZoom(), DETAIL_ZOOM + 1.5), duration: reduced() ? 0 : 900 }) });
 const scale = new maplibregl.ScaleControl({ maxWidth: 110, unit: f.units.us ? "imperial" : "metric" });
 map.addControl(scale, "bottom-left");
 
@@ -98,6 +102,7 @@ map.on("load", async () => {
   await refresh();
   const sel = param("d");
   if (sel) openFromLink(sel);
+  stormBar.fromLink();
 });
 
 let moveTimer = 0;
@@ -141,6 +146,7 @@ async function refresh() {
       if ((isDetail(res) !== isDetail(prev) || (res === 10) !== (prev === 10)) && state.view === "intro") renderPanel();
       renderLevels();
       views.afterRefresh();
+      stormBar.afterRefresh();
     } while (again);
   })();
   try { await refreshing; } finally { refreshing = null; }
@@ -250,6 +256,24 @@ function interactive() {
 
 // What each mark on the map means, said when the pointer is on it
 function tipFor(feat) {
+  const base = tipBase(feat), w = stormWaterAt(feat);
+  return w ? `${base} ${w}` : base;
+}
+
+// the storm's water in a hexagon at the exact step the timeline last passed
+function stormWaterAt(feat) {
+  const st = views.storm;
+  if (!stormBar.active || !st || feat.source === "overview" || !feat.source.startsWith("pk-") || feat.id == null) return "";
+  const values = st.values.get(`${feat.source.slice(3)}:${state.res}:${state.show}`), k = stormBar.step;
+  if (!values) return "";
+  if (k < 0) return "No rain yet.";
+  const v = values[feat.id * 16 + k];
+  if (Number.isNaN(v)) return "Water in this storm: not known here.";
+  if (state.res === 10) return v > 0 ? `Water now: ${f.depth(v).main} deep.` : "Water now: dry.";
+  return v > 0 ? `Under water now: ${f.pct(v, v < 0.01 ? 2 : 1)} of this hexagon.` : "Under water now: none.";
+}
+
+function tipBase(feat) {
   const p = feat.properties, id = feat.layer.id;
   const share = (x) => f.pct(x, x < 0.01 ? 2 : 1);
   if (id === "spill-points") return "Next depression on the overflow path. Click to open it.";
@@ -377,9 +401,42 @@ async function openFromLink(value) {
 // ------------------------------------------------------------------ panel
 const sheet = setupSheet($("panel"), $("handle"));
 
+// ---- the storm in the panel
+const stormCtx = () => ({ summary: stormBar.summary, storm: stormBar.storm, step: stormBar.step, show: state.show, res: state.res, readout: stormBar.readoutText() });
+const gaugeKey = () => (state.selected && stormBar.storm ? `${state.selected.region}.${state.selected.index}|${JSON.stringify(stormBar.storm)}` : null);
+const gaugeData = () => (state.gauge && state.gauge.key === gaugeKey() ? state.gauge.data : null);
+let gaugeToken = 0;
+async function loadGauge() {
+  const key = gaugeKey();
+  if (!key || state.gauge?.key === key) return;
+  const token = ++gaugeToken, { region, index } = state.selected;
+  state.gauge = { key, data: null };
+  try {
+    const data = await client.call("stormDepression", region, index, stormBar.storm);
+    if (token !== gaugeToken || gaugeKey() !== key) return;
+    state.gauge = { key, data };
+    if (state.view === "depression") renderPanel();
+  } catch { if (token === gaugeToken) state.gauge = null; }
+}
+stormBar.on((what) => {
+  const body = $("panel-body");
+  if (what === "storm") { state.gauge = null; renderPanel(); return; }
+  // a step: write the figures in place (no re-render: no flicker, scroll kept)
+  if (state.view === "intro") panelView.stormNumbers(body, stormCtx());
+  else if (state.view === "depression" && gaugeData()) {
+    const n = body.querySelector("[data-gauge-body]");
+    if (n) n.innerHTML = panelView.gaugeBody(gaugeData(), stormCtx());
+  }
+});
+
 function renderPanel() {
   const body = $("panel-body");
-  if (state.view === "depression" && state.selected?.data) body.innerHTML = panelView.depression(state.selected.data);
+  if (state.view === "depression" && state.selected?.data) {
+    const g = stormBar.active ? panelView.gauge(gaugeData(), stormCtx()) : "";
+    body.innerHTML = panelView.depression(state.selected.data, g);
+    if (stormBar.active && !gaugeData()) loadGauge();
+  }
+  else if (state.view === "intro" && stormBar.active && isDetail(state.res ?? autoRes(map.getZoom()))) body.innerHTML = panelView.stormResult(stormCtx());
   else if (state.view === "cell" && state.cell) body.innerHTML = panelView.overviewCell(state.cell.props, state.cell.res);
   else {
     const res = state.res ?? autoRes(map.getZoom());
@@ -400,6 +457,9 @@ $("panel").addEventListener("click", async (e) => {
   else if (act === "about") openAbout();
   else if (act === "disclaimer") openAbout("disclaimer");
   else if (act === "show-all" || act === "show-undrained") setShow(act === "show-all" ? "all" : "undrained");
+  else if (act === "storm-open") stormBar.open();
+  else if (act === "storm-close") stormBar.close();
+  else if (act === "open-dep") selectDepression(el.dataset.r, Number(el.dataset.i), { fly: true });
   else if (act === "zoom-dep" && state.selected?.data) fitCells(state.selected.data.cells);
   else if (act === "zoom-cell" && state.cell) {
     const ring = state.cell.geometry.coordinates[0];
@@ -452,6 +512,7 @@ $("basemap").onclick = () => {
 
 $("views").addEventListener("click", (e) => { const b = e.target.closest("[data-view]"); if (b) views.set(b.dataset.view); });
 $("view3d").onclick = () => { views.set(views.next()); toast(`View: ${{ flat: "Flat", columns: "Columns", wells: "Wells" }[views.view]}`); };
+$("rain").onclick = () => (stormBar.active ? stormBar.close() : stormBar.open());
 $("compass").onclick = () => map.easeTo({ bearing: 0, pitch: 0, duration: reduced() ? 0 : 700 });
 
 $("zoom-in").onclick = () => map.zoomIn();
@@ -463,6 +524,7 @@ $("units").onclick = () => {
   $("units").textContent = us ? "ft" : "m";
   scale.setUnit(us ? "imperial" : "metric");
   renderPanel();
+  stormBar.renderBar();
 };
 
 let you = null;
@@ -500,6 +562,7 @@ setupSearch({ input: $("search"), list: $("results"), onPick: (p) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !$("about").open && state.view !== "intro") clearSelection();
+  else if (e.key === "Escape" && !$("about").open && stormBar.playing) stormBar.stop();
   if (e.key === "/" && document.activeElement !== $("search")) { e.preventDefault(); $("search").focus(); }
 });
 
@@ -584,6 +647,13 @@ const guide = createGuide([
     text: "We opened a depression in Houston for you. The panel says how much water it holds, which storm fills it and where the water goes next: plain words first, exact numbers below." },
   { title: "What the lines mean", target: selectionRect, before: showExample,
     text: "Outlined hexagons: the selected depression (one depression can cover several hexagons). Blue arrows: where its water flows once it is full. Grey dotted lines: depressions that overflow into it. Point at any of them for a reminder; click a dot to follow the water." },
+  { title: "Run a storm", target: () => $("rain"),
+    before: async () => { if (state.view !== "intro") clearSelection(); if (!isDetail(state.res)) await showExample(); clearSelection(); if (!stormBar.active) stormBar.open(); await new Promise((r) => setTimeout(r, 400)); },
+    text: "The raindrop opens the rain simulator. Choose a storm by how rare it is (the 10-year storm, from NOAA Atlas 14 for this place) or by how much rain, how long it lasts, and how wet the ground was before." },
+  { title: "Watch it fill", target: () => $("storm"),
+    text: "Press Play: rain falls from none to the whole storm and the depressions fill, deeper blue for deeper water. The slider is rain fallen so far, not time. Overflowing depressions send thin blue lines to the next one." },
+  { title: "What the storm did", target: () => $("panel"),
+    text: "The panel counts what is full, what overflows and how much water is held in this view, at the point the slider is on. Click a depression for its own gauge. What the model leaves out (drains, pumps, soaking in) is listed under the figures." },
   { title: "Tools", target: () => document.querySelector(".tools"),
     text: "Zoom in and out, go to your location, see the whole country, switch the street map between detailed and quiet, switch metres and feet, and read About for sources and limits." },
   { title: "Come back any time", target: () => $("guide-open"),
@@ -609,4 +679,4 @@ map.once("idle", () => {
   document.body.appendChild(box);
 });
 
-if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide, views };
+if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide, views, stormBar };

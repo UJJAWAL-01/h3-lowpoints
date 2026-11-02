@@ -107,26 +107,42 @@ export function levelWater(pk, L, run, level, cellAreas) {
   return out;
 }
 
-// Counts at the end of the storm for the depressions with `pick(i)` true (e.g. lowest point in view)
-export function summarise(pk, run, pick = () => true) {
+// Counts at the end of the storm for the depressions with `pick(i)` true (e.g. lowest point in view).
+// likely(i): true for a likely drained depression (counted apart among those that fill).
+// rain: the storm's mm (a number, or one per depression) for the range of depths in the view.
+export function summarise(pk, run, pick = () => true, likely = null, rain = null) {
   const n = run.n, last = (STEPS - 1) * n;
-  const out = { depressions: 0, unknown: 0, fill: 0, overflow: 0, holdWater: 0, wetAreaM2: 0, heldM3: 0,
-    leavingM3: run.leaving, first: [] };
+  const out = { depressions: 0, unknown: 0, fill: 0, fillLikelyDrained: 0, overflow: 0, holdWater: 0,
+    wetAreaM2: 0, heldM3: 0, leavingM3: run.leaving, rainMin: Infinity, rainMax: -Infinity, first: [],
+    steps: Array.from({ length: STEPS }, () => ({ fill: 0, overflow: 0, holdWater: 0, wetAreaM2: 0, heldM3: 0 })) };
   for (let i = 0; i < n; i++) {
     if (!pick(i)) continue;
     out.depressions++;
+    const r = rain == null ? NaN : typeof rain === "number" ? rain : rain[i];
+    if (r < out.rainMin) out.rainMin = r;
+    if (r > out.rainMax) out.rainMax = r;
     const st = run.store[last + i];
     if (Number.isNaN(st)) { out.unknown++; continue; }
-    if (run.fillStep[i] >= 0) out.fill++;
+    // the same figures after each step of the storm (the panel follows the timeline)
+    for (let s = 0; s < STEPS; s++) {
+      const t = out.steps[s], sst = run.store[s * n + i];
+      if (run.fillStep[i] >= 0 && run.fillStep[i] <= s) t.fill++;
+      if (run.spillStep[i] >= 0 && run.spillStep[i] <= s) t.overflow++;
+      if (sst > 0) t.holdWater++;
+      t.wetAreaM2 += run.area[s * n + i];
+      t.heldM3 += sst;
+    }
+    if (run.fillStep[i] >= 0) { out.fill++; if (likely && likely(i)) out.fillLikelyDrained++; }
     if (run.spillStep[i] >= 0) out.overflow++;
     if (st > 0) out.holdWater++;
     out.wetAreaM2 += run.area[last + i];
     out.heldM3 += st;
-    if (run.fillStep[i] >= 0) out.first.push([run.fillStep[i], -(run.inflow[i] / run.volume[i]), i]);
+    if (run.fillStep[i] >= 0) out.first.push([run.fillStep[i], -run.volume[i], i]);
   }
-  // first to fill: the earliest step, then the most water for its size at the end
+  if (!(out.rainMin <= out.rainMax)) out.rainMin = out.rainMax = NaN;
+  // fill earliest: the earliest step, then the largest (a tiny hollow filling first says little)
   out.first.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
-  out.first = out.first.slice(0, 5).map(([step, r, i]) => ({ i, step, ratio: -r }));
+  out.first = out.first.slice(0, 5).map(([step, v, i]) => ({ i, step, volume: -v }));
   return out;
 }
 

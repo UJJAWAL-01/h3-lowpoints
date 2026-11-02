@@ -1,8 +1,9 @@
 // The three views (Flat, Columns, Wells): switching, tilting and rotating in 3D, the wells layer,
 // the stated exaggeration, and the storm's water in 3D (values from the worker's stormLevel).
 
-import { DEFAULT_EXAGGERATION, EXAGGERATIONS, SHARE_CAP, SHARE_M_PER_PCT, VIEWS, waterHeight } from "../map/heights.js";
-import { applyView, setExaggeration } from "../map/layers.js";
+import { DEFAULT_EXAGGERATION, EXAGGERATIONS, SHARE_CAP, SHARE_M_PER_PCT, VIEWS } from "../map/heights.js";
+import { applyView, setColumnGlass, setExaggeration } from "../map/layers.js";
+import { WaterLayer } from "../map/water.js";
 import { WellsLayer } from "../map/wells.js";
 
 const PITCH = 55;
@@ -10,6 +11,7 @@ const LABEL = { flat: "Flat", columns: "Columns", wells: "Wells" };
 
 export function createViews({ map, client, state, toast, reduced, param, setParam, onChange }) {
   const wells = new WellsLayer();
+  const water = new WaterLayer();     // the storm's water on the flat map
   let view = VIEWS.includes(param("v")) ? param("v") : "flat";
   let storm = null;                 // { storm, step, values: Map "region:level" -> Float32Array }
   const deps = new Map();           // region -> Int32Array: depression with most area, per drawn hexagon
@@ -24,6 +26,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
 
   function ensureLayer() {
     if (!map.getLayer("wells") && map.getLayer("selection-fill")) map.addLayer(wells, "selection-fill");
+    if (!map.getLayer(water.id) && map.getLayer("selection-fill")) { map.addLayer(water, "selection-fill"); water.placed = "selection-fill"; }
   }
   map.on("styledata", () => { if (map.getLayer("selection-fill")) ensureLayer(); });
 
@@ -40,10 +43,10 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     if (view === "wells" && v === "flat") return "Wells show at street scale (the finest level). Zoom in, or let the map take you there.";
     if (v === "columns") {
       return res === 10
-        ? `Column height = how deep water stands when full, ${scale()}. Colour: depth (sand shallow, brown deep).`
+        ? `Column height = how deep water stands when full, ${scale()}. Colour: depth (sand shallow, brown deep).${storm ? " Blue inside: the water at this point in the storm." : ""}`
         : `Column height: 1% of the hexagon in depressions = ${SHARE_M_PER_PCT[res]} m (shares above ${SHARE_CAP * 100}% drawn at ${SHARE_CAP * 100}%). Heights are not real.`;
     }
-    if (v === "wells") return `Well depth = how deep water stands when full, ${scale()}, measured down from each depression's rim (the level where water spills out). Colour: depth.`;
+    if (v === "wells") return `Well depth = how deep water stands when full, ${scale()}, measured down from each depression's rim (the level where water spills out). Colour: depth.${storm ? " Blue: the water at this point in the storm." : ""}`;
     return "";
   }
 
@@ -53,6 +56,15 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     applyView(map, effective(), sources);
     wells.setVisible(effective() === "wells");
     if (effective() === "wells") updateWells();
+    const kind = effective() === "columns" ? "columns" : "flat";
+    const showWater = !!storm && effective() !== "wells" && state.res >= 8;
+    water.setVisible(showWater, kind);
+    // Flat: the water lies over the hexagons. Columns: drawn first, so the see-through columns
+    // (glass) lie over the water rising inside them and do not hide it in the depth buffer.
+    const before = kind === "columns" ? "overview-fill" : "selection-fill";
+    if (map.getLayer(water.id) && map.getLayer(before) && water.placed !== before) { map.moveLayer(water.id, before); water.placed = before; }
+    setColumnGlass(map, !!storm && kind === "columns", sources);
+    if (showWater) updateWaterMesh(kind);
     if (storm) applyStep();
     const el = document.getElementById("view-note");
     if (el) {
@@ -99,7 +111,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     if (!EXAGGERATIONS.includes(x) || x === exag) return;
     exag = x;
     setParam("x", x === DEFAULT_EXAGGERATION ? null : String(x));
-    wells.exag = x;
+    wells.exag = x; water.exag = x;
     setExaggeration(map, x, drawn().map((r) => `pk-${r}`));
     map.triggerRepaint();
     render();
@@ -170,47 +182,73 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     } finally { wellsBusy = false; }
   }
 
+  // ---------------------------------------------------------------- flat water near the view
+  let waterBusy = false, waterAgain = false;
+  async function updateWaterMesh(kind) {
+    if (waterBusy) { waterAgain = true; return; }
+    waterBusy = true;
+    try {
+      do {
+        waterAgain = false;
+        const res = state.res;
+        const b = map.getBounds(), view = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+        const dx = (view[2] - view[0]) * 0.5, dy = (view[3] - view[1]) * 0.5;
+        const want = [view[0] - dx, view[1] - dy, view[2] + dx, view[3] + dy];
+        const regions = drawn();
+        water.dropExcept(new Set(regions));
+        for (const r of regions) {
+          const have = water.meshOf(r);
+          if (have && have.level === res && have.mode === state.show && have.kind === kind && have.box[0] <= view[0] && have.box[1] <= view[1]
+            && have.box[2] >= view[2] && have.box[3] >= view[3]) continue;
+          const mesh = await client.call("waterMesh", r, res, want, state.show, kind);
+          if (mesh && state.res === res && storm && water.kind === kind) water.setMesh(mesh);
+        }
+      } while (waterAgain);
+    } catch (e) {
+      toast("The storm's water could not be drawn here.");
+    } finally { waterBusy = false; }
+  }
+
   // ---------------------------------------------------------------- the storm's water in 3D
-  async function setStorm(s) {
-    storm = s ? { storm: s, step: 15, values: new Map() } : null;
+  let stormGen = 0;
+  async function setStorm(s, step = 15) {
+    storm = s ? { storm: s, step: Math.max(-1, Math.min(15, Number(step))), values: new Map(), gen: ++stormGen } : null;
+    wells.setStep(storm ? storm.step : 15); water.setStep(storm ? storm.step : 15);
+    water.exag = exag;
     wells.clearWater();
-    for (const r of state.regions.keys()) clearState(r);
-    if (storm) { await loadWater(); applyStep(); }
+    if (!storm) { water.clearWater(); water.setVisible(false); }   // a new storm: the old water blends into the new
+    if (storm) { await loadWater(); render(); }
     map.triggerRepaint();
   }
 
   async function loadWater() {
-    if (!storm || !(state.res >= 8)) return;
+    const cur = storm;
+    if (!cur || !(state.res >= 8)) return;
     for (const r of drawn()) {
       const key = `${r}:${state.res}:${state.show}`;
-      if (!storm.values.has(key)) {
-        const out = await client.call("stormLevel", r, state.res, storm.storm, state.show);
-        if (!storm) return;
+      if (!cur.values.has(key)) {
+        const out = await client.call("stormLevel", r, state.res, cur.storm, state.show);
+        if (storm !== cur || key !== `${r}:${state.res}:${state.show}`) return;     // a newer storm, level or filter
         storm.values.set(key, out.empty ? null : out.values);
       }
       const values = storm.values.get(key);
       if (values && state.res === 10 && !wells.waters.has(r)) wells.setWater(r, values);
+      if (values && !water.hasWater(r, state.res, cur.gen)) water.setWater(r, state.res, values, cur.gen);
     }
   }
 
-  function setStep(s) {
+  // t: -1 (no rain yet) .. 15 (the whole storm); fractional while the storm plays (the GPU layers
+  // blend two exact steps; nothing per hexagon changes on the page)
+  function setStep(t) {
     if (!storm) return;
-    storm.step = Math.max(0, Math.min(15, s | 0));
+    storm.step = Math.max(-1, Math.min(15, Number(t)));
     applyStep();
   }
 
   function applyStep() {
     if (!storm) return;
     wells.setStep(storm.step);
-    if (effective() !== "columns") return;
-    for (const r of drawn()) {
-      const values = storm.values.get(`${r}:${state.res}:${state.show}`);
-      if (!values) continue;
-      const K = values.length / 16;
-      for (let k = 0; k < K; k++) {
-        map.setFeatureState({ source: `pk-${r}`, id: k }, { w: waterHeight(state.res, values[k * 16 + storm.step], exag) });
-      }
-    }
+    water.setStep(storm.step);
   }
 
   function clearState(r) {
@@ -224,6 +262,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     deps.set(region, d);
     clearState(region);
     wells.drop(region);
+    water.dropMesh(region); water.clearWater(region);      // its hexagons are new
     if (exag !== DEFAULT_EXAGGERATION) setExaggeration(map, exag, [`pk-${region}`]);
     if (selected?.region === region) markSelected();
   }
@@ -249,6 +288,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
   function resetData() {
     wells.dropExcept(new Set());
     deps.clear();
+    water.clear();
     if (storm) { storm.values.clear(); wells.clearWater(); }
   }
 
@@ -257,7 +297,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
   map.once("load", () => { if (is3D() && map.getPitch() < 20) tilt(PITCH, false); });
   return {
     get view() { return view; }, get effective() { return effective(); }, is3D, set, next, render, note,
-    afterRefresh, drewPack, select, updateWells, setStorm, setStep, setFactor, goStreet, wells, resetData,
+    afterRefresh, drewPack, select, updateWells, setStorm, setStep, setFactor, goStreet, wells, water, resetData,
     get exaggeration() { return exag; },
     get storm() { return storm; },
   };

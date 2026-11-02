@@ -31,11 +31,12 @@ void main() {
 }`;
 
 const VS_WATER = `#version 300 es
-uniform mat4 u_matrix; uniform float u_exag; uniform int u_step; uniform sampler2D u_water;
+uniform mat4 u_matrix; uniform float u_exag; uniform int u_s0; uniform int u_s1; uniform float u_frac; uniform sampler2D u_water;
 in vec2 a_pos; in vec3 a_cell;   // floor depth (m), Mercator per metre, hexagon index
+float at(int k, int s) { return s < 0 ? 0.0 : texelFetch(u_water, ivec2(k % 1024, (k / 1024) * 16 + s), 0).r; }
 void main() {
   int k = int(a_cell.z + 0.5);
-  float w = texelFetch(u_water, ivec2(k % 1024, (k / 1024) * 16 + u_step), 0).r;
+  float w = mix(at(k, u_s0), at(k, u_s1), u_frac);       // between two exact steps: blended (drawing only)
   if (!(w > 0.0)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }                    // dry: off screen
   gl_Position = u_matrix * vec4(a_pos, (w - a_cell.x) * a_cell.y * u_exag, 1.0);
 }`;
@@ -63,7 +64,7 @@ export class WellsLayer {
     this.id = id; this.type = "custom"; this.renderingMode = "3d";
     this.meshes = new Map();      // region -> {origin, buffers, counts, box}
     this.waters = new Map();      // region -> texture
-    this.step = 15; this.exag = DEFAULT_EXAGGERATION; this.on = false;
+    this.t = 15; this.exag = DEFAULT_EXAGGERATION; this.on = false;
   }
 
   onAdd(map, gl) {
@@ -79,7 +80,8 @@ export class WellsLayer {
       ramp: gl.getUniformLocation(this.pit, "u_ramp"),
       wpos: gl.getAttribLocation(this.wat, "a_pos"), wcell: gl.getAttribLocation(this.wat, "a_cell"),
       wmatrix: gl.getUniformLocation(this.wat, "u_matrix"), wexag: gl.getUniformLocation(this.wat, "u_exag"),
-      wstep: gl.getUniformLocation(this.wat, "u_step"), wtex: gl.getUniformLocation(this.wat, "u_water"),
+      ws0: gl.getUniformLocation(this.wat, "u_s0"), ws1: gl.getUniformLocation(this.wat, "u_s1"),
+      wfrac: gl.getUniformLocation(this.wat, "u_frac"), wtex: gl.getUniformLocation(this.wat, "u_water"),
     };
     this.empty = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.empty);
@@ -140,7 +142,8 @@ export class WellsLayer {
     this.map?.triggerRepaint();
   }
 
-  setStep(s) { this.step = Math.max(0, Math.min(15, s | 0)); this.map?.triggerRepaint(); }
+  // t: -1 (no rain) .. 15 (whole storm), fractional while playing
+  setStep(t) { this.t = Math.max(-1, Math.min(15, Number(t))); this.map?.triggerRepaint(); }
 
   _upload(m) {
     const gl = this.gl, make = (arr) => { const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW); return b; };
@@ -205,7 +208,9 @@ export class WellsLayer {
     if (this.waters.size) {
       gl.useProgram(this.wat);
       gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
-      gl.uniform1f(L.wexag, this.exag); gl.uniform1i(L.wstep, this.step); gl.uniform1i(L.wtex, 0);
+      const s0 = Math.floor(this.t), s1 = Math.min(s0 + 1, 15);
+      gl.uniform1f(L.wexag, this.exag); gl.uniform1i(L.ws0, s0); gl.uniform1i(L.ws1, s1); gl.uniform1f(L.wfrac, this.t - s0);
+      gl.uniform1i(L.wtex, 0);
       gl.activeTexture(gl.TEXTURE0);
       gl.enableVertexAttribArray(L.wpos); gl.enableVertexAttribArray(L.wcell);
       for (const m of ready) {
