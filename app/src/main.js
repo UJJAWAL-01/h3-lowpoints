@@ -491,7 +491,7 @@ $("about").addEventListener("click", (e) => {
 $("about-open").onclick = openAbout;
 $("about-close").onclick = () => $("about").close();
 $("about").addEventListener("click", (e) => { if (e.target === $("about")) $("about").close(); });
-$("about-version").textContent = `Explorer ${VERSION} · dataset 0.3 · packs doi:10.5281/zenodo.23875375`;
+$("about-version").textContent = `Explorer ${VERSION} · dataset 0.3 · packs doi:10.5281/zenodo.23896025`;
 
 setupSearch({ input: $("search"), list: $("results"), onPick: (p) => {
   clearSelection();

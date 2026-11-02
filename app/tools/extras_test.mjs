@@ -3,6 +3,7 @@
 // DATA_DIR holds index.json, packs.bin, rarity*.json/bin, extras_index.json, extras.bin.
 // check3: rim, ground, road class and distance in the app = the dataset (30 depressions).
 // check4: "Hide likely drained" leaves out exactly the drained and road-feature depressions.
+// DATA_DIR may be a live URL template (https://.../{file}); 4th arg: gallery (only) or checks (no gallery).
 // gallery: a screenshot of each gallery depression, selected, at street scale (for the owner).
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,10 +19,11 @@ const cases = JSON.parse(readFileSync(casesFile, "utf8"));
 const CHROME = ["C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
 const app = spawn(process.execPath, [join(here, "serve.mjs"), join(here, "..", "..", "docs"), "8772"], { stdio: "ignore" });
-const data = spawn(process.execPath, [join(here, "serve.mjs"), resolve(dataDir), "8773"], { stdio: "ignore" });
+const live = /^https?:/.test(dataDir);                  // a live host URL template ({file}) instead of a local folder
+const data = live ? null : spawn(process.execPath, [join(here, "serve.mjs"), resolve(dataDir), "8773"], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 800));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
-const base = `http://127.0.0.1:8772/explorer/?packs=${encodeURIComponent("http://127.0.0.1:8773/{file}")}`;
+const base = `http://127.0.0.1:8772/explorer/?packs=${encodeURIComponent(live ? dataDir : "http://127.0.0.1:8773/{file}")}`;
 const report = { errors: [] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -91,7 +93,7 @@ try {
   // so a d= link is never read; a fly is still moving when the picture is taken)
   const idle = () => page.evaluate(() => new Promise((res) => { const m = window.__lowpoints.map;
     const t = setTimeout(res, 20000); m.once("idle", () => { clearTimeout(t); res(); }); m.triggerRepaint(); }));
-  for (const [k, g] of cases.gallery.entries()) {
+  for (const [k, g] of (only === "checks" ? [] : cases.gallery).entries()) {
     try {
       const f = await call("findDepression", g.region, g.id);
       if (!f.ok || f.r < 0) throw new Error(f.e || "not found");
@@ -108,7 +110,7 @@ try {
   }
 } finally {
   await browser.close();
-  app.kill(); data.kill();
+  app.kill(); data?.kill();
 }
 if (only === "gallery") {
   writeFileSync(join(outDir, "gallery.json"), JSON.stringify(report, null, 1));
