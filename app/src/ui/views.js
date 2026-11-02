@@ -161,7 +161,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
       for (const r of regions) {
         const have = wells.meshBox(r);
         if (have && have[0] <= view[0] && have[1] <= view[1] && have[2] >= view[2] && have[3] >= view[3]) continue;
-        const mesh = await client.call("wellMesh", r, want);
+        const mesh = await client.call("wellMesh", r, want, state.show);
         if (mesh && effective() === "wells") wells.setMesh(mesh);
       }
       if (storm) await loadWater();
@@ -182,9 +182,9 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
   async function loadWater() {
     if (!storm || !(state.res >= 8)) return;
     for (const r of drawn()) {
-      const key = `${r}:${state.res}`;
+      const key = `${r}:${state.res}:${state.show}`;
       if (!storm.values.has(key)) {
-        const out = await client.call("stormLevel", r, state.res, storm.storm);
+        const out = await client.call("stormLevel", r, state.res, storm.storm, state.show);
         if (!storm) return;
         storm.values.set(key, out.empty ? null : out.values);
       }
@@ -204,7 +204,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     wells.setStep(storm.step);
     if (effective() !== "columns") return;
     for (const r of drawn()) {
-      const values = storm.values.get(`${r}:${state.res}`);
+      const values = storm.values.get(`${r}:${state.res}:${state.show}`);
       if (!values) continue;
       const K = values.length / 16;
       for (let k = 0; k < K; k++) {
@@ -245,12 +245,19 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     for (let k = 0; k < d.length; k++) if (d[k] === selected.index) map.setFeatureState({ source: `pk-${selected.region}`, id: k }, { sel: on });
   }
 
+  // the filter changed: every drawn hexagon is new
+  function resetData() {
+    wells.dropExcept(new Set());
+    deps.clear();
+    if (storm) { storm.values.clear(); wells.clearWater(); }
+  }
+
   interaction(is3D());
   // a link to a 3D view that does not say how tilted: tilt as the switch would
   map.once("load", () => { if (is3D() && map.getPitch() < 20) tilt(PITCH, false); });
   return {
     get view() { return view; }, get effective() { return effective(); }, is3D, set, next, render, note,
-    afterRefresh, drewPack, select, updateWells, setStorm, setStep, setFactor, goStreet, wells,
+    afterRefresh, drewPack, select, updateWells, setStorm, setStep, setFactor, goStreet, wells, resetData,
     get exaggeration() { return exag; },
     get storm() { return storm; },
   };

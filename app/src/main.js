@@ -28,6 +28,7 @@ const state = {
   view: "intro",           // what the panel shows: intro | cell | depression
   selected: null,          // {region, index, data}
   cell: null,              // {props, res}
+  show: "all",             // all | undrained (hide likely drained)
 };
 
 // ------------------------------------------------------------------ can this browser run it?
@@ -49,7 +50,8 @@ function unsupported(why) {
 })();
 
 // ------------------------------------------------------------------ map
-const START_VIEW = param("map");          // read before the map writes its own position
+const START_VIEW = param("map");
+if (param("show") === "undrained") state.show = "undrained";          // read before the map writes its own position
 maplibregl.setWorkerUrl(new URL("maplibre-gl-worker.js", location.href).href);
 const protocol = new Protocol({ metadata: false });
 protocol.add(new PMTiles(new RedirectSource(BASEMAP_URL)));
@@ -180,7 +182,7 @@ async function drawDetail(res) {
   busy(+todo.length);
   await Promise.all(todo.map(async (r) => {
     try {
-      const out = await client.call("pack", r, res);
+      const out = await client.call("pack", r, res, state.show);
       if (state.res !== res) return;
       if (out.empty) { state.regions.set(r, res); return; }
       addPackLayers(map, r);
@@ -199,6 +201,19 @@ async function drawDetail(res) {
 
 const OVERVIEW_LAYERS = ["overview-fill", "overview-line", "overview-hover", "overview-col"];
 const packLayers = (r) => [`pk-${r}-fill`, `pk-${r}-line`, `pk-${r}-hover`, `pk-${r}-col`, `pk-${r}-colw`];
+
+// Show all depressions or hide the likely drained: redraw every pack in the new mode
+function setShow(mode) {
+  if (mode === state.show) return;
+  state.show = mode;
+  setParam("show", mode === "all" ? null : mode);
+  for (const r of [...state.regions.keys()]) removePackLayers(map, r);
+  state.regions.clear();
+  views.resetData();
+  renderPanel();
+  refresh();
+  toast(mode === "all" ? "Showing all depressions" : "Hiding likely drained depressions");
+}
 
 function prune(want) {
   if (state.regions.size <= MAX_REGION_SOURCES) return;
@@ -243,6 +258,7 @@ function tipFor(feat) {
   if (id === "selection-fill") return "The selected depression. It covers every outlined hexagon.";
   if (feat.source === "overview") return `${share(p.s)} of this hexagon is in depressions · ${f.int(p.c)} depressions`;
   if (p.s != null) return `${share(p.s)} of this hexagon is in depressions · ${p.n} ${p.n === 1 ? "depression" : "depressions"}. Click for the largest.`;
+  if (p.g != null) return `Lowest ground here ${f.elevation(p.g).main} above sea level, ${f.depth(p.d).main} below its depression's rim (${f.elevation(p.rim).main}, where water spills out; NAVD 88)${p.rc === 2 ? " · road cut or underpass" : p.rc === 1 ? " · on a major road" : ""}${p.n > 1 ? ` · ${p.n} depressions meet here` : ""}. Click for details.`;
   return `Lowest ground here: ${f.depth(p.d).main} below its depression's rim (the level where water spills out). Water this deep when full${p.n > 1 ? ` · ${p.n} depressions meet here` : ""}. Click for details.`;
 }
 
@@ -367,7 +383,7 @@ function renderPanel() {
   else if (state.view === "cell" && state.cell) body.innerHTML = panelView.overviewCell(state.cell.props, state.cell.res);
   else {
     const res = state.res ?? autoRes(map.getZoom());
-    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res, views.note(), views.effective !== "flat");
+    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res, views.note(), views.effective !== "flat", state.show);
   }
   measure();
 }
@@ -383,6 +399,7 @@ $("panel").addEventListener("click", async (e) => {
   if (act === "close") clearSelection();
   else if (act === "about") openAbout();
   else if (act === "disclaimer") openAbout("disclaimer");
+  else if (act === "show-all" || act === "show-undrained") setShow(act === "show-all" ? "all" : "undrained");
   else if (act === "zoom-dep" && state.selected?.data) fitCells(state.selected.data.cells);
   else if (act === "zoom-cell" && state.cell) {
     const ring = state.cell.geometry.coordinates[0];

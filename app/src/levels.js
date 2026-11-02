@@ -13,13 +13,15 @@ export const full = (pk, i, arr) => arr[i * 7 + pk.count[i] - 1];
 
 // Per hexagon: deepest point when full, depressed area, the depression with most area there, the
 // number of depressions; per pack row (res-10 cell x depression): the hexagon it belongs to (rowK)
-export function levelCells(pk, level) {
+// skip: optional Uint8Array per depression; skipped depressions are left out (rowK -1)
+export function levelCells(pk, level, skip = null) {
   const m = pk.cell.length;
   const keys = new Map();
   const out = { cell: [], depth: [], area: [], dep: [], depArea: [], n: [], rowK: new Int32Array(m) };
   for (let r = 0; r < m; r++) {
     const c = level === 10 ? pk.cell[r] : parentOf(pk.cell[r], level);
     const d = pk.cell_dep[r];
+    if (skip && skip[d]) { out.rowK[r] = -1; continue; }
     const a = pk.cell_share[r] * full(pk, d, pk.areas);
     let k = keys.get(c);
     if (k === undefined) {

@@ -8,7 +8,7 @@ const both = (x) => `${f.esc(x.main)}${x.alt ? ` <small>${f.esc(x.alt)}</small>`
 const inline = (x) => `${f.esc(x.main)}${x.alt ? ` (${f.esc(x.alt)})` : ""}`;
 const CLOSE = `<button class="close" data-act="close" aria-label="Close details"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.6"/></svg></button>`;
 
-export function intro(nat, mode, res, heightNote = "", earth = false) {
+export function intro(nat, mode, res, heightNote = "", earth = false, show = "all") {
   const n = nat
     ? `<div class="stats" role="list">
         <div role="listitem"><span class="label">Depressions</span><span class="v">${f.int(nat.depressions)}</span></div>
@@ -29,6 +29,7 @@ export function intro(nat, mode, res, heightNote = "", earth = false) {
     ${legendHtml(res === 10 ? "depth" : "share", f.units.us, res === 10 && earth ? EARTH : undefined)}
     ${heightNote ? `<p class="note"><strong>3D:</strong> ${f.esc(heightNote)}</p>` : ""}
     <p class="note">${hint}</p>
+    ${showControl(show)}
     ${source("cell")}
     ${foot()}`;
 }
@@ -69,7 +70,10 @@ export function depression(d) {
   } else {
     where = "When full, its water leaves the mapped land: into open water (a river, lake or the sea) or past the edge of the data.";
   }
-  const status = d.landlocked
+  const road = d.road === 2
+    ? `<span class="badge solid" title="Its lowest point is ${f.int(d.roadM)} m from a major road (US Census TIGER 2024) and it lies along the road: a road cut, underpass or ramp. Storm drains usually empty these, but drains are not in the data, and underpasses can still flood when drains are overwhelmed.">Road cut or underpass</span>`
+    : d.road === 1 ? `<span class="badge" title="Its lowest point is ${f.int(d.roadM)} m from a major road (US Census TIGER 2024): storm drains may empty it; drains are not in the data.">On a major road</span>` : "";
+  const status = d.landlocked && !d.road
     ? `<span class="badge solid" title="No sign of drainage in mapped lines: no stream, ditch or canal within 30 m of its lowest point, and no highway or ramp within 30 m of where it overflows. Not proof that none exists.">Landlocked</span>`
     : d.drained ? `<span class="badge" title="A mapped stream, ditch or canal within 30 m of its lowest point, or a highway or ramp within 30 m of where it overflows">Likely drained</span>` : "";
   const shallow = d.depth < 1
@@ -79,12 +83,15 @@ export function depression(d) {
     : "";
   return `<div class="kicker"><span class="label">Depression</span>${CLOSE}</div>
     <h2>Holds <em>${f.esc(holds.main)}</em> of water</h2>
-    <div class="row">${status}${shallow}</div>
+    <div class="row">${road}${status}${shallow}</div>
     <p class="say">Water can stand up to <strong>${inline(deep)}</strong> deep over <strong>${inline(wide)}</strong>. ${fills}</p>
     <p class="say">${where}</p>
     ${mapKey(d)}
     <dl class="facts">
-      <dt>Depth when full</dt><dd>${both(deep)}</dd>
+      <dt>Depth when full <small>(below its rim)</small></dt><dd>${both(deep)}</dd>
+      ${d.extras ? `<dt>Rim, where water spills out <small>(above sea level, NAVD 88)</small></dt><dd>${both(f.elevation(d.rimM))}</dd>
+      <dt>Lowest ground <small>(above sea level)</small></dt><dd>${both(f.elevation(d.groundM))}</dd>
+      <dt>Nearest major road <small>(from the lowest point; Census TIGER 2024)</small></dt><dd>${Number.isFinite(d.roadM) ? both(f.distance(d.roadM)) : "over 100 m"}</dd>` : ""}
       <dt>Area when full</dt><dd>${both(wide)}</dd>
       <dt>Volume when full</dt><dd>${both(holds)}</dd>
       <dt>Land draining into it</dt><dd>${both(f.area(d.catchment))}</dd>
@@ -141,4 +148,15 @@ export function loading(what) {
 export function failed(msg) {
   return `<div class="kicker"><span class="label">Could not load</span>${CLOSE}</div><p>${f.esc(msg)}</p>
     <div class="row"><button class="btn" data-act="retry">Try again</button></div>`;
+}
+
+// Show all depressions, or hide those likely drained (applies at street and city scale)
+function showControl(show) {
+  return `<div class="show"><span class="label">Show</span>
+    <div class="seg" role="group" aria-label="Which depressions to show">
+      <button data-act="show-all" aria-pressed="${show === "all"}">All depressions</button>
+      <button data-act="show-undrained" aria-pressed="${show === "undrained"}">Hide likely drained</button></div>
+    <p class="note">Likely drained: a mapped stream, ditch or canal within 30 m of the lowest point, a major road within 30 m of
+      where it overflows, or a road cut or underpass (lowest point on a major road). Applies at city and street scale; the
+      country summaries count every depression.</p></div>`;
 }

@@ -171,15 +171,18 @@ async function getPack(region) {
 }
 
 // Cells to draw at one level: deepest point, depressed area, the depression with most area there
-function levelCells(v, level) {
-  return v.levels[level] || (v.levels[level] = groupCells(v.pack, level));
+// mode "all", or "undrained": without the likely drained (see hidden())
+function levelCells(v, level, mode = "all") {
+  const key = `${level}:${mode}`;
+  return v.levels[key] || (v.levels[key] = groupCells(v.pack, level, mode === "undrained" ? hidden(v) : null));
 }
 
-function cellAreas(v, level) {
-  if (v.areas[level]) return v.areas[level];
-  const L = levelCells(v, level), a = new Float64Array(L.cell.length);
+function cellAreas(v, level, mode = "all") {
+  const key = `${level}:${mode}`;
+  if (v.areas[key]) return v.areas[key];
+  const L = levelCells(v, level, mode), a = new Float64Array(L.cell.length);
   for (let k = 0; k < a.length; k++) a[k] = cellArea(hex(L.cell[k]), "m2");
-  return (v.areas[level] = a);
+  return (v.areas[key] = a);
 }
 
 function indexOfId(v, id) {
@@ -195,10 +198,23 @@ function lowLatLng(v) {
   return (v.lowLL = ll);
 }
 
-async function pack(region, level) {
+async function pack(region, level, mode = "all") {
   const v = await getPack(region);
   if (!v) return { region, empty: true };
-  const L = levelCells(v, level);
+  const ex = await extrasOf(v);
+  const L = levelCells(v, level, mode);
+  // level 10: lowest ground in each hexagon above sea level = its depression's rim - the depth there
+  let ground = null;
+  if (ex && level === 10) {
+    ground = new Float64Array(L.cell.length).fill(Infinity);
+    const pk = v.pack;
+    for (let r = 0; r < pk.cell.length; r++) {
+      const k = L.rowK[r];
+      if (k < 0) continue;
+      const g = ex.rim[pk.cell_dep[r]] - pk.cell_max_depth[r];
+      if (g < ground[k]) ground[k] = g;
+    }
+  }
   const features = new Array(L.cell.length);
   for (let k = 0; k < L.cell.length; k++) {
     const h = hex(L.cell[k]);
@@ -206,6 +222,7 @@ async function pack(region, level) {
       ? { h, d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] }
       : { h, s: L.area[k] / cellArea(h, "m2"), d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] };
     if (level !== 10) p.hc = Math.round(columnHeight(level, p) * 10) / 10;   // share columns (m); level 10 = d x chosen factor
+    if (ground && Number.isFinite(ground[k])) { p.g = Math.round(ground[k] * 10) / 10; p.rim = Math.round(ex.rim[L.dep[k]] * 10) / 10; p.rc = ex.road[L.dep[k]]; }
     features[k] = {
       type: "Feature", id: k,
       geometry: { type: "Polygon", coordinates: [ring(h)] },
@@ -257,6 +274,7 @@ async function depression(region, i) {
     depth: full(pk, i, pk.depths), area: full(pk, i, pk.areas), volume: full(pk, i, pk.vols),
     catchment: pk.catch[i], curveNumber: pk.cn[i], rainToFill: pk.rain_to_fill[i],
     fillsInYears: pk.fills_in_years[i], drained: (pk.flags[i] & 1) === 1, landlocked: (pk.flags[i] & 2) === 2,
+    ...(await extrasFields(v, i)),
     target: t, targetRegion: t >= 0 ? path.regions[1] : null, targetLowLngLat: t >= 0 ? chain[1] : null,
     chainSteps: chain.length - 1, chainLeaves: leaves, chainIdx, chainRegions: path.regions, chainIds: path.ids,
     chainOtherAreas: path.packs, chainCut: path.cut, cellCount: cells.length,
@@ -392,16 +410,17 @@ async function stormRun(region, stormIn) {
 
 // Water in every hexagon that pack() draws for this region and level, in the same order:
 // values[k * steps + s] (m of water at level 10, share under water at 8 and 9; NaN unknown)
-async function stormLevel(region, level, storm) {
+async function stormLevel(region, level, storm, mode = "all") {
   const run = await stormRun(region, storm);
   if (!run) return { region, level, empty: true };
   const v = packs.get(region) || await getPack(region);
-  const values = levelWater(v.pack, levelCells(v, level), run, level, cellAreas(v, level));
+  if (mode !== "all") await extrasOf(v);
+  const values = levelWater(v.pack, levelCells(v, level, mode), run, level, cellAreas(v, level, mode));
   return { region, level, steps: STEPS, values, ms: run.ms };
 }
 
 // The storm over the depressions whose lowest point is inside box [w, s, e, n], in these regions
-async function stormSummary(regions, box, stormIn) {
+async function stormSummary(regions, box, stormIn, mode = "all") {
   const storm = normaliseStorm(stormIn);
   const [w, s, e, n] = box;
   const total = { depressions: 0, unknown: 0, fill: 0, overflow: 0, holdWater: 0, wetAreaM2: 0, heldM3: 0,
@@ -411,7 +430,8 @@ async function stormSummary(regions, box, stormIn) {
     const run = await stormRun(region, storm);
     if (!run) continue;
     const v = await getPack(region), ll = lowLatLng(v);
-    const pick = (i) => ll[2 * i] >= s && ll[2 * i] <= n && ll[2 * i + 1] >= w && ll[2 * i + 1] <= e;
+    const hide = mode === "undrained" ? (await extrasOf(v), hidden(v)) : null;
+    const pick = (i) => (!hide || !hide[i]) && ll[2 * i] >= s && ll[2 * i] <= n && ll[2 * i + 1] >= w && ll[2 * i + 1] <= e;
     const sm = summarise(v.pack, run, pick);
     for (const k of ["depressions", "unknown", "fill", "overflow", "holdWater", "wetAreaM2", "heldM3"]) total[k] += sm[k];
     for (const f of sm.first) firsts.push({ ...f, region, id: v.pack.id[f.i].toString(), lngLat: [ll[2 * f.i + 1], ll[2 * f.i]] });
@@ -451,14 +471,17 @@ async function stormDepression(region, i, storm) {
 //   pit    [x, y, z, colour] triangles: floors and walls (colour = depth class 0..6; walls add a
 //          lighting fraction 0.05..0.95, floors have none)
 //   water  [x, y, floorDepthM, zPerMetre, k] triangles, k = the hexagon's index in pack(region, 10)
-async function wellMesh(region, box) {
+async function wellMesh(region, box, mode = "all") {
   const v = await getPack(region);
   if (!v) return null;
-  const L = levelCells(v, 10);
+  if (mode !== "all") await extrasOf(v);
+  const L = levelCells(v, 10, mode);
+  v.centresBy = v.centresBy || {};
+  v.centres10 = v.centresBy[mode];
   if (!v.centres10) {
     const c = new Float64Array(2 * L.cell.length);
     L.cell.forEach((x, k) => { const [la, lo] = cellToLatLng(hex(x)); c[2 * k] = la; c[2 * k + 1] = lo; });
-    v.centres10 = c;
+    v.centres10 = v.centresBy[mode] = c;
   }
   const C = v.centres10, [w, s, e, n] = box;
   const ox = mercX((w + e) / 2), oy = mercY((s + n) / 2);
@@ -535,4 +558,50 @@ async function nearestDepression(lat, lon) {
     if (best) return best;
   }
   return null;
+}
+
+// ------------------------------------------------------------------ extras: elevations, road features
+// From extras.bin beside the packs (app/tools/extras.py): per depression its rim above sea level
+// (NAVD 88), distance from its lowest point to the nearest major road, and its road class (0 none,
+// 1 lowest point within 30 m of a major road, 2 = 1 and lying along it). Hosts without the file:
+// null, and the app works without elevations or road features.
+let extrasIndex, extrasIndexPromise;
+async function extrasOf(v) {
+  if (v.extras !== undefined) return v.extras;
+  if (!v.extrasPromise) {
+    v.extrasPromise = (async () => {
+      try {
+        if (extrasIndex === undefined) {
+          extrasIndexPromise = extrasIndexPromise || hosts.json("extras_index.json").catch(() => null);
+          extrasIndex = await extrasIndexPromise;
+        }
+        const e = extrasIndex?.regions?.[v.region];
+        if (!e) return (v.extras = null);
+        const [off, len, n] = e;
+        const raw = await gunzip(await hosts.range(extrasIndex.file, off, len));
+        if (n !== v.pack.n) throw new Error("extras do not match the pack");
+        const buf = raw.byteOffset % 4 === 0 ? raw : raw.slice();
+        v.extras = { rim: new Float32Array(buf.buffer, buf.byteOffset, n), roadM: new Float32Array(buf.buffer, buf.byteOffset + 4 * n, n),
+          road: new Uint8Array(buf.buffer, buf.byteOffset + 8 * n, n) };
+      } catch { v.extras = null; }
+      return v.extras;
+    })();
+  }
+  return v.extrasPromise;
+}
+
+// likely drained: the dataset's drained flag, or a road feature (road class 1 or 2)
+function hidden(v) {
+  if (v.hide) return v.hide;
+  const pk = v.pack, ex = v.extras, h = new Uint8Array(pk.n);
+  for (let i = 0; i < pk.n; i++) h[i] = (pk.flags[i] & 1) || (ex && ex.road[i] > 0) ? 1 : 0;
+  if (ex !== undefined) v.hide = h;               // final once the extras are known
+  return h;
+}
+
+async function extrasFields(v, i) {
+  const ex = await extrasOf(v);
+  if (!ex) return { extras: false };
+  const rim = ex.rim[i];
+  return { extras: true, rimM: rim, groundM: rim - full(v.pack, i, v.pack.depths), roadM: ex.roadM[i], road: ex.road[i] };
 }

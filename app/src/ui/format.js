@@ -27,6 +27,10 @@ function pair(metric, usText) {
 export function depth(m) {
   return pair(`${sig(m)} m`, `${sig(m * 3.28084)} ft`);
 }
+// height above sea level (NAVD 88)
+export function elevation(m) {
+  return pair(`${nf(1).format(m)} m`, `${int(m * 3.28084)} ft`);
+}
 export function rain(mm) {
   if (!Number.isFinite(mm)) return { main: "–", alt: "" };
   return pair(`${int(mm)} mm`, `${nf(1).format(mm / 25.4)} in`);

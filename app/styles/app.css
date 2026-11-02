@@ -362,3 +362,8 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .view-note .exag button:first-child { border-left: 0; }
 .view-note .exag button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .view-note .btn { justify-self: start; }
+
+.show { display: grid; gap: 6px; }
+.show .seg { border: var(--rule-soft); width: max-content; max-width: 100%; flex-wrap: wrap; }
+.show .seg button:first-child { border-left: 0; }
+.show .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }

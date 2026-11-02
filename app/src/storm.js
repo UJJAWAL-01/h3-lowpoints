@@ -88,6 +88,7 @@ export function levelWater(pk, L, run, level, cellAreas) {
   const unknown = new Uint8Array(K);
   for (let r = 0; r < pk.cell.length; r++) {
     const k = L.rowK[r], d = pk.cell_dep[r], at = k * STEPS;
+    if (k < 0) continue;                                   // depression left out (filter)
     if (Number.isNaN(run.store[(STEPS - 1) * n + d])) { unknown[k] = 1; continue; }
     if (level === 10) {
       const floor = full(pk, d, pk.depths) - pk.cell_max_depth[r];      // below the full level
