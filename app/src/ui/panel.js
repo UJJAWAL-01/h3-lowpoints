@@ -1,5 +1,6 @@
 // What the side panel (or bottom sheet) says. Plain sentences first, the numbers below them.
 
+import { EARTH } from "../map/heights.js";
 import { legendHtml } from "../map/layers.js";
 import * as f from "./format.js";
 
@@ -7,7 +8,7 @@ const both = (x) => `${f.esc(x.main)}${x.alt ? ` <small>${f.esc(x.alt)}</small>`
 const inline = (x) => `${f.esc(x.main)}${x.alt ? ` (${f.esc(x.alt)})` : ""}`;
 const CLOSE = `<button class="close" data-act="close" aria-label="Close details"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.6"/></svg></button>`;
 
-export function intro(nat, mode, res, heightNote = "") {
+export function intro(nat, mode, res, heightNote = "", earth = false) {
   const n = nat
     ? `<div class="stats" role="list">
         <div role="listitem"><span class="label">Depressions</span><span class="v">${f.int(nat.depressions)}</span></div>
@@ -25,7 +26,7 @@ export function intro(nat, mode, res, heightNote = "") {
     <p class="lede">Every closed depression on land in the lower 48 US states: low ground that water flows into but not out of.</p>
     <p class="notice">For exploration and learning only. Not a flood map, forecast or advice. <button class="btn link" data-act="disclaimer">Disclaimer</button></p>
     ${n}
-    ${legendHtml(res === 10 ? "depth" : "share", f.units.us)}
+    ${legendHtml(res === 10 ? "depth" : "share", f.units.us, res === 10 && earth ? EARTH : undefined)}
     ${heightNote ? `<p class="note"><strong>3D:</strong> ${f.esc(heightNote)}</p>` : ""}
     <p class="note">${hint}</p>
     ${source("cell")}
@@ -94,7 +95,7 @@ export function depression(d) {
       <dt>Lowest point <small>(centre of its H3 res-10 cell)</small></dt><dd>≈ ${d.lat.toFixed(4)}, ${d.lon.toFixed(4)}<small><button class="copy" data-copy="${f.esc(d.low)}" title="Copy the cell id">${f.esc(d.low)}</button></small></dd>
       <dt>Dataset id</dt><dd><button class="copy" data-copy="${f.esc(d.id)}" title="Copy">${f.esc(d.id)}</button></dd>
     </dl>
-    <p class="note">From the 30 m elevation model (vertical error about 0.5 to 1 m), with no storm drains, pipes or pumps.</p>
+    <p class="note">Depths are measured down from the depression's rim, the level at which water spills out (USGS 3DEP 30 m bare-earth elevation; vertical error about 0.5 to 1 m). Storm drains, sewers, culverts and pumps are not in the data: in cities, many deep depressions are road cuts, underpasses or ramps that drains keep dry.</p>
     <div class="row"><button class="btn" data-act="zoom-dep">Zoom to it</button><button class="btn" data-act="share">Copy link</button></div>
     ${source("depression")}`;
 }

@@ -12,7 +12,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%23f2f3f1' stroke='%23121513' stroke-width='2'/%3E%3Cpath d='M9 18c3 4 11 4 14 0' fill='none' stroke='%231d3f9e' stroke-width='2.5'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/instrument-serif-latin-400-italic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=30bed7ab0a">
+<link rel="stylesheet" href="app.css?v=b58fae2751">
 </head>
 <body>
 <a class="skip" href="#search">Skip to place search</a>
@@ -51,7 +51,7 @@
     <button data-view="wells" aria-pressed="false" title="3D wells: depressions sink below the map (exaggerated; street scale)">Wells</button>
   </div>
 </div>
-<p class="view-note card" id="view-note" hidden role="status"></p>
+<div class="view-note card" id="view-note" hidden role="status"></div>
 
 <div class="tools">
   <div class="stack card">
@@ -96,7 +96,7 @@
       <li>Across the country and at city scale, each hexagon says how much of its area lies in depressions.</li>
       <li>At street scale (the finest level), each hexagon is shaded by how deep water stands there when its depression is full.</li>
       <li>Columns and Wells show the same numbers in 3D: columns rise, wells sink below the map. Their
-        heights are exaggerated, by a factor the map states (30 times at street scale). Drag with the
+        heights are exaggerated, by a factor you choose and the map states (×1 is true scale, ×10 the default). Drag with the
         right mouse button, or two fingers, to tilt and turn; the compass button sets north up again.</li>
       <li>Click a hexagon to see its depression: how much it holds, the rain that fills it, how often that
         rain falls, and where it overflows.</li>
@@ -104,6 +104,8 @@
     <h3>What it does not include</h3>
     <ul>
       <li>Storm drains, sewers, pipes and pumps. In cities they carry much of the water away.</li>
+      <li>Storm drains, sewers, culverts and pumps. In cities many deep depressions are road cuts,
+        underpasses and ramps that drains keep dry; the elevation data cannot show drains.</li>
       <li>Features smaller than the 30 m elevation data can see, such as most street-scale dips.</li>
       <li>Rivers in flood, tides, snowmelt and frozen ground.</li>
     </ul>
@@ -158,6 +160,6 @@
 </dialog>
 
 <noscript><p style="position:fixed;inset:auto 16px 16px;background:#fff;border:1px solid #121513;padding:12px">This map needs JavaScript.</p></noscript>
-<script type="module" src="app.js?v=30bed7ab0a"></script>
+<script type="module" src="app.js?v=b58fae2751"></script>
 </body>
 </html>

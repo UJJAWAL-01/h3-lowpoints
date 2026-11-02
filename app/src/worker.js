@@ -4,7 +4,7 @@
 
 import { cellArea, cellToBoundary, cellToLatLng, gridDisk, latLngToCell, polygonToCells } from "h3-js";
 import { Hosts } from "./data/hosts.js";
-import { columnHeight, mercX, mercY, mercZPerMetre } from "./map/heights.js";
+import { columnHeight, depthClass, mercX, mercY, mercZPerMetre } from "./map/heights.js";
 import { full, levelCells as groupCells, parentOf } from "./levels.js";
 import { gunzip, parsePack } from "./pack.js";
 import { YEARS, depthsAt, parseRarity, returnPeriod, stormDepths } from "./rarity.js";
@@ -20,7 +20,7 @@ const packs = new Map();                 // region -> {pack, derived}, in least-
 const pending = new Map();               // region -> promise (one request per pack at a time)
 
 const handlers = { init, national, overviewCells, regionsIn, pack, depression, findDepression, regionOf, example,
-  rarityAt, stormLevel, stormSummary, stormDepression, wellMesh };
+  rarityAt, stormLevel, stormSummary, stormDepression, wellMesh, nearestDepression };
 
 self.onmessage = async (e) => {
   const { id, type, args } = e.data;
@@ -205,7 +205,7 @@ async function pack(region, level) {
     const p = level === 10
       ? { h, d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] }
       : { h, s: L.area[k] / cellArea(h, "m2"), d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] };
-    p.hc = Math.round(columnHeight(level, p) * 10) / 10;            // column height in the 3D view (m)
+    if (level !== 10) p.hc = Math.round(columnHeight(level, p) * 10) / 10;   // share columns (m); level 10 = d x chosen factor
     features[k] = {
       type: "Feature", id: k,
       geometry: { type: "Polygon", coordinates: [ring(h)] },
@@ -448,7 +448,8 @@ async function stormDepression(region, i, storm) {
 // depth when full (deepest point) below the level at which its depression overflows; walls stand
 // where neighbouring hexagons differ in depth (or border ground with no depression).
 //   open   [x, y] triangles: the hexagon openings
-//   pit    [x, y, z, shade] triangles: floors and walls (shade 0 light .. 1 dark)
+//   pit    [x, y, z, colour] triangles: floors and walls (colour = depth class 0..6; walls add a
+//          lighting fraction 0.05..0.95, floors have none)
 //   water  [x, y, floorDepthM, zPerMetre, k] triangles, k = the hexagon's index in pack(region, 10)
 async function wellMesh(region, box) {
   const v = await getPack(region);
@@ -483,7 +484,7 @@ async function wellMesh(region, box) {
   const open = [], pit = [], water = [];
   rings.forEach((ring, t) => {
     const d = depthOf(t), k = pick[t], pts = ring.map(([lng, lat]) => P(lng, lat));
-    const floorShade = 0.5 + 0.4 * Math.min(d / 4, 1);       // floors darker than walls: a hollow
+    const floorShade = depthClass(d);                         // floor colour: the depth class (sand .. brown)
     for (let j = 1; j + 1 < pts.length; j++) {
       for (const q of [pts[0], pts[j], pts[j + 1]]) {
         open.push(q[0], q[1]);
@@ -506,10 +507,32 @@ async function wellMesh(region, box) {
     const ex = (deeper.b[0] - deeper.a[0]) * Math.cos((lat * Math.PI) / 180), ey = deeper.b[1] - deeper.a[1];
     const len = Math.hypot(ex, ey) || 1, nx = ey / len, ny = -ex / len;   // outward for a counter-clockwise ring
     const lit = -(nx * -0.6 + ny * 0.8);                                   // inner face towards the light
-    const shade = 0.22 + 0.2 * lit;
+    const shade = depthClass(bottom) + 0.05 + 0.9 * Math.min(Math.max(0.5 + 0.5 * lit, 0), 1);   // class + light
     const quad = [[a, top], [b, top], [b, bottom], [a, top], [b, bottom], [a, bottom]];
     for (const [q, depth] of quad) pit.push(q[0], q[1], -depth * q[2], shade);
   }
   return { region, origin: [ox, oy], cells: pick.length, box,
     open: new Float32Array(open), pit: new Float32Array(pit), water: new Float32Array(water) };
+}
+
+// The depression nearest to a point that is worth seeing as a well (at least 1 m deep and
+// 5,000 m2), in the point's res-4 area or the six around it: where "Wells" takes the visitor
+async function nearestDepression(lat, lon) {
+  const start = latLngToCell(lat, lon, 4);
+  for (const ring of [[start], gridDisk(start, 1).filter((c) => c !== start)]) {
+    let best = null, bd = Infinity;
+    for (const r of ring) {
+      let v;
+      try { v = await getPack(r); } catch { continue; }
+      if (!v) continue;
+      const pk = v.pack, ll = lowLatLng(v), k = Math.cos((lat * Math.PI) / 180);
+      for (let i = 0; i < pk.n; i++) {
+        if (full(pk, i, pk.depths) < 1 || full(pk, i, pk.areas) < 5000) continue;
+        const d = (ll[2 * i] - lat) ** 2 + ((ll[2 * i + 1] - lon) * k) ** 2;
+        if (d < bd) { bd = d; best = { region: r, index: i, lngLat: [ll[2 * i + 1], ll[2 * i]] }; }
+      }
+    }
+    if (best) return best;
+  }
+  return null;
 }

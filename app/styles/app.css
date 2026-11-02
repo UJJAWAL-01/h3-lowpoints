@@ -355,3 +355,10 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
   .view-note { top: auto; bottom: calc(var(--sheet-peek, 140px) + 12px); left: 12px; right: 64px; max-width: none; font-size: 13px; }
   body.sheet-up .view-note { display: none; }
 }
+
+.view-note { display: grid; gap: 8px; }
+.view-note .exag { display: flex; border: var(--rule-soft); width: max-content; }
+.view-note .exag button { border: 0; border-left: var(--rule-soft); background: var(--card); min-width: 40px; height: 32px; font: 600 13px var(--sans); }
+.view-note .exag button:first-child { border-left: 0; }
+.view-note .exag button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.view-note .btn { justify-self: start; }

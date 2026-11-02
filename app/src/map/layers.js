@@ -1,5 +1,6 @@
 // Hexagon layers and their legends. One ink ramp for both scales; blue is kept for water.
 
+import { DEFAULT_EXAGGERATION, DEPTH_BREAKS, EARTH } from "./heights.js";
 import { LABELS_FROM } from "./style.js";
 
 // Hexagons sit above the whole street map (labels stay on top); the selection sits above the
@@ -86,14 +87,18 @@ export function removePackLayers(map, region) {
 // ------------------------------------------------------------------ 3D columns
 // Height from the worker (property hc, see heights.js); in a storm the blue water column (height in
 // feature-state "w", metres drawn) stands at the foot and the grey column starts on top of it.
-const HEX_COLOUR = ["case", ["has", "s"], step("s", SHARE.breaks), step("d", DEPTH.breaks)];
+// columns: share levels in ink, depth (level 10) in the earth colours of the 3D views
+const earth = ["step", ["get", "d"], ...EARTH.flatMap((c, i) => (i < DEPTH_BREAKS.length ? [c, DEPTH_BREAKS[i]] : [c]))];
+const HEX_COLOUR = ["case", ["has", "s"], step("s", SHARE.breaks), earth];
+let exaggeration = DEFAULT_EXAGGERATION;
+const height = () => ["case", ["has", "s"], ["get", "hc"], ["*", ["get", "d"], exaggeration]];
 const SELECTED = ["boolean", ["feature-state", "sel"], false];
 
 function columnLayer(id, source, colour) {
   return { id, type: "fill-extrusion", source, layout: { visibility: "none" }, paint: {
-    "fill-extrusion-color": ["case", SELECTED, "#1f3a8a", colour],
+    "fill-extrusion-color": ["case", SELECTED, "#121513", colour],
     "fill-extrusion-base": ["coalesce", ["feature-state", "w"], 0],
-    "fill-extrusion-height": ["max", ["get", "hc"], ["coalesce", ["feature-state", "w"], 0]],
+    "fill-extrusion-height": ["max", source === "overview" ? ["get", "hc"] : height(), ["coalesce", ["feature-state", "w"], 0]],
     "fill-extrusion-opacity": 0.94, "fill-extrusion-vertical-gradient": true } };
 }
 
@@ -118,6 +123,15 @@ export function applyView(map, view, sources) {
   }
 }
 
+// the visitor's depth factor (x1, x5, x10): level-10 columns of every pack source
+export function setExaggeration(map, e, sources) {
+  exaggeration = e;
+  for (const src of sources) {
+    if (src === "overview" || !map.getLayer(`${src}-col`)) continue;
+    map.setPaintProperty(`${src}-col`, "fill-extrusion-height", ["max", height(), ["coalesce", ["feature-state", "w"], 0]]);
+  }
+}
+
 export function setVisible(map, ids, on) {
   for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
 }
@@ -126,10 +140,10 @@ export function empty() {
   return { type: "FeatureCollection", features: [] };
 }
 
-export function legendHtml(kind, us) {
+export function legendHtml(kind, us, colours = INK) {
   const L = kind === "share" ? SHARE.labels : us ? DEPTH.labelsFt : DEPTH.labelsM;
   const title = kind === "share" ? "Share of each hexagon in depressions (%)" : `Water depth when full (${us ? "ft" : "m"})`;
   return `<div class="legend" aria-label="${title}"><span class="label">${title}</span>
-    <div class="ramp">${INK.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
+    <div class="ramp">${colours.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
     <div class="ramp-labels">${L.map((l) => `<span>${l}</span>`).join("")}</div></div>`;
 }

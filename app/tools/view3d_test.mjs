@@ -98,12 +98,14 @@ try {
       const fs = L.map.querySourceFeatures(`pk-${r}`).slice(0, 400);
       let wrong = 0, wet = 0;
       for (const f of fs) {
-        if (Math.abs(f.properties.hc - f.properties.d * 30) > 0.06) wrong++;
+        const E = L.views.exaggeration, col = f.properties.d * E;           // the rule at level 10
+        if (f.properties.hc != null) wrong++;                                // level 10 has no share height
         const st = L.map.getFeatureState({ source: `pk-${r}`, id: f.id });
         if (st.w > 0) wet++;
-        if (st.w > f.properties.hc + 0.35) wrong++;            // water never above the column (hc is rounded: d to 0.01 m, hc to 0.1 m)
+        if (st.w > col + 0.006 * E) wrong++;                                 // water never above the column (d rounded to 0.01 m)
       }
-      return { sampled: fs.length, wrong, wetAtLastStep: wet };
+      const expr = JSON.stringify(L.map.getPaintProperty(`pk-${r}-col`, "fill-extrusion-height"));
+      return { sampled: fs.length, wrong, wetAtLastStep: wet, heightRuleUsesFactor: expr.includes(`["get","d"],${L.views.exaggeration}`) };
     });
     return { ...(await viewState(page)), stormMs, stepMs, stepsLookDifferent: !a.equals(b), ...check };
   });
@@ -146,8 +148,36 @@ try {
     return { ...(await viewState(page)), mesh, ...water, waterChangesPicture: !dry.equals(high), stepsLookDifferent: !low.equals(high), frames };
   });
 
-  // 5. wells chosen at city scale: says so, draws flat
-  await scenario("wells_city_note", { hash: "#map=12.6/29.76/-95.37&v=wells" }, async (page) => viewState(page));
+  // 5. wells opened by link at city scale: says so, draws flat, offers to go to street level
+  await scenario("wells_city_note", { hash: "#map=12.6/29.76/-95.37&v=wells" }, async (page) => ({ ...(await viewState(page)),
+    streetButton: !!(await page.$("#view-note [data-street]")) }));
+
+  // 5b. choosing Wells at city scale and at country scale takes the visitor to street level
+  for (const [name, hash] of [["wells_from_city", "#map=12.4/30.27/-97.74"], ["wells_from_country", "#map=4/38.5/-97"]]) {
+    await scenario(name, { hash }, async (page) => {
+      await page.click('[data-view="wells"]');
+      await page.waitForFunction(() => window.__lowpoints.state.res === 10 && window.__lowpoints.views.wells.meshes.size > 0,
+        { timeout: 90000, polling: 500 });
+      await settle(page);
+      return viewState(page);
+    });
+  }
+
+  // 5c. the depth factor: x1, x5, x10 change wells and columns, and go in the link
+  await scenario("factor", { hash: "#map=15.4/29.7604/-95.3698&v=wells" }, async (page) => {
+    const seen = [];
+    for (const x of [1, 5, 10]) {
+      await page.click(`#view-note [data-exag="${x}"]`); await sleep(1500);
+      seen.push(await page.evaluate(() => ({ factor: window.__lowpoints.views.exaggeration, wells: window.__lowpoints.views.wells.exag,
+        link: new URLSearchParams(location.hash.slice(1)).get("x") })));
+      await shot(page, `factor_x${x}.png`);
+    }
+    await page.click('[data-view="columns"]'); await settle(page);
+    await page.click('#view-note [data-exag="1"]'); await sleep(1500);
+    const colExpr = await page.evaluate(() => { const L = window.__lowpoints, r = [...L.state.regions.keys()].find((x) => L.map.getLayer(`pk-${x}-col`));
+      return JSON.stringify(L.map.getPaintProperty(`pk-${r}-col`, "fill-extrusion-height")); });
+    return { seen, columnsAtTrueScale: colExpr.includes('["get","d"],1]') };
+  });
 
   // 6. selection survives view switches and a street-map swap; clicking a column selects
   await scenario("switch_keep_selection", { hash: "#map=14.6/29.7604/-95.3698" }, async (page) => {

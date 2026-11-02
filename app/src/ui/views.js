@@ -1,8 +1,8 @@
 // The three views (Flat, Columns, Wells): switching, tilting and rotating in 3D, the wells layer,
 // the stated exaggeration, and the storm's water in 3D (values from the worker's stormLevel).
 
-import { DEPTH_EXAGGERATION, SHARE_CAP, SHARE_M_PER_PCT, VIEWS, waterHeight } from "../map/heights.js";
-import { applyView } from "../map/layers.js";
+import { DEFAULT_EXAGGERATION, EXAGGERATIONS, SHARE_CAP, SHARE_M_PER_PCT, VIEWS, waterHeight } from "../map/heights.js";
+import { applyView, setExaggeration } from "../map/layers.js";
 import { WellsLayer } from "../map/wells.js";
 
 const PITCH = 55;
@@ -14,6 +14,8 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
   let storm = null;                 // { storm, step, values: Map "region:level" -> Float32Array }
   const deps = new Map();           // region -> Int32Array: depression with most area, per drawn hexagon
   let selected = null;              // { region, index }
+  let exag = EXAGGERATIONS.includes(Number(param("x"))) ? Number(param("x")) : DEFAULT_EXAGGERATION;
+  wells.exag = exag;
 
   const is3D = () => view !== "flat";
   const effective = () => (view === "wells" && state.res !== 10 ? "flat" : view);
@@ -31,16 +33,17 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     on ? map.keyboard.enableRotation() : map.keyboard.disableRotation();
   }
 
+  const scale = () => (exag === 1 ? "at true scale (×1)" : `exaggerated ×${exag}`);
   // what the legend says about heights, in plain words
   function note() {
     const v = effective(), res = state.res;
-    if (view === "wells" && v === "flat") return "Wells show at the finest level (street scale). Zoom in to see them.";
+    if (view === "wells" && v === "flat") return "Wells show at street scale (the finest level). Zoom in, or let the map take you there.";
     if (v === "columns") {
       return res === 10
-        ? `Column height = water depth when full, exaggerated ×${DEPTH_EXAGGERATION}.`
+        ? `Column height = how deep water stands when full, ${scale()}. Colour: depth (sand shallow, brown deep).`
         : `Column height: 1% of the hexagon in depressions = ${SHARE_M_PER_PCT[res]} m (shares above ${SHARE_CAP * 100}% drawn at ${SHARE_CAP * 100}%). Heights are not real.`;
     }
-    if (v === "wells") return `Well depth = water depth when full, exaggerated ×${DEPTH_EXAGGERATION}, below the level at which each depression overflows.`;
+    if (v === "wells") return `Well depth = how deep water stands when full, ${scale()}, measured down from each depression's rim (the level where water spills out). Colour: depth.`;
     return "";
   }
 
@@ -52,7 +55,14 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     if (effective() === "wells") updateWells();
     if (storm) applyStep();
     const el = document.getElementById("view-note");
-    if (el) { const t = note(); el.textContent = t; el.hidden = !t; }
+    if (el) {
+      const t = note(), depthView = (effective() === "wells" || effective() === "columns") && state.res === 10;
+      const far = view === "wells" && effective() === "flat";
+      el.innerHTML = t ? `<span>${t}</span>${depthView ? `<span class="exag" role="group" aria-label="Depth exaggeration">${EXAGGERATIONS.map((x) =>
+        `<button data-exag="${x}" aria-pressed="${x === exag}" title="${x === 1 ? "True scale" : `Depths drawn ${x} times deeper`}">×${x}</button>`).join("")}</span>` : ""}${far
+        ? '<button class="btn primary" data-street="1">Take me to street level</button>' : ""}` : "";
+      el.hidden = !t;
+    }
     document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === view)));
     const cyc = document.getElementById("view3d");
     if (cyc) { cyc.title = cyc.ariaLabel = `View: ${LABEL[view]}. Click for ${LABEL[next()]}`; cyc.setAttribute("aria-pressed", String(is3D())); }
@@ -67,11 +77,40 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     view = v;
     setParam("v", v === "flat" ? null : v);
     interaction(is3D());
-    if (is3D() && !was3D && map.getPitch() < 20) { tilt(PITCH, animate); watchSpeed(); }
+    if (v === "wells" && state.res !== 10) { goStreet(); watchSpeed(); }
+    else if (is3D() && !was3D && map.getPitch() < 20) { tilt(PITCH, animate); watchSpeed(); }
     if (!is3D() && was3D) tilt(0, animate, 0);
     render();
     onChange?.(view);
   }
+
+  // Wells chosen away from street scale: fly to the nearest depression worth seeing
+  async function goStreet() {
+    const c = map.getCenter();
+    toast("Wells show at street scale: taking you to the nearest depression.");
+    try {
+      const at = await client.call("nearestDepression", c.lat, c.lng);
+      if (!at) { toast("No depression near here to show as wells. Find a city first, then choose Wells."); return; }
+      map.flyTo({ center: at.lngLat, zoom: 15.6, pitch: PITCH, duration: reduced() ? 0 : 2200 });
+    } catch { toast("The nearest depression could not be found (no connection?)."); }
+  }
+
+  function setFactor(x) {
+    if (!EXAGGERATIONS.includes(x) || x === exag) return;
+    exag = x;
+    setParam("x", x === DEFAULT_EXAGGERATION ? null : String(x));
+    wells.exag = x;
+    setExaggeration(map, x, drawn().map((r) => `pk-${r}`));
+    map.triggerRepaint();
+    render();
+    onChange?.(view);
+  }
+
+  document.getElementById("view-note")?.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-exag], [data-street]");
+    if (!b) return;
+    if (b.dataset.street) goStreet(); else setFactor(Number(b.dataset.exag));
+  });
 
   function tilt(pitch, animate, bearing) {
     const opts = { pitch, duration: animate && !reduced() ? 900 : 0 };
@@ -169,7 +208,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
       if (!values) continue;
       const K = values.length / 16;
       for (let k = 0; k < K; k++) {
-        map.setFeatureState({ source: `pk-${r}`, id: k }, { w: waterHeight(state.res, values[k * 16 + storm.step]) });
+        map.setFeatureState({ source: `pk-${r}`, id: k }, { w: waterHeight(state.res, values[k * 16 + storm.step], exag) });
       }
     }
   }
@@ -185,6 +224,7 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
     deps.set(region, d);
     clearState(region);
     wells.drop(region);
+    if (exag !== DEFAULT_EXAGGERATION) setExaggeration(map, exag, [`pk-${region}`]);
     if (selected?.region === region) markSelected();
   }
 
@@ -210,7 +250,8 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
   map.once("load", () => { if (is3D() && map.getPitch() < 20) tilt(PITCH, false); });
   return {
     get view() { return view; }, get effective() { return effective(); }, is3D, set, next, render, note,
-    afterRefresh, drewPack, select, updateWells, setStorm, setStep, wells,
+    afterRefresh, drewPack, select, updateWells, setStorm, setStep, setFactor, goStreet, wells,
+    get exaggeration() { return exag; },
     get storm() { return storm; },
   };
 }

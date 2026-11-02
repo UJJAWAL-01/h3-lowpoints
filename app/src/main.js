@@ -243,7 +243,7 @@ function tipFor(feat) {
   if (id === "selection-fill") return "The selected depression. It covers every outlined hexagon.";
   if (feat.source === "overview") return `${share(p.s)} of this hexagon is in depressions · ${f.int(p.c)} depressions`;
   if (p.s != null) return `${share(p.s)} of this hexagon is in depressions · ${p.n} ${p.n === 1 ? "depression" : "depressions"}. Click for the largest.`;
-  return `Water ${f.depth(p.d).main} deep here when full${p.n > 1 ? ` · ${p.n} depressions meet here` : ""}. Click for details.`;
+  return `Lowest ground here: ${f.depth(p.d).main} below its depression's rim (the level where water spills out). Water this deep when full${p.n > 1 ? ` · ${p.n} depressions meet here` : ""}. Click for details.`;
 }
 
 function setHover(feat) {
@@ -367,7 +367,7 @@ function renderPanel() {
   else if (state.view === "cell" && state.cell) body.innerHTML = panelView.overviewCell(state.cell.props, state.cell.res);
   else {
     const res = state.res ?? autoRes(map.getZoom());
-    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res, views.note());
+    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res, views.note(), views.effective !== "flat");
   }
   measure();
 }

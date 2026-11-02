@@ -51,7 +51,7 @@
     <button data-view="wells" aria-pressed="false" title="3D wells: depressions sink below the map (exaggerated; street scale)">Wells</button>
   </div>
 </div>
-<p class="view-note card" id="view-note" hidden role="status"></p>
+<div class="view-note card" id="view-note" hidden role="status"></div>
 
 <div class="tools">
   <div class="stack card">
@@ -96,7 +96,7 @@
       <li>Across the country and at city scale, each hexagon says how much of its area lies in depressions.</li>
       <li>At street scale (the finest level), each hexagon is shaded by how deep water stands there when its depression is full.</li>
       <li>Columns and Wells show the same numbers in 3D: columns rise, wells sink below the map. Their
-        heights are exaggerated, by a factor the map states (30 times at street scale). Drag with the
+        heights are exaggerated, by a factor you choose and the map states (×1 is true scale, ×10 the default). Drag with the
         right mouse button, or two fingers, to tilt and turn; the compass button sets north up again.</li>
       <li>Click a hexagon to see its depression: how much it holds, the rain that fills it, how often that
         rain falls, and where it overflows.</li>
@@ -104,6 +104,8 @@
     <h3>What it does not include</h3>
     <ul>
       <li>Storm drains, sewers, pipes and pumps. In cities they carry much of the water away.</li>
+      <li>Storm drains, sewers, culverts and pumps. In cities many deep depressions are road cuts,
+        underpasses and ramps that drains keep dry; the elevation data cannot show drains.</li>
       <li>Features smaller than the 30 m elevation data can see, such as most street-scale dips.</li>
       <li>Rivers in flood, tides, snowmelt and frozen ground.</li>
     </ul>

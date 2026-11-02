@@ -1,5 +1,5 @@
 // The "Wells" view: each depression sinks below the street map, a hollow you look down into, its
-// hexagons stepping down to their depth when full (exaggerated, heights.DEPTH_EXAGGERATION), with
+// hexagons stepping down to their depth when full (exaggerated by the visitor's factor), with
 // blue water rising inside during a storm. A small WebGL2 layer of our own (MapLibre draws only
 // upwards from the ground).
 //
@@ -8,12 +8,12 @@
 // seen through an opening, and are hidden by each other where they should be. The depth buffer is
 // cleared afterwards so the layers above (labels, the selection, the overflow path) draw as before.
 
-import { DEPTH_EXAGGERATION } from "./heights.js";
+import { DEFAULT_EXAGGERATION, EARTH } from "./heights.js";
 
 const VS_PIT = `#version 300 es
 uniform mat4 u_matrix; uniform float u_exag; uniform int u_mode;
 in vec4 a_pos;            // x, y, z (Mercator, unexaggerated), shade
-out float v_shade;
+flat out float v_shade;
 void main() {
   if (u_mode == 0) { gl_Position = vec4(a_pos.xy, -1.0, 1.0); v_shade = 0.0; return; }   // whole screen
   vec4 p = u_matrix * vec4(a_pos.xy, u_mode == 1 ? 0.0 : a_pos.z * u_exag, 1.0);
@@ -22,8 +22,13 @@ void main() {
 }`;
 const FS_PIT = `#version 300 es
 precision mediump float;
-in float v_shade; out vec4 colour;
-void main() { colour = vec4(mix(vec3(0.95, 0.955, 0.945), vec3(0.11, 0.13, 0.12), v_shade), 1.0); }`;
+uniform vec3 u_ramp[7];
+flat in float v_shade; out vec4 colour;
+void main() {
+  float k = floor(v_shade + 0.001), lit = v_shade - k;        // depth class, wall lighting (0 = floor)
+  vec3 c = u_ramp[int(clamp(k, 0.0, 6.0))];
+  colour = vec4(lit > 0.01 ? c * (0.45 + 0.5 * lit) : c, 1.0);
+}`;
 
 const VS_WATER = `#version 300 es
 uniform mat4 u_matrix; uniform float u_exag; uniform int u_step; uniform sampler2D u_water;
@@ -58,7 +63,7 @@ export class WellsLayer {
     this.id = id; this.type = "custom"; this.renderingMode = "3d";
     this.meshes = new Map();      // region -> {origin, buffers, counts, box}
     this.waters = new Map();      // region -> texture
-    this.step = 15; this.exag = DEPTH_EXAGGERATION; this.on = false;
+    this.step = 15; this.exag = DEFAULT_EXAGGERATION; this.on = false;
   }
 
   onAdd(map, gl) {
@@ -71,6 +76,7 @@ export class WellsLayer {
     this.loc = {
       pos: gl.getAttribLocation(this.pit, "a_pos"), matrix: gl.getUniformLocation(this.pit, "u_matrix"),
       exag: gl.getUniformLocation(this.pit, "u_exag"), mode: gl.getUniformLocation(this.pit, "u_mode"),
+      ramp: gl.getUniformLocation(this.pit, "u_ramp"),
       wpos: gl.getAttribLocation(this.wat, "a_pos"), wcell: gl.getAttribLocation(this.wat, "a_cell"),
       wmatrix: gl.getUniformLocation(this.wat, "u_matrix"), wexag: gl.getUniformLocation(this.wat, "u_exag"),
       wstep: gl.getUniformLocation(this.wat, "u_step"), wtex: gl.getUniformLocation(this.wat, "u_water"),
@@ -172,7 +178,7 @@ export class WellsLayer {
     const L = this.loc;
     // 1. the whole screen nearest
     gl.useProgram(this.pit);
-    gl.uniform1i(L.mode, 0); gl.uniform1f(L.exag, this.exag);
+    gl.uniform1i(L.mode, 0); gl.uniform1f(L.exag, this.exag); gl.uniform3fv(L.ramp, RAMP);
     gl.colorMask(false, false, false, false); gl.depthMask(true); gl.depthFunc(gl.ALWAYS);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.screen);
     gl.enableVertexAttribArray(L.pos); gl.vertexAttribPointer(L.pos, 4, gl.FLOAT, false, 16, 0);
@@ -218,6 +224,8 @@ export class WellsLayer {
     gl.depthMask(true); gl.clear(gl.DEPTH_BUFFER_BIT);
   }
 }
+
+const RAMP = new Float32Array(EARTH.flatMap((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)));
 
 // mvp x translate(origin), in double precision, handed to the GPU as float32
 function shifted(m, [ox, oy]) {
