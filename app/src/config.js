@@ -7,10 +7,10 @@ export const DATASET = { version: "0.3", doi: "10.5281/zenodo.23731345" };
 // Data packs: tried in order; a host that fails is skipped for five minutes.
 export const PACK_HOSTS = [
   // pinned to a commit: a later upload cannot mix an old index with new packs
-  { name: "Hugging Face", url: "https://huggingface.co/datasets/h3-lowpoints/explorer-data/resolve/5fca7be56bc2307a6ff1d4af34bf12a28a054700/{file}" },
-  { name: "Zenodo", url: "https://zenodo.org/api/records/23824290/files/{file}/content" },
+  { name: "Hugging Face", url: "https://huggingface.co/datasets/h3-lowpoints/explorer-data/resolve/110026efd830b923bff8707a910c48c67ba86f5f/{file}" },
+  { name: "Zenodo", url: "https://zenodo.org/api/records/23875375/files/{file}/content" },
 ];
-export const PACKS_DOI = "10.5281/zenodo.23824290";
+export const PACKS_DOI = "10.5281/zenodo.23875375";
 
 export const BASEMAP_URL =
   "https://huggingface.co/datasets/h3-lowpoints/explorer-basemap/resolve/15e4850ea9f89e60a0842cb5d91ba1decd1f546c/us48_osm_z14.pmtiles";
