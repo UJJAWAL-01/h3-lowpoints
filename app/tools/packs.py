@@ -7,7 +7,7 @@
               uniform storm depths and the three ground conditions (and its interpolation error)
     build     the packs (one file, packs.bin, plus index.json) and a summary
 
-A pack is gzip of: b"H3LP", uint32 format version, uint32 header length, a JSON header, then the
+A pack is gzip of: b"H3LP", uint32 format version (2 adds target_id and target_region), uint32 header length, a JSON header, then the
 arrays it lists, each little-endian and starting on a multiple of 8 bytes. See app/src/pack.js.
 """
 import gzip
@@ -19,7 +19,8 @@ from pathlib import Path
 
 import numpy as np
 
-FORMAT = 1
+FORMAT = 2
+# format 2 adds target_id and target_region: where each depression overflows, across pack edges
 CONDITIONS = ("dry", "average", "wet")
 GRID_MM = np.r_[np.arange(0.0, 100.0, 2.0), np.arange(100.0, 300.0, 5.0), np.arange(300.0, 1000.0 + 1e-9, 10.0)]
 # uniform depths (mm) for the external inflow: finer where small storms start upstream overflow
@@ -211,6 +212,9 @@ def build(dataset, out):
                 ("cell_share", share[rows].astype("<f4")), ("cell_max_depth", dmax[rows].astype("<f4")),
                 ("ext_dep", local[rec].astype("<i4")), ("ext_inflow", ext.astype("<f4")),
                 ("ext_grid", e["grid"].astype("<f4")),
+                # format 2: the global overflow target (dataset id, 0 = leaves the data) and its region
+                ("target_id", np.where(tg >= 0, ids[np.maximum(tg, 0)], 0).astype("<i8")),
+                ("target_region", np.where(tg >= 0, region[np.maximum(tg, 0)], 0).astype("<u8")),
             ]
             raw = pack_bytes({"region": format(int(r), "x"), "conditions": list(CONDITIONS)}, arrays)
             z = gzip.compress(raw, compresslevel=9, mtime=0)
