@@ -166,6 +166,30 @@ lines appear from each depression in view that overflows, at the step its overfl
 - Features smaller than the 30 m elevation model can see.
 - How the rain is spread in space beyond NOAA Atlas 14's own map (storms by amount are uniform).
 
+## Do this in Python
+
+A depression's panel, and the storm result for a view less than about 20 km across, have a button
+**Do this in Python**: the h3-lowpoints code (library 0.5.1) that recomputes what the panel shows
+from public data, for a box 0.05° (about 5 km) wider than the depression or the view on each side.
+It downloads USGS 3DEP elevation, ESA WorldCover, Annual NLCD 2024, USDA gNATSGO soils and NOAA
+Atlas 14 for the box, builds the water mask, finds the depressions with their catchments, works out
+their curve numbers and the rain that fills them, and, for a storm, runs it with
+`storms.storm_response` and counts the depressions whose lowest point's H3 cell lies in the view.
+It runs on your computer, not in the explorer.
+
+`app/tools/python_check.py` runs these exact snippets and compares them with the map (dataset 0.3),
+in Houston, New York City and North Dakota:
+
+| What | Result (2 November 2026) |
+|---|---|
+| 12 depressions: depth, area, volume, catchment, curve number, own-land rain, storm that fills it | equal, within 1 part in 10 million |
+| 3 storms by amount: depressions in view, full, overflowing; water held | counts equal; water within 1 part in a million |
+| 3 storms by rarity: the same | counts equal; water held within 0.04% to 0.12%: the map takes each depression's storm depth at its lowest point, the library averages it over the catchment |
+
+Elsewhere a box run can differ slightly next to open water (dataset 0.3 was built before the
+library's water-mask fix of 0.5.1) or when the land draining into a depression reaches beyond the
+box ([Accuracy and limits](limitations.md)).
+
 ## Evidence
 
 Every panel ends with its source and one line on what the studies found for what it shows: a
@@ -223,6 +247,7 @@ Every check below runs in a real browser (headless Chrome) against the same data
 | Levels while zooming; overview columns only at overview levels | `app/tools/zoom_test.mjs` |
 | Abuse while a storm plays (spam, map moves, views, phone, soak) | `app/tools/storm_stress.mjs` |
 | Evidence text = the evidence page (every number) | `tests/test_docs.py` |
+| "Do this in Python" snippets = the map | `app/tools/python_check.py` |
 | The app in general: errors, links, keyboard, accessibility (axe) | `app/tools/ui_test.mjs`, `stress_test.mjs` |
 
 Speed and smoothness measured in headless Chrome use software graphics and are not real-device

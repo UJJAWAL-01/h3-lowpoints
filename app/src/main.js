@@ -17,6 +17,7 @@ import { createStormBar } from "./ui/storm-bar.js";
 import { setupDebug } from "./ui/debug.js";
 import { createViews } from "./ui/views.js";
 import { aboutHtml as evidenceHtml } from "./ui/evidence.js";
+import * as python from "./ui/python.js";
 
 const $ = (id) => document.getElementById(id);
 const isDetail = (res) => res >= 8;
@@ -484,7 +485,24 @@ $("panel").addEventListener("click", async (e) => {
   } else if (act === "share") {
     try { await navigator.clipboard.writeText(location.href); toast("Link copied."); } catch { toast(location.href); }
   } else if (act === "retry" && state.selected) selectDepression(state.selected.region, state.selected.index);
+  else if (act === "python-dep" && state.selected?.data) openPython("depression", state.selected.data);
+  else if (act === "python-storm" && stormBar.summary?.box) openPython("storm", stormBar.summary.box);
 });
+
+// "Do this in Python": the library code that recomputes what the panel shows
+function openPython(kind, arg) {
+  const code = kind === "depression" ? python.depressionSnippet(arg) : python.stormSnippet(arg, stormBar.storm);
+  $("python-title").textContent = kind === "depression" ? "Recompute this depression" : "Recompute this storm";
+  $("python-say").innerHTML = python.sayHtml(kind, state.show);
+  $("python-code").textContent = code;
+  $("python").showModal();
+}
+$("python-copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("python-code").textContent); toast("Code copied."); }
+  catch { toast("Select the code and copy it."); }
+};
+$("python-close").onclick = () => $("python").close();
+$("python").addEventListener("click", (e) => { if (e.target === $("python")) $("python").close(); });
 
 // ------------------------------------------------------------------ controls
 function renderLevels() {

@@ -7,6 +7,7 @@ import { WATER } from "../map/water.js";
 import { STEPS, fallen } from "./storm-bar.js";
 import { duration, timeAt } from "../temporal.js";
 import { noteHtml } from "./evidence.js";
+import { viewTooLarge } from "./python.js";
 
 const both = (x) => `${f.esc(x.main)}${x.alt ? ` <small>${f.esc(x.alt)}</small>` : ""}`;
 const inline = (x) => `${f.esc(x.main)}${x.alt ? ` (${f.esc(x.alt)})` : ""}`;
@@ -109,7 +110,7 @@ export function depression(d, extra = "") {
       <dt>Dataset id</dt><dd><button class="copy" data-copy="${f.esc(d.id)}" title="Copy">${f.esc(d.id)}</button></dd>
     </dl>
     <p class="note">Depths are measured down from the depression's rim, the level at which water spills out (USGS 3DEP 30 m bare-earth elevation; vertical error about 0.5 to 1 m). Storm drains, sewers, culverts and pumps are not in the data: in cities, many deep depressions are road cuts, underpasses or ramps that drains keep dry.</p>
-    <div class="row"><button class="btn" data-act="zoom-dep">Zoom to it</button><button class="btn" data-act="share">Copy link</button></div>
+    <div class="row"><button class="btn" data-act="zoom-dep">Zoom to it</button><button class="btn" data-act="share">Copy link</button><button class="btn" data-act="python-dep">Do this in Python</button></div>
     ${source("depression")}`;
 }
 
@@ -217,12 +218,20 @@ export function stormResult(c) {
     ${rng ? `<div class="range"><span class="label">At the end, by the ground before the storm</span><dl class="facts">${rng}</dl></div>` : ""}
     ${firsts}
     ${waterLegend(c.res, f.units.us)}
+    ${pythonRow(sm.box)}
     ${assumptions(c)}
     ${showControl(c.show)}
     ${source("storm")}`;
 }
 
 const GROUND = { dry: "Dry", average: "Average", wet: "Wet" };
+
+function pythonRow(box) {
+  if (!box) return "";
+  return viewTooLarge(box)
+    ? `<p class="note">Zoom in to a view less than about 20 km across for the Python code that recomputes this storm.</p>`
+    : `<div class="row"><button class="btn" data-act="python-storm">Do this in Python</button></div>`;
+}
 const STORM_CLOSE = `<button class="close" data-act="storm-close" aria-label="Close the rain simulator"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.6"/></svg></button>`;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const NONE = { fill: 0, overflow: 0, holdWater: 0, wetAreaM2: 0, heldM3: 0 };

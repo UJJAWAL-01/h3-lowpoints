@@ -233,6 +233,9 @@ dialog h3 { font: 600 12px/1.2 var(--sans); letter-spacing: .06em; text-transfor
 dialog p, dialog li { margin: 0; color: var(--ink-2); max-width: 64ch; }
 dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 #evidence { display: grid; gap: 10px; }
+#python { width: min(860px, calc(100vw - 24px)); }
+pre.code { margin: 0; background: var(--paper); border: var(--rule-soft); padding: 12px 14px; overflow: auto; max-height: 52dvh; font: 12.5px/1.5 var(--mono); color: var(--ink); white-space: pre; tab-size: 4; }
+pre.code:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 table.evidence { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.45; }
 table.evidence th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); border-bottom: var(--rule); padding: 4px 8px 4px 0; }
 table.evidence td { vertical-align: top; border-bottom: var(--rule-soft); padding: 6px 8px 6px 0; color: var(--ink-2); }
