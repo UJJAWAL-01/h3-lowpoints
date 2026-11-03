@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.1 (unreleased)
+## 0.5.1 (3 November 2026)
 
 ### Fixed
 - **The water mask no longer depends on where the box starts.** `build_water_mask` samples each
