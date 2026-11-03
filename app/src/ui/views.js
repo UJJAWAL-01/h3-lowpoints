@@ -312,10 +312,10 @@ export function createViews({ map, client, state, toast, reduced, param, setPara
 
   interaction(is3D());
   // a link to a 3D view that does not say how tilted: tilt as the switch would
-  map.once("load", () => { if (is3D() && map.getPitch() < 20) tilt(PITCH, false); });
+  const ready = () => { if (is3D() && map.getPitch() < 20) tilt(PITCH, false); };
   return {
     get view() { return view; }, get effective() { return effective(); }, is3D, set, next, render, note,
-    afterRefresh, drewPack, select, updateWells, setStorm, setStep, setFactor, goStreet, wells, water, resetData,
+    afterRefresh, drewPack, select, updateWells, setStorm, setStep, setFactor, goStreet, wells, water, resetData, ready,
     get exaggeration() { return exag; },
     get storm() { return storm; },
   };

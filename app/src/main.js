@@ -99,8 +99,18 @@ map.on("error", (e) => {
   }
 });
 
-map.on("load", async () => {
+// Start on "load", or as soon as the style is ready: when the street map's host fails, "load" may
+// never fire, and the depressions must still draw.
+let started = false;
+const startWatch = setInterval(() => { if (started) clearInterval(startWatch); else if (map.isStyleLoaded()) start(); }, 400);
+map.on("load", start);
+async function start() {
+  if (started) return;
+  started = true;
+  clearInterval(startWatch);
   addBaseLayers(map);
+  views.ready();
+  setupDebug({ map, state, views, stormBar });     // ?debug=1: frame rate and timings on this device
   if (!START_VIEW) map.fitBounds([[-124.8, 24.4], [-66.9, 49.4]], { padding: fitPadding(true), duration: 0 });
   renderPanel();
   warm.national.then((nat) => { state.nat = nat; if (state.view === "intro") renderPanel(); })
@@ -111,7 +121,7 @@ map.on("load", async () => {
   stormBar.fromLink();
   const t = param("tour");
   if (TOURS[t]) { setParam("tour", null); tour.start(t, { film: param("film") === "1" }); }
-});
+}
 
 let moveTimer = 0;
 map.on("moveend", () => { clearTimeout(moveTimer); moveTimer = setTimeout(refresh, 120); });
@@ -735,7 +745,5 @@ map.once("idle", () => {
   });
   document.body.appendChild(box);
 });
-
-map.once("load", () => setupDebug({ map, state, views, stormBar }));     // ?debug=1: frame rate and timings on this device
 
 if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide, views, stormBar, tour };
