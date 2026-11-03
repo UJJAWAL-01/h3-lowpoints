@@ -1,5 +1,5 @@
 // Load test (spec 6.4g) against the real data hosts.
-//   node app/tools/load_test.mjs OUT_DIR [VISITS=20] [REPLAY=70] [reuse]   (reuse: part A's saved traces)
+//   node app/tools/load_test.mjs OUT_DIR [VISITS=20] [REPLAY=70] [reuse] [SPREAD_S]   (reuse: part A's saved traces; SPREAD_S: visits arrive over this many seconds, 0 = all at once)
 // A  VISITS scripted visits in headless Chrome (4 at a time), app from a local server standing in
 //    for GitHub Pages, data and basemap from the pinned hosts: every request recorded (host, range,
 //    status, bytes, time) and the time to each stage (city view, street view, storm, depression).
@@ -16,7 +16,7 @@ import puppeteer from "puppeteer-core";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = resolve(process.argv[2]);
-const VISITS = Number(process.argv[3] || 20), REPLAY = Number(process.argv[4] || 70), REUSE = process.argv[5] === "reuse";
+const VISITS = Number(process.argv[3] || 20), REPLAY = Number(process.argv[4] || 70), REUSE = process.argv[5] === "reuse", SPREAD = Number(process.argv[6] || 0);
 mkdirSync(out, { recursive: true });
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const app = spawn(process.execPath, [join(here, "serve.mjs"), join(here, "..", "..", "docs"), "8791"], { stdio: "ignore" });
@@ -89,7 +89,10 @@ try {
   console.log("A", JSON.stringify(report.A));
 
   // B: replay REPLAY visits at once (host requests only; the app's own files are served by Pages)
-  const traces = visits.filter((v) => v.ok).map((v) => v.requests.filter((r) => r.kind !== "app (Pages)" && r.kind !== "other"));
+  // a redirected request is recorded twice: the hop with its Range (status 3xx) and the final hop without one,
+  // which must not be replayed (it would fetch the whole 1 GB data or 7.7 GB map file)
+  const firstHop = (r) => !(/^https:\/\/huggingface\.co\//.test(r.url0) && (r.status === 200 || r.status === 206));
+  const traces = visits.filter((v) => v.ok).map((v) => v.requests.filter((r) => r.kind !== "app (Pages)" && r.kind !== "other" && firstHop(r)));
   const replayOne = async (trace) => {
     const res = [], t0 = Date.now();
     // a browser fetches several at once: 6 at a time, in recorded order
@@ -110,10 +113,11 @@ try {
     return { ms: Date.now() - t0, res };
   };
   const t0 = Date.now();
-  const replays = await Promise.all(Array.from({ length: REPLAY }, (_, k) => replayOne(traces[k % traces.length])));
+  const replays = await Promise.all(Array.from({ length: REPLAY }, async (_, k) => { await sleep((k / REPLAY) * SPREAD * 1000); return replayOne(traces[k % traces.length]); }));
   const all = replays.flatMap((r) => r.res);
   report.B = {
     seconds: (Date.now() - t0) / 1000, requests: all.length,
+    spreadSeconds: SPREAD, errors: [...new Set(all.filter((r) => r.error).map((r) => r.error))].slice(0, 5),
     status: all.reduce((m, r) => ((m[`${r.kind} ${r.status}`] = (m[`${r.kind} ${r.status}`] || 0) + 1), m), {}),
     requestMs: Object.fromEntries([...new Set(all.map((r) => r.kind))].map((k) => [k, stats(all.filter((r) => r.kind === k).map((r) => r.ms))])),
     visitMs: stats(replays.map((r) => r.ms)), gb: +(all.reduce((s, r) => s + (r.bytes || 0), 0) / 1e9).toFixed(3),
