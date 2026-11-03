@@ -227,7 +227,7 @@ export function createStormBar({ map, client, state, views, toast, reduced, para
       if (t >= 1) { moveTo(STEPS - 1, { fromPlay: true, t: 1 }); stop(); writeLink(); return; }
       const t0 = performance.now();
       moveTo(p, { fromPlay: true, t });
-      if (window.__lowpoints) (window.__stormTicks ||= []).push(performance.now() - t0);   // test builds only read it
+      if (window.__lowpoints || window.__lowpointsDebug) (window.__stormTicks ||= []).push(performance.now() - t0);   // tests and ?debug=1 read it
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);

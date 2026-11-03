@@ -447,3 +447,9 @@ body.storm-open .toast, body.storm-open .invite { bottom: calc(var(--bottom) + 4
 .rain { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; opacity: 0; transition: opacity .3s; }
 
 .gauge .why { display: block; margin-top: 4px; color: var(--muted); font-size: 12.5px; }
+
+/* ?debug=1 diagnostics */
+.debug { position: fixed; z-index: 45; left: 50%; top: var(--top); transform: translateX(-50%); width: min(460px, calc(100vw - 32px)); padding: 8px 12px; font: 12.5px/1.45 var(--mono); }
+.debug-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.debug dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; }
+.debug dt { color: var(--muted); } .debug dd { margin: 0; }

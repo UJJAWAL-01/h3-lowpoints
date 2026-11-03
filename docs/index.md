@@ -30,6 +30,7 @@ fills ([Susceptibility](susceptibility.md)), is published as open data:
 | Choose and download elevation data | [Data sources](data-sources.md) |
 | Analyze a state or a country | [Large regions](large-regions.md) |
 | Read and share the interactive map | [The map](map.md) |
+| Use the web explorer and its rain simulator | [The explorer](explorer.md) |
 | Know how results are checked, and check your own | [Verification](verification.md) |
 | Test the depressions against observed flooding | [Validation](validation.md) |
 | Know how easily each depression fills in a storm | [Susceptibility](susceptibility.md) |

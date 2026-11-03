@@ -14,6 +14,7 @@ import * as panelView from "./ui/panel.js";
 import { setupSearch } from "./ui/search.js";
 import { setupSheet } from "./ui/sheet.js";
 import { createStormBar } from "./ui/storm-bar.js";
+import { setupDebug } from "./ui/debug.js";
 import { createViews } from "./ui/views.js";
 
 const $ = (id) => document.getElementById(id);
@@ -691,5 +692,7 @@ map.once("idle", () => {
   });
   document.body.appendChild(box);
 });
+
+map.once("load", () => setupDebug({ map, state, views, stormBar }));     // ?debug=1: frame rate and timings on this device
 
 if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide, views, stormBar };
