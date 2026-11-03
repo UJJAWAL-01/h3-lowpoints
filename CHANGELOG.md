@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 (unreleased)
+
+### Fixed
+- **The water mask no longer depends on where the box starts.** `build_water_mask` samples each
+  elevation pixel at 3 x 3 points against WorldCover. On the real grids (3DEP 30 m, WorldCover
+  10 m) every third pixel centre lies exactly on a WorldCover pixel edge, and rounding error, which
+  depended on the elevation raster's corner, decided those ties: two boxes over the same place could
+  mask a pixel differently (61 of 198,900 pixels in a test box in Houston), which changed a few
+  depressions and catchments near water. A point on an edge now always belongs to the pixel after
+  it. Boxes now agree on every shared pixel (tested, and on real data in Houston, New York City and
+  North Dakota). Dataset 0.3 was built with 0.3.0's rule: at a few pixels on the edges of water a
+  run with 0.5.1 differs from it; use 0.5.0 or earlier to reproduce it exactly.
+
 ## 0.5.0 (30 October 2026)
 
 ### Added

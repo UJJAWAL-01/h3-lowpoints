@@ -269,6 +269,13 @@ datum as WGS 84; other CRSs are sampled through a warped view of WorldCover. On 
 of Wisconsin the two ways agree on all but 0.02% of pixels, which lie on the edges of water where
 the metre between NAD83 and WGS 84 moves a sample point into the next WorldCover pixel.
 
+**Points on a pixel edge.** On 3DEP's 1 arc-second grid, every third pixel centre lies exactly on
+an edge between two WorldCover pixels. Such a point belongs to the pixel after it (east, or south),
+whatever box is analyzed: since version 0.5.1, two boxes over the same place give the same mask on
+every pixel they share (a test builds overlapping boxes on the real grids and compares them).
+Before 0.5.1, rounding error decided these ties and depended on the box's corner; dataset 0.3 was
+built that way, so at a few pixels on the edges of water a box run today differs from it.
+
 Why it matters: lakes are flat in elevation data, and a lake whose outlet (a dam, locks, a narrow
 river) stands higher than its surface fills as one huge depression. Measured on two boxes of 3DEP
 30 m data:

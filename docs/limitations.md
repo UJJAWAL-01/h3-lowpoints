@@ -112,6 +112,11 @@ did equally well, and every uniform drain rule made the ranking worse.
 - **Flat floors.** On a flat bottom the lowest point is the first deepest pixel in reading order,
   a fixed rule, not the "centre" of the floor.
 - **No minimum area.** One deep pixel counts as a depression. On noisy data, raise `min_depth`.
+- **A box run is not always the national dataset.** Recomputing a box gives the dataset's
+  depressions exactly when the box holds all the land that drains into them; leave a margin of a
+  few kilometres (more where depressions spill into one another over long distances, as in the
+  prairie potholes). Near open water a few pixels may differ from dataset 0.3, which was built
+  before the water-mask fix of 0.5.1 ([Data sources](data-sources.md#water-mask-from-esa-worldcover)).
 - **Coverage on sampled cells.** Cells that touch the edge or nodata and span more than 40,000
   pixels have their coverage measured on a regular sample, with an error well under 1%.
 

@@ -300,6 +300,18 @@ def _water(samples, sea=None):
     return water.astype("uint8")
 
 
+TIE = 1e-6               # a sample point this close to a WorldCover pixel edge (in pixels) is on it
+
+
+def _pixel_index(v):
+    """The pixel holding each position `v` (in pixels from the grid's corner); a point on an edge
+    belongs to the pixel after it. Sample points of 30 m grids fall exactly on WorldCover's 10 m
+    edges (every third pixel centre); without snapping, rounding error, which depends on where the
+    elevation raster starts, would decide those ties, and two boxes would mask a pixel differently."""
+    near = np.round(v)
+    return np.floor(np.where(np.abs(v - near) < TIE, near, v)).astype(np.int64)
+
+
 def _sample_geographic(wc, dem_transform, r0, r1, c0, c1):
     """WorldCover classes at the 3 x 3 sample points of pixels r0:r1, c0:c1 of a lon/lat grid.
 
@@ -312,8 +324,8 @@ def _sample_geographic(wc, dem_transform, r0, r1, c0, c1):
     xs = dem_transform.c + (np.arange(c0, c1)[:, None] + k).ravel() * dem_transform.a
     ys = dem_transform.f + (np.arange(r0, r1)[:, None] + k).ravel() * dem_transform.e
     t = wc.transform
-    cols = np.floor((xs - t.c) / t.a).astype(np.int64)
-    rows = np.floor((ys - t.f) / t.e).astype(np.int64)
+    cols = _pixel_index((xs - t.c) / t.a)
+    rows = _pixel_index((ys - t.f) / t.e)
     rmin, cmin = int(rows.min()), int(cols.min())
     window = Window(cmin, rmin, int(cols.max()) - cmin + 1, int(rows.max()) - rmin + 1)
     block = wc.read(1, window=window, boundless=True, fill_value=0)

@@ -242,3 +242,56 @@ def test_open_sea_beyond_worldcover_is_water_but_dry_land_there_is_not(tmp_path)
     assert not got[off & (heights == 3.0)].any()       # dry land never is
     assert not got[85:95, 95:105].any()                # nor is nodata
     assert got[60:80, 95:100].all()                    # sea below 0 m is
+
+
+def test_the_mask_of_a_pixel_does_not_depend_on_where_the_box_starts(tmp_path):
+    # On the real grids (3DEP 1/3600 degree, WorldCover 1/12000), every third sample point lies
+    # exactly on a WorldCover pixel edge. Boxes starting at different corners must agree on every
+    # pixel they share, and a point on an edge belongs to the pixel after it.
+    wc = blobs((900, 1000), 3)
+    wc_west, wc_north = -96.0, 30.0
+    fake_worldcover(tmp_path, 27, -96, wc_west, wc_north, wc)
+    masks = []
+    for i, (dc, dr, w, h) in enumerate([(0, 0, 200, 180), (37, 23, 150, 140), (101, 59, 90, 110)]):
+        tr = from_origin(wc_west + (40 + dc) * PX1, wc_north - (30 + dr) * PX1, PX1, PX1)
+        dem = write(tmp_path / f"dem{i}.tif", np.full((h, w), 5.0), "EPSG:4269", tr, -9999.0)
+        with rasterio.open(landcover.build_water_mask(dem, tmp_path / f"w{i}.tif", source=tmp_path)) as m:
+            masks.append((dc, dr, m.read(1)))
+    big = np.zeros((300, 300), dtype="uint8")
+    dc0, dr0, a0 = masks[0]
+    big[:a0.shape[0], :a0.shape[1]] = a0
+    for dc, dr, a in masks[1:]:
+        np.testing.assert_array_equal(a, big[dr:dr + a.shape[0], dc:dc + a.shape[1]])
+    # the rule for points on an edge, by hand: positions are exact multiples of 1/21600 degree
+    def by_hand(c0, r0, shape):
+        out = np.zeros(shape, dtype="uint8")
+        for r in range(shape[0]):
+            for c in range(shape[1]):
+                hits = 0
+                for kr in (1, 3, 5):
+                    for kc in (1, 3, 5):
+                        x6 = 6 * (40 + c0 + c) + kc          # in 1/21600 degree from wc_west
+                        y6 = 6 * (30 + r0 + r) + kr
+                        hits += wc[(y6 * 12000) // 21600, (x6 * 12000) // 21600] == landcover.WATER_CLASS
+                out[r, c] = hits >= 5
+        return out
+    np.testing.assert_array_equal(a0[:60, :60], by_hand(0, 0, (60, 60)))
+    assert a0.any() and not a0.all()
+
+
+def test_a_projected_mask_does_not_depend_on_where_the_box_starts(tmp_path):
+    wc = blobs((1200, 1200), 5)
+    fake_worldcover(tmp_path, 30, -99, -97.6, 30.6, wc)
+    from pyproj import Transformer
+    x, y = Transformer.from_crs(4326, 32614, always_xy=True).transform(-97.55, 30.55)
+    x, y = round(x / 30) * 30, round(y / 30) * 30
+    masks = []
+    for i, (dc, dr, w, h) in enumerate([(0, 0, 300, 300), (37, 23, 200, 180), (101, 59, 150, 170)]):
+        dem = write(tmp_path / f"d{i}.tif", np.full((h, w), 5.0), "EPSG:32614",
+                    from_origin(x - 3000 + dc * 30, y + 3000 - dr * 30, 30, 30), -9999.0)
+        with rasterio.open(landcover.build_water_mask(dem, tmp_path / f"w{i}.tif", source=tmp_path)) as m:
+            masks.append((dc, dr, m.read(1)))
+    a0 = masks[0][2]
+    assert a0.any() and not a0.all()
+    for dc, dr, a in masks[1:]:
+        np.testing.assert_array_equal(a, a0[dr:dr + a.shape[0], dc:dc + a.shape[1]])
