@@ -35,6 +35,8 @@ export function intro(nat, mode, res, heightNote = "", earth = false, show = "al
     ${heightNote ? `<p class="note"><strong>3D:</strong> ${f.esc(heightNote)}</p>` : ""}
     <p class="note">${hint}</p>
     ${mode === "detail" ? '<div class="row"><button class="btn primary" data-act="storm-open">Run a storm here</button></div>' : ''}
+    <div class="tour-offer"><span class="label">Take a tour</span><p class="note">The app runs itself through every feature, in about 4 minutes.</p>
+      <div class="row"><button class="btn" data-act="tour" data-k="nyc">New York City</button><button class="btn" data-act="tour" data-k="austin">Austin</button></div></div>
     ${showControl(show)}
     ${source("cell")}
     ${foot()}`;

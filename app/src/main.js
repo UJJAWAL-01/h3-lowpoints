@@ -18,6 +18,8 @@ import { setupDebug } from "./ui/debug.js";
 import { createViews } from "./ui/views.js";
 import { aboutHtml as evidenceHtml } from "./ui/evidence.js";
 import * as python from "./ui/python.js";
+import { createTour, TOURS } from "./ui/tour.js";
+import { reportsKey, showReports } from "./map/reports.js";
 
 const $ = (id) => document.getElementById(id);
 const isDetail = (res) => res >= 8;
@@ -107,6 +109,8 @@ map.on("load", async () => {
   const sel = param("d");
   if (sel) openFromLink(sel);
   stormBar.fromLink();
+  const t = param("tour");
+  if (TOURS[t]) { setParam("tour", null); tour.start(t, { film: param("film") === "1" }); }
 });
 
 let moveTimer = 0;
@@ -486,6 +490,7 @@ $("panel").addEventListener("click", async (e) => {
     try { await navigator.clipboard.writeText(location.href); toast("Link copied."); } catch { toast(location.href); }
   } else if (act === "retry" && state.selected) selectDepression(state.selected.region, state.selected.index);
   else if (act === "python-dep" && state.selected?.data) openPython("depression", state.selected.data);
+  else if (act === "tour" && TOURS[el.dataset.k]) { hideInvite(); tour.start(el.dataset.k); }
   else if (act === "python-storm" && stormBar.summary?.box) openPython("storm", stormBar.summary.box);
 });
 
@@ -502,6 +507,22 @@ $("python-copy").onclick = async () => {
   catch { toast("Select the code and copy it."); }
 };
 $("python-close").onclick = () => $("python").close();
+
+// ------------------------------------------------------------------ flood reports and tours
+let reportsVisible = false;
+$("reports").onclick = async () => {
+  reportsVisible = !reportsVisible;
+  $("reports").setAttribute("aria-pressed", String(reportsVisible));
+  try {
+    const sets = await showReports(map, reportsVisible);
+    $("reports-key").hidden = !reportsVisible;
+    if (sets) $("reports-key").querySelector("p").textContent = reportsKey(sets);
+  } catch { reportsVisible = false; $("reports").setAttribute("aria-pressed", "false"); toast("The flood reports could not load."); }
+};
+$("reports-key").querySelector("button").onclick = () => $("reports").click();
+
+const tour = createTour({ map, state, stormBar, views, openLink: openFromLink, clearSelection, setShow, openAbout, reduced, $,
+  onEnd: () => renderPanel() });
 $("python").addEventListener("click", (e) => { if (e.target === $("python")) $("python").close(); });
 
 // ------------------------------------------------------------------ controls
@@ -689,7 +710,7 @@ const guide = createGuide([
   { title: "What the storm did", target: () => $("panel"),
     text: "The panel counts what is full, what overflows and how much water is held in this view, at the point the slider is on. Click a depression for its own gauge. What the model leaves out (drains, pumps, soaking in) is listed under the figures." },
   { title: "Tools", target: () => document.querySelector(".tools"),
-    text: "Zoom in and out, go to your location, see the whole country, switch the street map between detailed and quiet, switch metres and feet, and read About for sources and limits." },
+    text: "Zoom in and out, go to your location, see the whole country, switch the street map between detailed and quiet, show real flood reports (New York City and Austin), switch metres and feet, and read About for sources and limits." },
   { title: "Come back any time", target: () => $("guide-open"),
     text: "Press Guide to see this again. In the panel, Copy link shares exactly what you are looking at." },
 ]);
@@ -701,13 +722,15 @@ map.once("idle", () => {
   const box = document.createElement("div");
   box.className = "invite";
   box.setAttribute("role", "status");
-  box.innerHTML = `<span>New here? A one-minute guide shows how to use the map.</span>
-    <button class="btn primary" data-i="go">Show me</button><button class="btn link" data-i="no">No thanks</button>`;
+  box.innerHTML = `<span>New here? Watch the app run itself through a city, or take the one-minute guide.</span>
+    <button class="btn primary" data-i="nyc">Tour: New York City</button><button class="btn primary" data-i="austin">Tour: Austin</button>
+    <button class="btn" data-i="go">Guide</button><button class="btn link" data-i="no">No thanks</button>`;
   box.addEventListener("click", (e) => {
     const b = e.target.closest("[data-i]");
     if (!b) return;
     hideInvite();
     if (b.dataset.i === "go") guide.start();
+    else if (TOURS[b.dataset.i]) { try { localStorage.setItem("lowpoints.guided", "1"); } catch { /* ignore */ } tour.start(b.dataset.i); }
     else { try { localStorage.setItem("lowpoints.guided", "1"); } catch { /* ignore */ } }
   });
   document.body.appendChild(box);
@@ -715,4 +738,4 @@ map.once("idle", () => {
 
 map.once("load", () => setupDebug({ map, state, views, stormBar }));     // ?debug=1: frame rate and timings on this device
 
-if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide, views, stormBar };
+if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__lowpoints = { map, state, client, refresh, selectDepression, guide, views, stormBar, tour };

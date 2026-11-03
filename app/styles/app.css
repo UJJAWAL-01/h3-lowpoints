@@ -465,3 +465,79 @@ body.storm-open .toast, body.storm-open .invite { bottom: calc(var(--bottom) + 4
 .debug-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .debug dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; }
 .debug dt { color: var(--muted); } .debug dd { margin: 0; }
+
+/* ---------------------------------------------------------------- hidden cards stay hidden */
+.view-note[hidden], .reports-key[hidden] { display: none; }
+
+/* ---------------------------------------------------------------- flood reports */
+#reports[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.reports-key {
+  position: fixed; z-index: 8; bottom: calc(var(--bottom) + 30px); right: calc(var(--gutter-r) + 56px); max-width: 340px;
+  margin: 0; padding: 9px 12px; display: grid; gap: 6px; font-size: 13px; line-height: 1.45; color: var(--ink-2);
+}
+.reports-key p { margin: 0; }
+.reports-key .btn { justify-self: start; }
+@media (max-width: 719px) { .reports-key { left: var(--gutter-l); right: var(--gutter-l); bottom: calc(var(--sheet-peek, 140px) + 12px); max-width: none; } }
+
+/* ---------------------------------------------------------------- tours */
+.tour-offer { display: grid; gap: 6px; border-top: var(--rule-soft); padding-top: 10px; }
+.tour-offer .note { margin: 0; }
+.tour {
+  position: fixed; z-index: 40; left: 50%; transform: translateX(-50%); bottom: calc(var(--bottom) + 34px);
+  width: min(720px, calc(100vw - 24px)); background: var(--card); border: var(--rule); padding: 14px 18px 12px;
+  display: grid; gap: 10px; box-shadow: 0 6px 24px rgba(18, 21, 19, .18);
+}
+.tour-cap { display: grid; gap: 4px; }
+.tour-cap h2 { margin: 0; font: 600 20px/1.25 var(--sans); }
+.tour-cap p { margin: 0; font-size: 15.5px; line-height: 1.5; color: var(--ink-2); min-height: 1.5em; }
+.tour-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tour-dots { display: flex; gap: 5px; list-style: none; margin: 0 auto 0 0; padding: 0; }
+.tour-dots button { width: 10px; height: 10px; border-radius: 50%; border: 1px solid var(--ink); background: var(--card); padding: 0; cursor: pointer; }
+.tour-dots button.done { background: var(--faint); border-color: var(--faint); }
+.tour-dots button[aria-current="step"] { background: var(--water); border-color: var(--water); }
+.tour-pointer {
+  position: fixed; z-index: 45; left: -14px; top: -14px; width: 28px; height: 28px; border-radius: 50%;
+  border: 2px solid var(--ink); background: rgba(255, 255, 255, .55); pointer-events: none; opacity: 0;
+  transition: transform .7s var(--ease), opacity .3s;
+}
+.tour-pointer.on { opacity: 1; }
+.tour-pointer.press::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--water);
+  animation: tour-ring .6s ease-out forwards;
+}
+@keyframes tour-ring { from { transform: scale(1); opacity: 1; } to { transform: scale(2.4); opacity: 0; } }
+body.touring .invite { display: none; }
+@media (min-width: 720px) {        /* centred in the map, beside the panel */
+  .tour:not(.film) { bottom: calc(var(--bottom) + 34px); top: auto;
+    left: calc(var(--gutter-l) + var(--panel-w) + 16px + (100vw - var(--gutter-l) - var(--panel-w) - 16px - var(--gutter-r) - 52px) / 2);
+    width: min(600px, calc(100vw - var(--panel-w) - 130px)); }
+  /* the rain simulator sits at the bottom: the tour moves to the top, between the panel and the controls */
+  body.storm-open .tour:not(.film) { top: var(--top); bottom: auto;
+    left: calc(var(--gutter-l) + var(--panel-w) + 16px + (100vw - var(--gutter-l) - var(--panel-w) - 16px - var(--gutter-r) - 370px) / 2);
+    width: max(280px, min(600px, calc(100vw - var(--panel-w) - 420px))); }
+}
+@media (min-width: 720px) and (max-width: 1179px) {   /* too narrow beside the controls: just below them */
+  body.storm-open .tour:not(.film) { top: calc(var(--top) + 100px);
+    left: calc(var(--gutter-l) + var(--panel-w) + 16px + (100vw - var(--gutter-l) - var(--panel-w) - 16px - var(--gutter-r) - 52px) / 2);
+    width: min(520px, calc(100vw - var(--panel-w) - 110px)); }
+}
+@media (max-width: 719px) {
+  .tour { bottom: auto; top: calc(var(--top-h, 110px) + 8px); padding: 10px 12px; }
+  .tour-cap h2 { font-size: 17px; }
+  .tour-cap p { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { .tour-pointer { transition: none; } .tour-pointer.press::after { animation: none; } }
+
+/* film mode: no controls, a lower-third caption, title and end cards */
+.tour.film { bottom: 56px; width: min(980px, calc(100vw - 80px)); padding: 18px 26px; border: 0; background: rgba(255, 255, 255, .94); }
+.tour.film .tour-nav { display: none; }
+.tour.film .tour-cap h2 { font-size: 30px; }
+.tour.film .tour-cap p { font-size: 21px; }
+.tour-title-card {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-content: center; gap: 10px; text-align: center;
+  background: var(--paper); color: var(--ink); transition: opacity .9s;
+}
+.tour-title-card .wordmark { font: italic 400 84px/1 var(--serif); margin: 0; }
+.tour-title-card p { margin: 0; font-size: 26px; color: var(--ink-2); }
+.tour-title-card.out { opacity: 0; }
+body.filming .toast, body.filming .invite { display: none; }

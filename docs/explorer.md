@@ -166,6 +166,37 @@ lines appear from each depression in view that overflows, at the step its overfl
 - Features smaller than the 30 m elevation model can see.
 - How the rain is spread in space beyond NOAA Atlas 14's own map (storms by amount are uniform).
 
+## Tours
+
+**Take a tour** (on the opening panel, in the first-visit invitation, or the link `#tour=nyc` /
+`#tour=austin`) runs the explorer by itself through New York City or Austin, in 12 chapters:
+the country, finding a place, the levels, basemaps and units, one depression and where its water
+goes, roads and drains, a storm played hour by hour, a storm by amount on dry ground, the 3D views,
+the city's flood reports with what the studies found there, evidence and limits, and "Do this in
+Python". It presses the explorer's own buttons; every number in a caption is read from the panels
+as the tour runs. Pause, Back, Next, the chapter dots and Exit (or Escape) control it; touching the
+map pauses it; with reduced motion it cuts instead of flying.
+
+The places follow rules fixed before any caption was written (`app/tools/tour_places.py`): inside
+the city limits, a landlocked depression at least 1 m deep, not on a major road, that fills in the
+2-year 24-hour storm and overflows into at least 2 more, with the most of that city's storm-day flood
+reports within 300 m (ties: the largest); for roads, the nearest road cut or underpass. No rule had
+to be relaxed. `app/tools/tour_test.mjs` runs both tours end to end and checks every chapter, every
+caption and every control.
+
+## Flood reports
+
+The flood-reports button (three dots, in the tools) shows the 311 flood reports of one real storm
+in each of two cities, over the map: New York City on 29 September 2023 (913 reports) and Austin on
+30 October 2015 (203). They are the requests in the street-flooding categories the studies used,
+on that day, inside the city limits, with repeats at one place on one day counted once and
+coordinates rounded to 5 decimals. They show where people reported flooding, not where water stood.
+Sources, as their terms ask: NYC Open Data, 311 Service Requests from 2020 to Present (`erm2-nwe9`),
+downloaded 28 October 2026 (New York City's Open Data Law puts no restrictions on use and asks that
+the source, version and changes be stated); City of Austin, Texas - data.austintexas.gov, Austin 311
+Public Data (`xwdj-i9he`, public domain). Other cities are not shown. An independent recount of both
+files from the downloads gives the same points.
+
 ## Do this in Python
 
 A depression's panel, and the storm result for a view less than about 20 km across, have a button
@@ -248,6 +279,7 @@ Every check below runs in a real browser (headless Chrome) against the same data
 | Abuse while a storm plays (spam, map moves, views, phone, soak) | `app/tools/storm_stress.mjs` |
 | Evidence text = the evidence page (every number) | `tests/test_docs.py` |
 | "Do this in Python" snippets = the map | `app/tools/python_check.py` |
+| Tours: every chapter, caption and control, phone, reduced motion | `app/tools/tour_test.mjs` |
 | The app in general: errors, links, keyboard, accessibility (axe) | `app/tools/ui_test.mjs`, `stress_test.mjs` |
 
 Speed and smoothness measured in headless Chrome use software graphics and are not real-device

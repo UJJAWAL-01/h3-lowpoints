@@ -12,7 +12,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%23f2f3f1' stroke='%23121513' stroke-width='2'/%3E%3Cpath d='M9 18c3 4 11 4 14 0' fill='none' stroke='%231d3f9e' stroke-width='2.5'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="fonts/instrument-serif-latin-400-italic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="app.css?v=0e8570aa8d">
+<link rel="stylesheet" href="app.css?v=0cfcdf940e">
 </head>
 <body>
 <a class="skip" href="#search">Skip to place search</a>
@@ -52,6 +52,9 @@
   </div>
 </div>
 <div class="view-note card" id="view-note" hidden role="status"></div>
+<div class="reports-key card" id="reports-key" hidden role="status"><span class="label">Flood reports (311)</span><p></p>
+  <p class="note">Red dots are where people reported flooding to the city, not where water stood. Only New York City and Austin, one storm each.</p>
+  <button class="btn link">Hide</button></div>
 <section class="storm card" id="storm" hidden aria-label="Rain simulator"></section>
 
 <div class="tools">
@@ -66,6 +69,7 @@
     <button id="rain" aria-label="Rain simulator: run a storm" title="Rain simulator: run a storm" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6C6 4.6 3.6 7.4 3.6 10a4.4 4.4 0 0 0 8.8 0C12.4 7.4 10 4.6 8 1.6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
     <button id="view3d" aria-label="Switch the view" title="View: Flat" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l5.8 3.2v6.6L8 14.5l-5.8-3.2V4.7z M2.2 4.7L8 8l5.8-3.3 M8 8v6.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
     <button id="basemap" aria-label="Switch the street map" title="Street map: detailed or quiet"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l6.5 3.3L8 8.1 1.5 4.8z M1.5 8l6.5 3.3L14.5 8 M1.5 11.2l6.5 3.3 6.5-3.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+    <button id="reports" aria-label="Flood reports (311) in New York City and Austin" title="Flood reports (311): New York City and Austin" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="6" r="2" fill="currentColor"/><circle cx="11" cy="5" r="1.6" fill="currentColor"/><circle cx="9" cy="11" r="2.2" fill="currentColor"/></svg></button>
     <button id="units" aria-label="Switch units" title="Switch between metric and US units" class="mono">m</button>
     <button id="about-open" aria-label="About this map" title="About this map"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7v4.5" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="4.8" r="1" fill="currentColor"/></svg></button>
   </div>
@@ -110,6 +114,8 @@
         that rain has fallen (rain reaches each depression as it falls, so times are the earliest possible; where
         NOAA has no pattern, the timeline is rain fallen). It is computed in 16 exact steps with the same equations as the
         library; while it plays the map blends smoothly between them, and every number shown is an exact step.</li>
+      <li>The three dots show real <strong>flood reports</strong>: people's 311 reports in New York City and Austin on one storm day each. They show where people reported flooding, not where water stood.</li>
+      <li><strong>Take a tour</strong> on the opening panel to watch the app run itself through every feature in New York City or Austin.</li>
     </ul>
     <h3>What it does not include</h3>
     <ul>
@@ -133,7 +139,8 @@
         NOAA Atlas 14 24-hour storms, counting overflow from upstream.</li>
       <li>Every step is open source and checked; the code, the full dataset and its tests are public.
         <a href="https://ujjawal-01.github.io/h3-lowpoints/definition.html" target="_blank" rel="noopener">Method</a> ·
-        <a href="https://ujjawal-01.github.io/h3-lowpoints/verification.html" target="_blank" rel="noopener">How results are checked</a></li>
+        <a href="https://ujjawal-01.github.io/h3-lowpoints/verification.html" target="_blank" rel="noopener">How results are checked</a> ·
+        <a href="https://ujjawal-01.github.io/h3-lowpoints/explorer.html" target="_blank" rel="noopener">How this explorer works</a></li>
     </ul>
     <section id="evidence" aria-labelledby="evidence-title">
       <h3 id="evidence-title">How well it matches real floods</h3>
@@ -168,6 +175,9 @@
       <li>Sources behind them: USGS 3DEP, ESA WorldCover, Annual NLCD 2024, USDA gNATSGO, NOAA Atlas 14.</li>
       <li>Streets: © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> (ODbL), tiles by Protomaps.</li>
       <li>Place search: US Census Bureau 2024 Gazetteer and population estimates.</li>
+      <li>Flood reports: NYC Open Data, 311 Service Requests from 2020 to Present (erm2-nwe9), downloaded 28 October 2026;
+        City of Austin, Texas - data.austintexas.gov, Austin 311 Public Data (xwdj-i9he). One storm day each, street-flooding
+        requests inside the city limits, repeats at one place on one day counted once, coordinates rounded to 5 decimals.</li>
       <li>Fonts: Instrument Serif, IBM Plex Sans and Mono, Noto Sans (SIL Open Font License).</li>
     </ul>
     <p class="muted mono" id="about-version"></p>
@@ -187,6 +197,6 @@
 </dialog>
 
 <noscript><p style="position:fixed;inset:auto 16px 16px;background:#fff;border:1px solid #121513;padding:12px">This map needs JavaScript.</p></noscript>
-<script type="module" src="app.js?v=0e8570aa8d"></script>
+<script type="module" src="app.js?v=0cfcdf940e"></script>
 </body>
 </html>

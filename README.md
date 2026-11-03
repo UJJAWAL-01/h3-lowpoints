@@ -13,6 +13,9 @@ Find closed depressions ("low points") in an elevation model and describe them o
 > A depression is a feature of the terrain model: this library does not say whether water
 > collects there, and its output is **not a flood map**.
 
+**Try it in your browser: [the Lowpoints explorer](https://ujjawal-01.github.io/h3-lowpoints/explorer/)**: every closed
+depression in the lower 48 states, a rain simulator and 3D views, with nothing to install.
+
 **Documentation: [ujjawal-01.github.io/h3-lowpoints](https://ujjawal-01.github.io/h3-lowpoints/)**
 (also in [docs/](https://ujjawal-01.github.io/h3-lowpoints/)), with
 [getting started](https://ujjawal-01.github.io/h3-lowpoints/getting-started), [concepts](https://ujjawal-01.github.io/h3-lowpoints/concepts),
@@ -41,6 +44,9 @@ Find closed depressions ("low points") in an elevation model and describe them o
    counting overflow from upstream, and how full NOAA Atlas 14 design storms leave it; and
    whether mapped streams, canals or roads drain it
    ([susceptibility](https://ujjawal-01.github.io/h3-lowpoints/susceptibility)).
+9. **Follows** a storm in time: when each depression fills, how deep it gets, where its water goes
+   and how long it stands, for any NOAA Atlas 14 storm or rain depth
+   ([storms in time](https://ujjawal-01.github.io/h3-lowpoints/storms)).
 
 ## Install
 

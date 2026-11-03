@@ -46,6 +46,7 @@ async function scenario(name, fn, { bypassCSP = false } = {}) {
   const errors = [];
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text().slice(0, 300)); });
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message.slice(0, 300)}`));
+  page.on("response", (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()}: ${r.url().slice(0, 200)}`); });
   const t0 = Date.now();
   let result;
   try { result = await fn(page, errors); } catch (e) { result = { crashed: String(e.message || e).slice(0, 400) }; }
