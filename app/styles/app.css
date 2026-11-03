@@ -232,6 +232,12 @@ dialog h2 em { font-style: normal; color: var(--water); }
 dialog h3 { font: 600 12px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 10px 0 0; }
 dialog p, dialog li { margin: 0; color: var(--ink-2); max-width: 64ch; }
 dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+#evidence { display: grid; gap: 10px; }
+table.evidence { border-collapse: collapse; width: 100%; font-size: 13.5px; line-height: 1.45; }
+table.evidence th { text-align: left; font-weight: 600; font-size: 12px; color: var(--muted); border-bottom: var(--rule); padding: 4px 8px 4px 0; }
+table.evidence td { vertical-align: top; border-bottom: var(--rule-soft); padding: 6px 8px 6px 0; color: var(--ink-2); }
+table.evidence td:last-child { white-space: nowrap; font-weight: 500; }
+@media (max-width: 560px) { table.evidence td:last-child { white-space: normal; } }
 
 /* ---------------------------------------------------------------- phones: bottom sheet */
 @media (max-width: 719px) {
@@ -284,6 +290,8 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .source { display: grid; gap: 4px; border-top: var(--rule-soft); padding-top: 10px; }
 .source p { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
 .source a { color: var(--muted); }
+.source .evidence-note { margin-top: 4px; }
+.source .evidence-note .label { margin-right: 4px; }
 .how { border-top: 1px solid var(--line); padding-top: 8px; }
 .how summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--ink); }
 .how p { margin: 8px 0 0; font-size: 14px; line-height: 1.55; color: var(--ink-2); }

@@ -120,3 +120,14 @@ def test_package_metadata_is_consistent():
     given, family = name.split(" ", 1)
     citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
     assert f'family-names: "{family}"' in citation and f'given-names: "{given}"' in citation
+
+
+def test_explorer_evidence_matches_the_evidence_page():
+    """Every number the explorer's evidence text uses appears on the evidence page."""
+    app = (ROOT / "app" / "src" / "ui" / "evidence.js").read_text(encoding="utf-8")
+    page = (ROOT / "docs" / "evidence.md").read_text(encoding="utf-8")
+    texts = re.findall(r'"([^"]{20,})"', app)
+    assert len(texts) >= 10, "evidence.js texts not found"
+    numbers = {n for t in texts for n in re.findall(r"\d+(?:\.\d+)?%?", t)}
+    on_page = set(re.findall(r"\d+(?:\.\d+)?%?", page))
+    assert numbers - on_page == set(), f"not on docs/evidence.md: {sorted(numbers - on_page)}"

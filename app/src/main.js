@@ -16,6 +16,7 @@ import { setupSheet } from "./ui/sheet.js";
 import { createStormBar } from "./ui/storm-bar.js";
 import { setupDebug } from "./ui/debug.js";
 import { createViews } from "./ui/views.js";
+import { aboutHtml as evidenceHtml } from "./ui/evidence.js";
 
 const $ = (id) => document.getElementById(id);
 const isDetail = (res) => res >= 8;
@@ -567,6 +568,7 @@ $("about").addEventListener("click", (e) => {
 $("about-open").onclick = openAbout;
 $("about-close").onclick = () => $("about").close();
 $("about").addEventListener("click", (e) => { if (e.target === $("about")) $("about").close(); });
+$("about-evidence").innerHTML = evidenceHtml();
 $("about-version").textContent = `Explorer ${VERSION} · dataset 0.3 · packs doi:10.5281/zenodo.23896025`;
 
 setupSearch({ input: $("search"), list: $("results"), onPick: (p) => {

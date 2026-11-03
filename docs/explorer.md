@@ -166,6 +166,14 @@ lines appear from each depression in view that overflows, at the step its overfl
 - Features smaller than the 30 m elevation model can see.
 - How the rain is spread in space beyond NOAA Atlas 14's own map (storms by amount are uniform).
 
+## Evidence
+
+Every panel ends with its source and one line on what the studies found for what it shows: a
+depression (flood reports against the 2-year storm and against landlocked or drained), an area
+(the 30 m data against 1 m lidar) or a storm (predicted standing water against reports in ten
+storms). About has the full table, negative results included. The text comes from
+[Evidence](evidence.md); `tests/test_docs.py` fails if any number in it is not on that page.
+
 ## Links
 
 Everything you see is in the link (after `#`), so Copy link shares it exactly:
@@ -214,6 +222,7 @@ Every check below runs in a real browser (headless Chrome) against the same data
 | 3D heights = depth × factor; views keep the selection and storm | `app/tools/view3d_test.mjs` |
 | Levels while zooming; overview columns only at overview levels | `app/tools/zoom_test.mjs` |
 | Abuse while a storm plays (spam, map moves, views, phone, soak) | `app/tools/storm_stress.mjs` |
+| Evidence text = the evidence page (every number) | `tests/test_docs.py` |
 | The app in general: errors, links, keyboard, accessibility (axe) | `app/tools/ui_test.mjs`, `stress_test.mjs` |
 
 Speed and smoothness measured in headless Chrome use software graphics and are not real-device
