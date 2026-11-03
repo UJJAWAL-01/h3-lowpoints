@@ -401,9 +401,10 @@ dialog ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
 .storm-picks button[aria-pressed="true"] small { color: var(--paper-2); }
 .storm-readout { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
 .storm-far { margin: 0; font-size: 14.5px; color: var(--ink-2); }
-.storm-time { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
-.storm-time .play { min-width: 92px; min-height: 36px; }
-.storm-now { font: 600 13.5px var(--sans); font-variant-numeric: tabular-nums; color: var(--water); white-space: nowrap; min-width: 20ch; text-align: right; }
+/* the slider keeps one width: the clock, whose text changes length, sits on its own line under it */
+.storm-time { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: center; }
+.storm-time .play { min-width: 92px; min-height: 36px; grid-row: span 2; }
+.storm-now { grid-column: 2; font: 600 13.5px var(--sans); font-variant-numeric: tabular-nums; color: var(--water); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* the timeline: a water-blue track that fills as the rain falls */
 .storm input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; margin: 0; cursor: pointer; }

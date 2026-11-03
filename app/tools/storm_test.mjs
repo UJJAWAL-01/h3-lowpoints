@@ -272,7 +272,7 @@ try {
   await open("map=14.8/29.7604/-95.3698&s=r.10.24");
   await settled(); await sleep(1500);
   R.check12 = await page.evaluate(() => new Promise((res) => {
-    const L = window.__lowpoints, log = { cardRebuilt: 0, backJumps: 0, negative: 0, frames: 0 };
+    const L = window.__lowpoints, log = { cardRebuilt: 0, backJumps: 0, negative: 0, frames: 0 }, widths = new Set(), lefts = new Set();
     new MutationObserver((m) => { for (const x of m) if (x.type === "childList" && x.target.id === "storm") log.cardRebuilt++; })
       .observe(document.getElementById("storm"), { childList: true });
     const slider = document.querySelector('[data-f="time"], [data-f="step"]'), button = document.querySelector('[data-st="play"]');
@@ -282,6 +282,8 @@ try {
       if (t < last - 1e-9) log.backJumps++;
       if (/-\d/.test(text)) log.negative++;
       last = t; log.frames++;
+      const sl = document.querySelector('[data-f="time"], [data-f="step"]')?.getBoundingClientRect();   // the slider must not move or resize
+      if (sl) { widths.add(Math.round(sl.width * 10)); lefts.add(Math.round(sl.left * 10)); }
       if (L.stormBar.playing || log.frames < 5) requestAnimationFrame(watch);
     };
     button.click();
@@ -291,12 +293,13 @@ try {
     const done = () => {
       log.sliderKept = document.querySelector('[data-f="time"], [data-f="step"]') === slider;
       log.buttonKept = document.querySelector('[data-st="play"]') === button;
+      log.sliderWidths = widths.size; log.sliderLefts = lefts.size;
       res(log);
     };
     const wait = () => (L.stormBar.playing ? setTimeout(wait, 100) : setTimeout(done, 600));
     setTimeout(wait, 300);
   }));
-  R.check12.ok = R.check12.cardRebuilt === 0 && R.check12.backJumps === 0 && R.check12.negative === 0 && R.check12.sliderKept && R.check12.buttonKept;
+  R.check12.ok = R.check12.sliderWidths === 1 && R.check12.sliderLefts === 1 && R.check12.cardRebuilt === 0 && R.check12.backJumps === 0 && R.check12.negative === 0 && R.check12.sliderKept && R.check12.buttonKept;
 
   // ---------------------------------------------------------------- 10. accessibility (axe) with the storm open
   const axe = readFileSync(join(here, "..", "node_modules", "axe-core", "axe.min.js"), "utf8");
