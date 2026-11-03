@@ -79,6 +79,7 @@ export function createTour(ctx) {
     $("tour-chapter").textContent = `${tour.name} tour · ${chapter + 1} of ${CHAPTERS.length} · ${CHAPTERS[chapter]}`;
     $("tour-title").textContent = title;
     $("tour-text").textContent = text;
+    if (ctx.sheet?.phone) ctx.sheet.set("peek");      // the map is the point: keep the sheet low
     ui.querySelectorAll(".tour-dots button").forEach((b, k) => {
       b.classList.toggle("done", k < chapter);
       b.setAttribute("aria-current", k === chapter ? "step" : "false");
@@ -149,10 +150,12 @@ export function createTour(ctx) {
   }
   const panelText = () => $("panel-body").innerText;
   const sel = (s) => document.querySelector(s);
+  const seen = (s) => { const e = sel(s); return e && e.offsetWidth ? e : null; };      // phones have no view buttons
   const dep = () => state.selected?.data;
   async function openDep(which, t) {
     const p = tour[which];
     await point([p.lon, p.lat], t);
+    setTimeout(() => pointer?.classList.remove("on"), 900);
     await openLink(`${p.region}.${p.id}`);
     await waitFor(() => dep() && dep().id === p.id, t);
     await loaded(t);
@@ -268,12 +271,12 @@ export function createTour(ctx) {
     async (t) => {                                   // 8 3D
       await calm(t);
       caption("See it in 3D", "Columns raise each hexagon by how deep its water is; the height is exaggerated, and the map says by how much.");
-      await press(sel('[data-view="columns"]') || $("view3d"), t);
+      await press(seen('[data-view="columns"]') || $("view3d"), t);
       await wait(800, t);
       await ease({ pitch: 58, bearing: -25, duration: 3000 }, t);
       await ease({ bearing: 35, duration: 7000 }, t);
       caption("Wells", "Wells sink each depression below the street: you look down into the hollows the water fills.");
-      await press(sel('[data-view="wells"]') || $("view3d"), t);
+      await press(seen('[data-view="wells"]') || $("view3d"), t);
       await wait(1500, t); await loaded(t);
       await ease({ bearing: -20, pitch: 62, duration: 8000 }, t);
       await wait(1000, t);

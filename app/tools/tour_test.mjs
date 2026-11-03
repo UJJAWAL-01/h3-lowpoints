@@ -1,6 +1,6 @@
 // Tours (spec 6.4e): both tours run end to end in headless Chrome on local data, with the checks
 // fixed in plans/PHASE6_4e_SPEC.md.
-//   node app/tools/tour_test.mjs DATA_DIR OUT_DIR [nyc|austin|controls]
+//   node app/tools/tour_test.mjs DATA_DIR OUT_DIR [nyc|austin|phone|controls]
 // full run   every chapter reached in order; every caption free of NaN, undefined, Infinity and
 //            negative numbers; chapter 4 caption = the panel's volume; chapter 6 counts = the panel's;
 //            no page errors; a screenshot at each chapter
@@ -48,10 +48,12 @@ const snap = (page) => page.evaluate(() => ({
   fill: document.querySelector("[data-sv=fill]")?.textContent || null,
 }));
 
-async function fullRun(key) {
-  const { page, errors } = await open();
+async function fullRun(key, opts = {}) {
+  const { page, errors } = await open("#map=4/38/-97", opts);
+  const tag = opts.phone ? `${key}_phone` : key;
   await page.evaluate((k) => window.__lowpoints.tour.start(k), key);
   const seen = [], captions = [], start = Date.now();
+  let stormClear = null;
   let last = "", lastCh = -1;
   while (Date.now() - start < 12 * 60000) {
     const s = await snap(page);
@@ -59,10 +61,17 @@ async function fullRun(key) {
     if (s.chapter !== lastCh) {
       lastCh = s.chapter; seen.push(s.chapter);
       await sleep(1500);
-      await page.screenshot({ path: join(out, `${key}_${String(s.chapter + 1).padStart(2, "0")}.png`) });
+      await page.screenshot({ path: join(out, `${tag}_${String(s.chapter + 1).padStart(2, "0")}.png`) });
     }
     const cap = `${s.title} | ${s.text}`;
-    if (cap !== last && s.text) { last = cap; captions.push({ chapter: s.chapter, cap, panelH2: s.panelH2, fill: s.fill, t: Date.now() - start }); }
+    if (cap !== last && s.text) {
+      last = cap; captions.push({ chapter: s.chapter, cap, panelH2: s.panelH2, fill: s.fill, t: Date.now() - start });
+      if (opts.phone && /Press Play/.test(cap)) {
+        await sleep(1200);
+        await page.screenshot({ path: join(out, `${tag}_storm.png`) });
+        stormClear = await page.evaluate(() => { const a = document.querySelector(".tour").getBoundingClientRect(), b = document.getElementById("storm").getBoundingClientRect(); return b.width > 0 && (a.bottom <= b.top || b.bottom <= a.top); });
+      }
+    }
     await sleep(250);
   }
   const ms = Date.now() - start;
@@ -78,7 +87,8 @@ async function fullRun(key) {
     overflowSentence: captions.some((c) => c.chapter === 3 && /^Where the water goes \| When full/.test(c.cap)), errors,
   };
   r.pass = r.allChapters && !bad.length && r.volumeMatchesPanel && r.stormCountMatchesPanel && r.roadCutNamed && r.overflowSentence && !errors.length;
-  writeFileSync(join(out, `${key}_captions.json`), JSON.stringify(captions, null, 1));
+  if (opts.phone) { r.stormBarClear = stormClear; r.pass = r.pass && stormClear === true; }
+  writeFileSync(join(out, `${tag}_captions.json`), JSON.stringify(captions, null, 1));
   await page.close();
   return r;
 }
@@ -162,6 +172,7 @@ async function controls() {
 
 try {
   for (const k of ["nyc", "austin"]) if (!only || only === k) { report[k] = await fullRun(k); console.log(k, JSON.stringify(report[k])); }
+  if (!only || only === "phone") { report.phone = await fullRun("nyc", { phone: true }); console.log("phone", JSON.stringify(report.phone)); }
   if (!only || only === "controls") { report.controls = await controls(); console.log("controls", JSON.stringify(report.controls)); }
 } finally { await browser.close(); app.kill(); data.kill(); }
 report.pass = Object.values(report).every((x) => x.pass);

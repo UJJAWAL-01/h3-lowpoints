@@ -521,7 +521,7 @@ $("reports").onclick = async () => {
 };
 $("reports-key").querySelector("button").onclick = () => $("reports").click();
 
-const tour = createTour({ map, state, stormBar, views, openLink: openFromLink, clearSelection, setShow, openAbout, reduced, $,
+const tour = createTour({ map, state, stormBar, views, openLink: openFromLink, clearSelection, setShow, openAbout, reduced, $, sheet,
   onEnd: () => renderPanel() });
 $("python").addEventListener("click", (e) => { if (e.target === $("python")) $("python").close(); });
 

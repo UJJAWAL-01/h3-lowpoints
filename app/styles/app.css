@@ -522,9 +522,12 @@ body.touring .invite { display: none; }
     width: min(520px, calc(100vw - var(--panel-w) - 110px)); }
 }
 @media (max-width: 719px) {
-  .tour { bottom: auto; top: calc(var(--top-h, 110px) + 8px); padding: 10px 12px; }
-  .tour-cap h2 { font-size: 17px; }
-  .tour-cap p { font-size: 14px; }
+  .tour { bottom: auto; top: calc(var(--top-h, 110px) + 8px); padding: 8px 12px; gap: 6px; }
+  .tour-cap h2 { font-size: 16px; }
+  .tour-cap p { font-size: 13.5px; line-height: 1.4; }
+  .tour-dots { display: none; }
+  .tour-nav { flex-wrap: nowrap; gap: 6px; justify-content: space-between; }
+  .tour-nav .btn { padding: 6px 10px; font-size: 13.5px; min-height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) { .tour-pointer { transition: none; } .tour-pointer.press::after { animation: none; } }
 
