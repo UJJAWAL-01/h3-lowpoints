@@ -96,6 +96,7 @@ export function createTour(ctx) {
   async function waitFor(fn, t, ms = 60000) {
     const end = Date.now() + ms;
     while (!fn()) { check(t); if (Date.now() > end) return false; await sleep(150); }
+    while (paused) { check(t); await sleep(100); }       // what was loading has arrived: hold it until Play
     check(t);
     return true;
   }
