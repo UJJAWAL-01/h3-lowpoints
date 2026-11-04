@@ -157,7 +157,7 @@ export function createTour(ctx) {
     await point([p.lon, p.lat], t);
     setTimeout(() => pointer?.classList.remove("on"), 900);
     await openLink(`${p.region}.${p.id}`);
-    await waitFor(() => dep() && dep().id === p.id, t);
+    await waitFor(() => dep() && String(dep().id) === String(p.id), t, 15000);
     await loaded(t);
   }
   async function closeDialogs() { document.querySelectorAll("dialog[open]").forEach((d) => d.close()); }
