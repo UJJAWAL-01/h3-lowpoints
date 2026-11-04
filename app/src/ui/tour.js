@@ -28,9 +28,12 @@ const CHAPTERS = ["The country", "Find a place", "Zoom in", "One depression", "R
 
 class Cancelled extends Error {}
 
+const READ_WORD = 250, READ_LEAD = 600;              // a caption stays up for 240 words a minute, after a short lead
+
 export function createTour(ctx) {
   const { map, state, stormBar, views, openLink, clearSelection, setShow, openAbout, openPython, reduced, $ } = ctx;
   let tour = null, key = null, chapter = 0, token = 0, paused = false, film = false, ui = null, pointer = null, reportsOn = false;
+  let shownAt = 0, needed = 0, pausedAt = 0;         // the caption on screen: when it appeared, how long it needs
 
   // ---------------------------------------------------------------- the bar and the pointer
   function build() {
@@ -69,6 +72,8 @@ export function createTour(ctx) {
   function touched(e) { if (tour && e.isTrusted && !paused && !film) setPaused(true); }
 
   function setPaused(p) {
+    if (p && !paused) pausedAt = Date.now();
+    if (!p && paused) shownAt += Date.now() - pausedAt;  // a pause does not count as reading time
     paused = p;
     const b = ui?.querySelector('[data-t="pause"]');
     if (b) { b.textContent = p ? "Play" : "Pause"; b.setAttribute("aria-pressed", String(p)); }
@@ -79,6 +84,8 @@ export function createTour(ctx) {
     $("tour-chapter").textContent = `${tour.name} tour · ${chapter + 1} of ${CHAPTERS.length} · ${CHAPTERS[chapter]}`;
     $("tour-title").textContent = title;
     $("tour-text").textContent = text;
+    shownAt = Date.now();
+    needed = text ? READ_LEAD + text.trim().split(/\s+/).length * READ_WORD : 0;
     if (ctx.sheet?.phone) ctx.sheet.set("peek");      // the map is the point: keep the sheet low
     ui.querySelectorAll(".tour-dots button").forEach((b, k) => {
       b.classList.toggle("done", k < chapter);
@@ -100,6 +107,7 @@ export function createTour(ctx) {
     check(t);
     return true;
   }
+  const read = (t) => wait(needed - (Date.now() - shownAt), t);   // whatever reading time is left: moves count towards it
   const loaded = (t) => waitFor(() => state.loading === 0 && map.loaded() && !map.isMoving(), t);
   async function fly(opts, t) {
     check(t);
@@ -127,7 +135,7 @@ export function createTour(ctx) {
     else { const r = target.getBoundingClientRect(); x = r.left + r.width / 2; y = r.top + r.height / 2; }
     pointer.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
     pointer.classList.add("on");
-    await wait(reduced() ? 100 : 750, t);
+    await wait(reduced() ? 100 : 500, t);
     pointer.classList.remove("press"); void pointer.offsetWidth; pointer.classList.add("press");
   }
   async function press(el, t) {
@@ -135,7 +143,7 @@ export function createTour(ctx) {
     el.scrollIntoView?.({ block: "nearest" });
     await point(el, t);
     el.click();
-    await wait(350, t);
+    await wait(250, t);
     setTimeout(() => pointer?.classList.remove("on"), 900);
     return true;
   }
@@ -146,7 +154,7 @@ export function createTour(ctx) {
     for (const ch of text) {
       input.value += ch;
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      await wait(reduced() ? 20 : 110, t);
+      await wait(reduced() ? 20 : 70, t);
     }
   }
   const panelText = () => $("panel-body").innerText;
@@ -174,11 +182,11 @@ export function createTour(ctx) {
   const chapters = [
     async (t) => {                                   // 1 the country
       await calm(t); if (stormBar.active) stormBar.close(); if (state.view !== "intro") clearSelection();
-      await fly({ center: [-97.6, 38.6], zoom: 3.55, pitch: 0, bearing: 0, duration: 2500 }, t);
       await waitFor(() => state.nat, t, 20000);
       caption("Where rain water collects", `Lowpoints maps every closed depression on land in the lower 48 US states: ${f.int(state.nat.depressions)} places where rain flows in but cannot flow out. Darker hexagons have more of their land in depressions.`);
-      await ease({ center: [-92, 38.4], zoom: 3.9, duration: 7000 }, t);
-      await wait(1500, t);
+      await fly({ center: [-97.6, 38.6], zoom: 3.55, pitch: 0, bearing: 0, duration: 1500 }, t);
+      await ease({ center: [-92, 38.4], zoom: 3.9, duration: 5000 }, t);
+      await read(t);
     },
     async (t) => {                                   // 2 find a place
       await calm(t);
@@ -186,24 +194,23 @@ export function createTour(ctx) {
       await type($("search"), tour.search, t);
       await waitFor(() => sel("#results li[data-i]"), t, 10000);
       await press(sel("#results li[data-i]"), t);
-      await wait(300, t);
       $("search").value = ""; $("search").dispatchEvent(new Event("input", { bubbles: true })); $("search").blur();
       await loaded(t);
-      await fly({ ...tour.city, duration: 3500 }, t);
-      await wait(2500, t);
+      await fly({ ...tour.city, duration: 2200 }, t);
+      await read(t);
     },
     async (t) => {                                   // 3 zoom in: levels, basemap, units
       await calm(t);
       const d = tour.depression;
-      await fly({ center: [d.lon, d.lat], zoom: 12.2, duration: 5000 }, t);
       caption("From city to street", "At city scale each hexagon adds up the depressions in it (H3 levels 8 and 9). Zoomed in to level 10, each hexagon is about 15,000 m², and its shade is how deep water stands there once its depression is full.");
-      await wait(3500, t);
-      await fly({ center: [d.lon, d.lat], zoom: 15.4, duration: 4500 }, t);
-      await wait(2000, t);
+      await fly({ center: [d.lon, d.lat], zoom: 12.2, duration: 3000 }, t);
+      await wait(800, t);
+      await fly({ center: [d.lon, d.lat], zoom: 15.4, duration: 3000 }, t);
+      await read(t);
       caption("Your map, your units", "Switch the street map between detailed and quiet, and the units between metres and feet.");
-      await press($("basemap"), t); await wait(1800, t); await press($("basemap"), t);
-      await press($("units"), t); await wait(1500, t); await press($("units"), t);
-      await wait(1000, t);
+      await press($("basemap"), t); await wait(900, t); await press($("basemap"), t);
+      await press($("units"), t); await wait(800, t); await press($("units"), t);
+      await read(t);
     },
     async (t) => {                                   // 4 one depression
       await calm(t);
@@ -211,45 +218,46 @@ export function createTour(ctx) {
       const d = dep();
       const where = [...document.querySelectorAll("#panel-body p.say")].map((x) => x.textContent).find((x) => /^When full/.test(x)) || "";
       caption("One depression", `This one holds ${f.volume(d.volume).main} of water when full, up to ${f.depth(d.depth).main} deep. ${f.fillsIn(d.fillsInYears).text}`);
-      await wait(6500, t);
+      await read(t);
       caption("Where the water goes", `${where} The blue arrows follow it; grey dotted lines are depressions that overflow into this one.`);
-      await ease({ zoom: Math.max(13.8, map.getZoom() - 1.2), duration: 2500 }, t);
-      await wait(5000, t);
+      await ease({ zoom: Math.max(13.8, map.getZoom() - 1.2), duration: 2000 }, t);
+      await read(t);
     },
     async (t) => {                                   // 5 roads and drains
       await calm(t);
-      await fly({ center: [tour.road.lon, tour.road.lat], zoom: 15.6, duration: 4000 }, t);
+      await fly({ center: [tour.road.lon, tour.road.lat], zoom: 15.6, duration: 2500 }, t);
       await openDep("road", t);
       const cut = /road cut or underpass/i.test(panelText());
       caption("Roads and drains", `${cut ? "This hollow runs along a major road: a road cut or underpass" : "This hollow lies on a major road"}. Storm drains usually empty these, but drains are not in the elevation data, so the map flags them.`);
-      await wait(5500, t);
+      await read(t);
       caption("Hide likely drained", "One click takes likely drained depressions off the map: those beside a stream, ditch or canal, or on a major road.");
-      await press(sel('[data-act="show-undrained"]'), t); await wait(3000, t); await loaded(t);
-      await press(sel('[data-act="show-all"]'), t); await wait(1500, t);
+      await press(sel('[data-act="show-undrained"]'), t); await wait(1800, t); await loaded(t);
+      await read(t);
+      await press(sel('[data-act="show-all"]'), t);
       clearSelection();
     },
     async (t) => {                                   // 6 run a storm
       await calm(t); if (state.view !== "intro") clearSelection();
       const d = tour.depression;
-      await fly({ center: [d.lon, d.lat], zoom: 14.6, duration: 4000 }, t);
+      await fly({ center: [d.lon, d.lat], zoom: 14.6, duration: 2500 }, t);
       if (!stormBar.active) await press($("rain"), t);
       await waitFor(() => stormBar.summary && sel('[data-st="play"]'), t);
       caption("Run a storm", `${stormBar.readoutText()} Press Play and watch the depressions fill.`);
-      await wait(4500, t);
+      await read(t);
       await press(sel('[data-st="play"]'), t);
       caption("Hour by hour", "Rain falls as it does in this region's storms (NOAA Atlas 14's pattern). Depressions fill, deeper blue for deeper water, and overflowing ones light up the path to the next.");
       await waitFor(() => stormBar.playing, t, 5000);
       await waitFor(() => !stormBar.playing, t, 30000);
-      await wait(800, t);
+      await read(t);
       const end = stormBar.summary.byStep[stormBar.summary.byStep.length - 1];
       caption("What the storm did", `By the end, ${f.int(end.fill)} of the ${f.int(stormBar.summary.depressions)} depressions in view are full and ${f.int(end.overflow)} overflow. The panel lists which filled first.`);
-      await wait(5500, t);
+      await read(t);
       await openDep("depression", t);
       await waitFor(() => sel("[data-gauge-body]") && !/Running/.test(sel(".gauge").innerText), t, 30000);
       const lines = (sel("[data-gauge-body]")?.innerText || "").split("\n").map((x) => x.trim()).filter(Boolean);
       const g = lines.find((x) => /^Full after about/.test(x)) || lines.find((x) => /full/i.test(x)) || "";
       caption("One depression in the storm", g ? g.trim() : "Its own gauge shows how full it gets and when.");
-      await wait(6000, t);
+      await read(t);
       clearSelection();
     },
     async (t) => {                                   // 7 your own storm
@@ -261,47 +269,44 @@ export function createTour(ctx) {
       await waitFor(() => stormBar.storm?.kind === "amount" && stormBar.summary, t);
       await press(sel('[data-ground="dry"]'), t);
       await waitFor(() => stormBar.storm?.condition === "dry" && stormBar.summary, t);
-      await wait(1200, t);
+      await read(t);
       const end = stormBar.summary.byStep[stormBar.summary.byStep.length - 1];
       caption("Dry ground soaks up more", `${stormBar.readoutText()} On dry ground, ${f.int(end.fill)} of the ${f.int(stormBar.summary.depressions)} depressions in view fill.`);
-      await wait(6000, t);
+      await read(t);
       await press(sel('[data-ground="average"]'), t);
       await press(sel('[data-kind="rarity"]'), t);
       await waitFor(() => stormBar.storm?.kind === "rarity" && stormBar.summary, t);
     },
-    async (t) => {                                   // 8 3D
+    async (t) => {                                   // 8 3D: Wells (a phone's one button cycles the views, so go straight there)
       await calm(t);
-      caption("See it in 3D", "Columns raise each hexagon by how deep its water is; the height is exaggerated, and the map says by how much.");
-      await press(seen('[data-view="columns"]') || $("view3d"), t);
-      await wait(800, t);
-      await ease({ pitch: 58, bearing: -25, duration: 3000 }, t);
-      await ease({ bearing: 35, duration: 7000 }, t);
-      caption("Wells", "Wells sink each depression below the street: you look down into the hollows the water fills.");
-      await press(seen('[data-view="wells"]') || $("view3d"), t);
-      await wait(1500, t); await loaded(t);
-      await ease({ bearing: -20, pitch: 62, duration: 8000 }, t);
-      await wait(1000, t);
+      caption("See it in 3D", "Wells sink each depression below the street, so you look down into the hollows the water fills. Depths are exaggerated, and the map says by how much.");
+      const b = seen('[data-view="wells"]');
+      if (b) await press(b, t); else { await point($("view3d"), t); views.set("wells"); }
+      await ease({ zoom: 15.4, pitch: 62, bearing: -25, duration: 2500 }, t);
+      await loaded(t);
+      await ease({ bearing: 30, duration: 6000 }, t);
+      await read(t);
     },
     async (t) => {                                   // 9 real floods
       await calm(t); if (stormBar.active) stormBar.close(); if (state.view !== "intro") clearSelection();
       const sets = await showReports(map, true); reportsOn = true;
       const s = sets.find((x) => x.key === key);
-      await fly({ ...tour.city, zoom: tour.city.zoom + 0.4, duration: 4500 }, t);
       caption("Real floods", `Red dots: ${f.int(s.points.length)} flood reports to ${tour.name}'s 311 line on ${dayText(s.day)}. They show where people noticed flooding, not where water stood.`);
-      await wait(6500, t);
+      await fly({ ...tour.city, zoom: tour.city.zoom + 0.4, duration: 3000 }, t);
+      await read(t);
       const d = tour.depression;
-      await fly({ center: [d.lon, d.lat], zoom: 14.2, duration: 4000 }, t);
       caption("What the studies found", tour.evidence);
-      await wait(7000, t);
+      await fly({ center: [d.lon, d.lat], zoom: 14.2, duration: 3000 }, t);
+      await read(t);
       await showReports(map, false); reportsOn = false;
     },
     async (t) => {                                   // 10 evidence and limits
       await calm(t);
       caption("Evidence and limits", "The map's main results were tested against real flood reports in six cities, and the negative results are published too. Storm drains, pipes and pumps are not in the data, and this is not a flood map or advice.");
       openAbout("evidence");
-      await wait(7000, t);
+      await wait(needed * 0.6, t);
       document.getElementById("disclaimer")?.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
-      await wait(4500, t);
+      await read(t);
       closeDialogs();
     },
     async (t) => {                                   // 11 python
@@ -309,16 +314,16 @@ export function createTour(ctx) {
       await openDep("depression", t);
       caption("Do this in Python", "Every depression comes with the code that recomputes it from public data, with the open-source h3-lowpoints library behind this map.");
       await press(sel('[data-act="python-dep"]'), t);
-      await wait(6500, t);
+      await read(t);
       closeDialogs();
       clearSelection();
     },
     async (t) => {                                   // 12 the end
       await calm(t); if (stormBar.active) stormBar.close();
       const other = key === "nyc" ? "austin" : "nyc";
-      await fly({ center: [-97.6, 38.6], zoom: 3.9, duration: 4000 }, t);
       caption("Explore your own city", `Search any place in the lower 48 states, run a storm, and follow the water. Next: the tour of ${TOURS[other].name}.`);
-      await wait(film ? 6000 : 5000, t);
+      await fly({ center: [-97.6, 38.6], zoom: 3.9, duration: 2500 }, t);
+      await read(t);
     },
   ];
 

@@ -171,11 +171,12 @@ lines appear from each depression in view that overflows, at the step its overfl
 **Take a tour** (on the opening panel, in the first-visit invitation, or the link `#tour=nyc` /
 `#tour=austin`) runs the explorer by itself through New York City or Austin, in 12 chapters:
 the country, finding a place, the levels, basemaps and units, one depression and where its water
-goes, roads and drains, a storm played hour by hour, a storm by amount on dry ground, the 3D views,
+goes, roads and drains, a storm played hour by hour, a storm by amount on dry ground, Wells in 3D,
 the city's flood reports with what the studies found there, evidence and limits, and "Do this in
 Python". It presses the explorer's own buttons; every number in a caption is read from the panels
 as the tour runs. Pause, Back, Next, the chapter dots and Exit (or Escape) control it; touching the
-map pauses it; with reduced motion it cuts instead of flying.
+map pauses it; with reduced motion it cuts instead of flying. A tour takes about 3 minutes: each
+caption stays up for its length at 240 words a minute, and camera moves run during that time.
 
 The places follow rules fixed before any caption was written (`app/tools/tour_places.py`): inside
 the city limits, a landlocked depression at least 1 m deep, not on a major road, that fills in the

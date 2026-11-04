@@ -23,7 +23,7 @@ const app = spawn(process.execPath, [join(here, "serve.mjs"), join(here, "..", "
 const data = spawn(process.execPath, [join(here, "serve.mjs"), resolve(dataDir), "8794"], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 800));
 const browser = await puppeteer.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true,
-  args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"], protocolTimeout: 900000 });
+  args: process.env.TOUR_GPU ? ["--use-angle=d3d11", "--enable-gpu", "--ignore-gpu-blocklist"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"], protocolTimeout: 900000 });
 const base = `http://127.0.0.1:8793/explorer/?packs=${encodeURIComponent("http://127.0.0.1:8794/{file}")}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BAD = /NaN|undefined|Infinity|null|\[object|(^|[\s(])-\d/;
@@ -53,7 +53,7 @@ async function fullRun(key, opts = {}) {
   const tag = opts.phone ? `${key}_phone` : key;
   await page.evaluate((k) => window.__lowpoints.tour.start(k), key);
   const seen = [], captions = [], start = Date.now();
-  let stormClear = null;
+  let stormClear = null, wells3d = null;
   let last = "", lastCh = -1;
   while (Date.now() - start < 12 * 60000) {
     const s = await snap(page);
@@ -62,6 +62,7 @@ async function fullRun(key, opts = {}) {
       lastCh = s.chapter; seen.push(s.chapter);
       await sleep(1500);
       await page.screenshot({ path: join(out, `${tag}_${String(s.chapter + 1).padStart(2, "0")}.png`) });
+      if (s.chapter === 7) wells3d = await page.evaluate(() => window.__lowpoints.views.view === "wells");
     }
     const cap = `${s.title} | ${s.text}`;
     if (cap !== last && s.text) {
@@ -84,9 +85,10 @@ async function fullRun(key, opts = {}) {
     captions: captions.length, badCaptions: bad, volumeMatchesPanel: !!(vol && c4.cap.includes(vol)),
     stormCountMatchesPanel: !!(c6 && c6.fill && c6.cap.includes(`${c6.fill} of the`)),
     roadCutNamed: captions.some((c) => c.chapter === 4 && /road cut or underpass/.test(c.cap)),
-    overflowSentence: captions.some((c) => c.chapter === 3 && /^Where the water goes \| When full/.test(c.cap)), errors,
+    overflowSentence: captions.some((c) => c.chapter === 3 && /^Where the water goes \| When full/.test(c.cap)),
+    wellsShown: wells3d, errors,
   };
-  r.pass = r.allChapters && !bad.length && r.volumeMatchesPanel && r.stormCountMatchesPanel && r.roadCutNamed && r.overflowSentence && !errors.length;
+  r.pass = r.allChapters && !bad.length && r.volumeMatchesPanel && r.stormCountMatchesPanel && r.roadCutNamed && r.overflowSentence && r.wellsShown === true && !errors.length;
   if (opts.phone) { r.stormBarClear = stormClear; r.pass = r.pass && stormClear === true; }
   writeFileSync(join(out, `${tag}_captions.json`), JSON.stringify(captions, null, 1));
   await page.close();
