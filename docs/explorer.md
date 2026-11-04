@@ -166,6 +166,11 @@ lines appear from each depression in view that overflows, at the step its overfl
 - Features smaller than the 30 m elevation model can see.
 - How the rain is spread in space beyond NOAA Atlas 14's own map (storms by amount are uniform).
 
+## Feedback
+
+**Send feedback**, at the foot of the panel, opens a new issue on the library's GitHub page (it needs a
+GitHub account).
+
 ## Tours
 
 **Take a tour** (on the opening panel, in the first-visit invitation, or the link `#tour=nyc` /

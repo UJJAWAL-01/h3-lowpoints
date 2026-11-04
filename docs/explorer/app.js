@@ -968,7 +968,8 @@ print(len(in_view), "depressions;",
     ${Xs("cell")}
     ${C8()}`}function C8(){return`<div class="foot"><button class="btn link" data-act="about">About this map</button>
     <a href="https://ujjawal-01.github.io/h3-lowpoints/evidence.html" target="_blank" rel="noopener">Evidence</a>
-    <a href="https://github.com/UJJAWAL-01/h3-lowpoints" target="_blank" rel="noopener">The library</a></div>`}function X2(e,t){return`<div class="kicker"><span class="label">H3 cell \xB7 resolution ${t}</span>${Uh}</div>
+    <a href="https://github.com/UJJAWAL-01/h3-lowpoints" target="_blank" rel="noopener">The library</a>
+    <a href="https://github.com/UJJAWAL-01/h3-lowpoints/issues/new" target="_blank" rel="noopener">Send feedback</a></div>`}function X2(e,t){return`<div class="kicker"><span class="label">H3 cell \xB7 resolution ${t}</span>${Uh}</div>
     <h2>${hr(e.s,e.s<.01?2:1)} <em>of this hexagon</em> is in depressions</h2>
     <div class="stats">
       <div><span class="label">Depressions</span><span class="v">${be(e.c)}</span></div>

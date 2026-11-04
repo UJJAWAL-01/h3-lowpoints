@@ -45,7 +45,8 @@ export function intro(nat, mode, res, heightNote = "", earth = false, show = "al
 function foot() {
   return `<div class="foot"><button class="btn link" data-act="about">About this map</button>
     <a href="https://ujjawal-01.github.io/h3-lowpoints/evidence.html" target="_blank" rel="noopener">Evidence</a>
-    <a href="https://github.com/UJJAWAL-01/h3-lowpoints" target="_blank" rel="noopener">The library</a></div>`;
+    <a href="https://github.com/UJJAWAL-01/h3-lowpoints" target="_blank" rel="noopener">The library</a>
+    <a href="https://github.com/UJJAWAL-01/h3-lowpoints/issues/new" target="_blank" rel="noopener">Send feedback</a></div>`;
 }
 
 export function overviewCell(p, res) {
