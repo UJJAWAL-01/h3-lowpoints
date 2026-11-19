@@ -138,6 +138,7 @@ h3lowpoints clip conus_30m --boundary us48 --out us48_30m
 
 ```
 h3lowpoints validate FOLDER --observations FILE [--controls FILE] [--boundary FILE] [options]
+h3lowpoints validate FOLDER --flood-map FILE [--boundary FILE] [options]
 ```
 
 Measures how much more often observations (flood reports, claims, high-water marks) fall in or
@@ -149,6 +150,8 @@ result.
 | Option | Default | Meaning |
 |---|---|---|
 | `--observations FILE` | | Observed locations: a CSV with `lon`/`lat` (or `longitude`/`latitude`, `lng`/`lat`) columns in degrees, or a vector file in any CRS. An `id` column is carried through. |
+| `--flood-map FILE` | | Instead of `--observations`: a flood map raster coded 1 flooded, 0 observed and dry, anything else not observed (as `sources.gfm.write_flood_map` writes a radar scene). Flooded pixels are the observations and observed dry pixels the controls, sampled with chances in proportion to pixel area; pixels not observed are never used. |
+| `--map-points N` | `20000` | With `--flood-map`: how many flooded and how many dry pixels are sampled (each). |
 | `--controls FILE` | | Where observations could have come from (addresses, building footprints), in the same forms. Without it, random points in `--boundary` are used, with a warning. |
 | `--boundary FILE` | the result's box, if any | The area studied (vector file, any CRS). Points outside are left out. Required without `--controls`. |
 | `--n-random N` | 10 per observation, at least 1000 | Number of random controls when `--controls` is not given. |

@@ -15,6 +15,8 @@ three files in a folder. This page describes every file, column and field.
 | `depression_cells.csv` or `depression_cells.parquet` | results computed with `details=True` (`--details`) | the depression × cell table |
 | `susceptibility.csv` or `susceptibility.parquet` | `h3lowpoints index` or `write_susceptibility` (results with catchments) | the susceptibility table |
 | `storm_<name>.csv` or `.parquet` | `h3lowpoints storm` or `write_storm` (results with catchments) | one storm followed in time ([storm tables](#storm-tables)) |
+| `water_history.csv` or `.parquet` | `analyze_tiled(hooks=[WaterHook(...)])`, or any result whose `tables` hold it | the [water history table](#the-water-history-table) |
+| `flood_events.csv`, `flood_seen.csv` (or `.parquet`) | `analyze_tiled(hooks=[FloodHook(...)])`, or any result whose `tables` hold them | the [flood event tables](#the-flood-event-tables) |
 | `meta.json` | every saved result | settings, versions, counts |
 | `dem.vrt` | `h3lowpoints build` | the virtual raster the region was analyzed from (a small text file pointing at the elevation tiles) |
 | `verify.json` | `h3lowpoints build` | `{"problems": [...]}`, empty when every check passed |
@@ -63,6 +65,9 @@ the data behind them was supplied.
 | `drain_at_core` | boolean | | Only with drains: a drain lies within `drain_radius_m` of the depression's deep core. |
 | `building_overlap` | float | 0 to 1 | Only with buildings: share of the depression's pixels under building footprints. |
 | `likely_building_artifact` | boolean | | Only with buildings: `building_overlap` is at least 0.5. |
+| `breached_depth_m` | float | m | Only with `breach_crossings`: the depression's greatest depth once road and railway embankments are cut where a stream crosses them (0 when it is gone). Never more than `max_depth_m`: a cut can leave a lowered stream pixel inside a depression that still holds water, and that pit is not counted as extra depth. |
+| `road_dam` | boolean | | Only with `breach_crossings`: `breached_depth_m` is below `min_depth`, so the depression is most likely water held back by an embankment the elevation model shows without its culvert or bridge opening. |
+| `bridge_crossing` | boolean | | Only with `breach_crossings`: a road or railway line tagged as a bridge passes over one of the depression's pixels. |
 | `catchment_area_m2` | float | m² | Only with `catchments=True`: ground area whose rain ends up in this depression, including the depression itself and the land draining to shallow sinks that spill into it. |
 | `spill_to` | integer | | Only with `catchments=True`: `id` of the depression that receives this one's overflow when it is full, or 0 when the overflow leaves the map. |
 | `spill_lat`, `spill_lon` | float | degrees (WGS 84) | Only with `catchments=True`: centre of the pixel where the full depression overflows. |
@@ -263,6 +268,83 @@ catchment (`min_coverage`), the soil or the rain pattern is unknown at the lowes
 depression receives water from one that is unknown. For every depression, `inflow_m3` equals
 `overflow_m3 + seepage_m3 + drained_m3 + water_left_m3` (tested to 1e-9).
 
+## The water history table
+
+Made by `water.water_history`, `water.water_history_by_cells` or `WaterHook` in a tiled run: one
+row per depression, its 1984-2021 Landsat water record (JRC Global Surface Water). The rules are
+in [Seen wet and seen flooded](water-history.md#water-history-jrc-global-surface-water-1984-2021).
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | The depression. |
+| `jrc_pixels` | float | pixels | JRC pixels (0.00025°, about 30 m) whose centres lie in the depression; with the cells method, the area-weighted count (can be fractional). |
+| `extent_pixels` | float | pixels | Of those, the pixels inside JRC's maximum water extent (water seen there at least once). |
+| `clear_years` | float | years | Years the satellite saw the depression's area (see clear years); NaN when the views are unknown. |
+| `views_res` | integer | | H3 resolution of the area the clear years were judged on (5, 4 or 3); 0 when no area held extent pixels (views unknown). |
+| `wet_years` | integer | years | Clear years with water on at least 10% of its pixels, or on at least 1 ha, and on at least 2 pixels. |
+| `first_wet_year`, `last_wet_year` | integer | year | First and last wet year; -1 when never wet. |
+| `permanent_years` | integer | years | Wet years with permanent water on at least half of its pixels. |
+| `max_wet_share` | float | 0 to 1 | Largest share of its pixels with water in any clear year; NaN with no clear year. |
+| `occurrence_mean` | float | % | Mean JRC occurrence over its pixels: per cent of all clear views with water, 1984-2021. |
+| `ever_wet_share` | float | 0 to 1 | Share of its pixels inside the maximum water extent. |
+| `wettest_month` | integer | 1 to 12 | Calendar month in which water came back most often (JRC monthly recurrence, averaged over its extent pixels); 0 when it has none. |
+| `trend_per_decade` | float | share per decade | Theil-Sen slope of its yearly wet share over the clear years; NaN unless wet at least once with at least 10 clear years. |
+| `trend_p` | float | 0 to 1 | Two-sided Mann-Kendall p-value of that trend (with the tie correction). |
+| `water_class` | text | | `too_small`, `too_few_views`, `permanent`, `seasonal`, `some_years` or `never_seen_wet` ([meanings](water-history.md#the-rules)). |
+
+## The flood event tables
+
+Made by `floods.flood_events` or `FloodHook` in a tiled run, from radar flood maps (Copernicus GFM)
+or flood maps of your own. Rules in
+[Seen wet and seen flooded](water-history.md#radar-flood-events-copernicus-gfm-and-your-own-maps).
+
+`flood_events`, one row per depression:
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | The depression. |
+| `scenes_covered` | integer | | Maps reaching any of its pixels. |
+| `scenes_observed` | integer | | Maps whose observed pixels cover at least 50% of its area. |
+| `scenes_flooded` | integer | | Of those, maps with flooded pixels on at least 10% of its observed pixels and at least 2 pixels. |
+| `first_flooded`, `last_flooded` | text | | Date and time of the first and last of those maps (or their names, for your own maps); empty when never flooded. |
+| `max_flooded_share` | float | 0 to 1 | Largest flooded share of its observed pixels in any map that observed it. |
+| `flooded_scenes` | text | | The flooded maps' names (GFM item ids), joined by `;`. |
+
+`flood_seen`, one row per depression and map that observed it (for scoring maps one by one):
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `scene` | text | | The map (GFM item id, or your name for it). |
+| `datetime` | text | | Its acquisition time (GFM); empty for your own maps. |
+| `id` | integer | | The depression. |
+| `observed_share` | float | 0 to 1 | Share of its area the map observed. |
+| `flooded_share` | float | 0 to 1 | Share of its observed pixels flooded. |
+| `observed` | boolean | | Always True (only observed pairs are kept). |
+| `flooded` | boolean | | Flooded in this map by the rule above. |
+
+## The confidence table
+
+Made by `confidence.confidence` (not saved by the analysis itself; save it like any table). One
+row per depression; the rule is in [Confidence grade](confidence.md#the-rule). A check that was
+not run leaves its column empty (missing, not False).
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `id` | integer | | The depression. |
+| `max_depth_m` | float | m | Its depth, as in the depression table. |
+| `error_m` | float | m | The vertical error `e` used. |
+| `base_grade` | text | | A, B or C from depth against `e`. |
+| `road_dam` | boolean | | From the depression table (road-crossing fix). |
+| `building_artifact` | boolean | | `likely_building_artifact` from the depression table (buildings given). |
+| `bridge_crossing` | boolean | | From the depression table. |
+| `artifact` | boolean | | `building_artifact` or `bridge_crossing`. |
+| `seen_wet` | boolean | | Water history class `permanent`, `seasonal` or `some_years`. |
+| `seen_flooded` | boolean | | Flooded in at least one map (`scenes_flooded` ≥ 1). |
+| `support` | boolean | | `seen_wet` or `seen_flooded`. |
+| `grade` | text | | A to D: base grade, D for any flag, then one level up with support. |
+| `reason` | text | | The grade in words. |
+| `terrain_agreement` | float | 0 to 1 | With `agreement=`: `covered_share` from `compare` against a second terrain; not part of the grade. |
+
 ## meta.json
 
 | Field | Meaning |
@@ -280,6 +362,7 @@ depression receives water from one that is unknown. For every depression, `inflo
 | `params.drain_radius_m`, `params.drain_core_frac` | Drain settings (used only with drains). |
 | `n_drains` | Number of drains supplied (0 for none). |
 | `n_buildings` | Number of building footprints supplied, or `null` when none were. |
+| `breach` | Only with `breach_crossings`: `radius_m`; the numbers of barrier, stream and bridge lines used (`n_barriers`, `n_streams`, `n_bridges`); crossings found and crossings where the ground was lowered (`n_crossings`, `n_crossings_cut`); `n_pixels_lowered`; the depressions flagged (`n_road_dam`, `n_bridge_crossing`); and `lines`, the OSM extract's file name (which carries its date) when the lines came from `sources.osm.fetch_lines`. |
 | `n_depressions` | Rows in the depression table. |
 | `n_edge` | Depressions with `edge = True`. |
 | `tiling` | Tiled runs only: `tile` (tile size in pixels), `n_tiles`, `n_border_cells` and `n_crossings` (the size of the graph joining the tiles; see [Large regions](large-regions.md)). |
@@ -287,6 +370,7 @@ depression receives water from one that is unknown. For every depression, `inflo
 | `clip` | Clipped results only: `boundary`, the membership `rule`, and `depressions_before` and `cells_before` (the counts before clipping). |
 | `susceptibility` | Results with a susceptibility table only: `runoff` (the runoff rule), `curve_numbers` and `impervious` (their sources, or `null`), `rain` (the storms' source, or `null`), `years` (the storms' return periods), `ratio_years`, `min_coverage`, `upstream_rel` (the precision of `rain_to_fill_upstream_mm`), `package_version`, and `clipped_after` (true when the result was clipped after the table was made); with drainage flags, `drainage`: the sources of `streams`, `canals`, `roads` and `land_cover`, `near_m`, `min_share`, `max_distance_m`, the `crs` distances were measured in, whether `channel_share` was measured, and `package_version`. |
 | `storms` | Results with storm tables only: one entry per storm name, with `method`, `condition`, `hours`, `storm` (its source), `pattern`, `step_minutes` (the step used), `after_hours`, `seepage`, `drains` (the drain rule, or `null`), `ponding_depth_m`, `min_coverage`, `water_left_table_m3` (water that flowed off the map), `inputs` (the per-cell inputs and their sources), `package_version`, and `clipped_after` when the result was clipped after the storm was run. |
+| `tables` | Results with water history or flood event tables only: one entry per table with its settings. `water_history`: `method` (`outline`, `outline (tiled)` or `cells`), `years`, `n_years`, `source`, `rules` (every threshold), `credit`. `flood_events` and `flood_seen`: `observed_share`, `flooded_share`, `min_flooded_pixels`, `n_maps` (maps used), `skipped_missing_layer` (catalogue items that could not be judged), `advisory_flags_not_observed`, `credit`. |
 | `build` | `h3lowpoints build` only: `dataset` (`3dep` or `3dep10`), `bbox`, and `seconds` for downloading tiles and for the analysis (of the last part, for a run made in parts); with `--water-mask`, also `water_mask`, the rule that made the mask. |
 
 Example (from `examples/quickstart.py`):

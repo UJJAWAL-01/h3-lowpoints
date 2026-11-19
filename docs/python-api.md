@@ -17,7 +17,7 @@ Conventions used throughout:
 
 ## Analysis
 
-### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, workers=1)`
+### `analyze(dem_path, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, breach_crossings=None, breach_radius_m=100.0, workers=1)`
 
 Find the depressions in an elevation file and describe them on H3 cells. Reads the whole raster
 into memory; for rasters larger than memory use `analyze_tiled`, which gives the same answer.
@@ -34,6 +34,8 @@ into memory; for rasters larger than memory use `analyze_tiled`, which gives the
 | `drain_core_frac` | The deep core is the part of a depression at least this fraction of its maximum depth deep (default 0.8). |
 | `catchments` | Also follow the water ([rules](definition.md#catchments-and-spill)): adds `catchment_area_m2`, `spill_to`, `spill_lat` and `spill_lon` to the depression table and fills `Result.catchments` (default `False`). |
 | `details` | Also describe each depression further ([rules](definition.md#levels-shape-and-fill-curve)): `ground_m`, `water_level_m`, `length_m`, `width_m`, `orientation_deg` and the fill curve (`area_*_down_m2`, `volume_*_down_m3`), and fill `Result.depression_cells` (default `False`). |
+| `breach_crossings` | Optional road, railway and stream lines: OpenStreetMap lines from `sources.osm.fetch_lines`, or a tuple `(barriers, streams)` or `(barriers, streams, bridges)` of line layers (reprojected when they have a CRS, otherwise taken to be in the raster's CRS). The fill is run a second time with every embankment cut where a stream crosses it: along the stream, up to `breach_radius_m` each side, the ground is lowered to the higher of the lowest ground on each side, never raised and never below the stream's own ground, so a basin with no lower way out is not drained. The depressions stay those of the uncut raster; adds `breached_depth_m`, `road_dam` and `bridge_crossing`, and `meta["breach"]`. |
+| `breach_radius_m` | How far along the stream, each side of a crossing, the cut reaches (default 100 m). |
 | `workers` | Label pixels with their H3 cells in this many processes (default 1). The result is identical; only the time changes (labelling was 3× faster with 4 processes on a laptop with 4 cores; more did not help). Processes are started on first use, so on Windows and macOS a script must call the analysis from under `if __name__ == "__main__":`. |
 
 Returns a `Result`. Raises `ValueError` when the raster has no CRS, a CRS that is neither
@@ -41,14 +43,14 @@ projected nor in degrees, a rotated or sheared grid, latitudes beyond ±90°, or
 Warns when `res` is finer than the data supports, or when `min_depth` is below 1 m on data coarser
 than 2 m.
 
-### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, workers=1, source="array")`
+### `analyze_array(arr, transform, crs, nodata=None, *, res="auto", min_depth=0.15, mask=None, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, breach_crossings=None, breach_radius_m=100.0, workers=1, source="array")`
 
 The same as `analyze` for an elevation array already in memory. `transform` is the raster's
 affine transform (as from rasterio), `crs` anything rasterio or pyproj accept (such as
 `"EPSG:32614"`), `nodata` the value marking missing pixels, and `source` the name recorded as
 `meta["dem"]`.
 
-### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", hours=None, mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, workers=1)`
+### `analyze_tiled(dem_path, *, tile=4096, out_dir=None, format="csv", hours=None, mask_path=None, verbose=False, res="auto", min_depth=0.15, drains_xy=None, buildings=None, drain_radius_m=5.0, drain_core_frac=0.8, catchments=False, details=False, workers=1, hooks=None, breach_crossings=None, breach_radius_m=100.0)`
 
 Analyze a raster of any size in square tiles. The result is identical to `analyze` on the same
 raster: tiles only decide how much memory is needed. See [Large regions](large-regions.md).
@@ -61,6 +63,8 @@ raster: tiles only decide how much memory is needed. See [Large regions](large-r
 | `hours` | With `out_dir`: stop after about this many hours, at the end of a tile, by raising `Paused` (`h3lowpoints.store.Paused`, also importable as `h3lowpoints.tiling.Paused`; its `done` and `total` count tile steps, two per tile). Calling again with the same arguments continues. |
 | `mask_path` | Optional raster on exactly the same grid as the DEM; non-zero pixels are ignored like nodata. |
 | `verbose` | Print one line per tile per pass. |
+| `hooks` | Optional list of steps run on every tile of the last pass, each adding tables to `Result.tables` (saved next to the depression table): `water.WaterHook` (`water_history`) and `floods.FloodHook` (`flood_events`, `flood_seen`). Their tables equal what `water_history` and `flood_events` give on the whole region. Their settings are part of the run's settings, so a resumed run with other hooks is refused. |
+| `breach_crossings`, `breach_radius_m` | The road-crossing fix, as in `analyze`; a tiled run cuts exactly the same pixels to the same levels. |
 | others | As in `analyze`. |
 
 With `out_dir`, every tile's result is saved in `out_dir/_work` as soon as it is computed, so an
@@ -136,11 +140,12 @@ in metres (default: matched to the input). Returns `dst_path`.
 | `transform`, `crs` | The raster's grid. |
 | `footprint` | Where the data is valid, used to measure coverage of any cell. Not saved. |
 | `path` | The folder holding the tables, for results written to disk or read from disk. |
+| `tables` | Tables added by `analyze_tiled(hooks=...)`, by name (`water_history`, `flood_events`, `flood_seen`), or `None`; [Outputs](outputs.md#the-water-history-table). |
 
 | Method | Does |
 |---|---|
 | `at_resolution(res)` | The cell table at a coarser resolution: exact roll-up, coverage measured afresh. |
-| `save(folder, format="csv")` | Write `depressions`, `cells` (and `catchments` and `depression_cells`, when present) and `meta.json`; `format` is `"csv"` or `"parquet"`. Returns the folder. |
+| `save(folder, format="csv")` | Write `depressions`, `cells` (and `catchments`, `depression_cells`, `susceptibility` and every table in `tables`, when present) and `meta.json`; `format` is `"csv"` or `"parquet"`. Returns the folder. |
 | `load()` | For a result written to disk: a copy with its tables read back. |
 | `to_html(path, title=None, max_cells=120000, max_points=20000, n_levels=6)` | Write the interactive web map ([The map](map.md)). Resolutions with more than `max_cells` cells are left out (coarser roll-ups are drawn instead); the deepest `max_points` depressions can be marked; `n_levels` resolutions are offered. Returns the path. |
 | `to_deck(value="max_depth_m", elevation_scale=20.0, hover=(), pitch=45)` | A pydeck map for notebooks (needs the `viz` extra): extruded hexagons whose height and colour follow `value`. |
@@ -195,6 +200,20 @@ values that are not degrees.
 
 `n` points spread evenly by area (on the sphere) over `boundary`, a shapely geometry in
 longitude/latitude or a vector file. `seed` may be a number or a numpy `Generator`.
+
+### `validation.validate_flood_map(result, flood_map, *, n=20000, seed=0, **kwargs)`
+
+`validate` with a flood map instead of points ([Validation](validation.md#flood-maps)):
+`flood_map` is a raster coded 1 flooded, 0 observed and dry, anything else not observed. Up to
+`n` flooded pixels become the observations and up to `n` dry pixels the controls, drawn with
+chances in proportion to pixel area (`seed`). Other arguments are those of `validate`. The
+report gains a `flood_map` section. Raises `ValueError` when the map has no flooded or no
+observed dry pixel.
+
+### `validation.flood_map_points(flood_map, *, n=20000, seed=0)`
+
+The points `validate_flood_map` uses: `(observations, controls, info)`, with the map's counts
+of flooded, dry and not-observed pixels in `info`.
 
 ## Susceptibility: `h3lowpoints.susceptibility`
 
@@ -367,6 +386,77 @@ table 10-1 (`runoff.ARC_TABLE`), linear between its rows.
 The USDA texture class of an NRCS texture name ("Fine sandy loam" gives "sandy loam"), or None;
 its wetting-front suction is `runoff.SUCTION_MM[...]` (Rawls, Brakensiek and Miller, 1983).
 
+## Observed water: `h3lowpoints.water` and `h3lowpoints.floods`
+
+The method, rules and limits are in [Seen wet and seen flooded](water-history.md); the columns
+in [Outputs](outputs.md#the-water-history-table).
+
+### `water.water_history(result, *, years=None, source=None, workers=1)`
+
+One row per depression of a result held in memory (from `analyze`, which keeps the pixel
+labels): its 1984-2021 JRC Global Surface Water record and `water_class` (outline method).
+`years` limits the years used (default all); `source` is `None` to read windows from the JRC
+server, or a folder of JRC tiles laid out as on the server. `workers` sets the processes used to
+place pixels in H3 cells (same answer). The settings, rules and credit are in
+`table.attrs["settings"]`. Raises `ValueError` for a result without labels.
+
+### `water.water_history_by_cells(depressions, depression_cells, bbox, *, years=None, source=None, layers=None, workers=1)`
+
+The same from a saved result's depression × cell table (cells method; `details=True`), for the
+depressions in `bbox` (lon/lat). `depressions` needs `id`, `lat` and `lon`; `depression_cells`
+needs `id`, `h3` and `area_m2`. An approximation: water anywhere in an H3 cell is spread over the
+whole cell. `layers` passes JRC layers already read for the box's window.
+
+### `water.WaterHook(source=None, years=None, workers=1)`
+
+For `analyze_tiled(hooks=[...])`: the `water_history` table of a region too big to hold,
+counted tile by tile (outline method), equal to `water_history` on the whole region. For a
+national run download the JRC tiles first and pass the folder as `source`; reading windows from
+the server is far too slow at that size.
+
+### `floods.flood_events(result, scenes, *, reader=None, workers=1, advisory=False)`
+
+Per depression of a result held in memory: in how many flood maps it was covered, observed and
+flooded. `scenes` is a table from `sources.gfm.search` (one row per item) or a dict
+`{name: path}` of your own rasters coded 1 flooded, 0 observed and dry, anything else not
+observed. Returns `(summary, seen)` ([Outputs](outputs.md#the-flood-event-tables)). Items missing
+a layer are skipped and listed in `attrs["settings"]["skipped_missing_layer"]`. `workers` reads
+that many maps at once (threads). `advisory=True` (GFM only) also counts pixels under GFM's
+advisory flags as not observed, as the national tables do. `reader` replaces the map reader (for
+tests).
+
+### `floods.FloodHook(scenes, *, workers=4, reader=None, advisory=False)`
+
+For `analyze_tiled(hooks=[...])`: the `flood_events` and `flood_seen` tables of a region too big
+to hold, equal to `flood_events` on the whole region. Each tile reads only the maps whose outline
+reaches it.
+
+## Confidence grade: `h3lowpoints.confidence`
+
+The rule and its limits are in [Confidence grade](confidence.md); the columns in
+[Outputs](outputs.md#the-confidence-table).
+
+### `confidence.confidence(result, *, error_m, water=None, floods=None, agreement=None)`
+
+One row per depression: base grade from depth against `error_m` (`ERROR_3DEP_30M` = 1.0,
+`ERROR_GLO30` = 2.0, or your own figure), flags from the depression table (`road_dam`,
+`bridge_crossing`, `likely_building_artifact`, where the analysis made them), support from
+`water` (a water history table) and `floods` (a table with `id` and `scenes_flooded`), and the
+grade. `agreement` (a table from `compare`) adds `terrain_agreement`, which is not part of the
+grade. `attrs["checks"]` lists the checks that were run; a check not run leaves its column empty.
+
+### `confidence.grade(depth_m, error_m, flagged, support)`
+
+The rule on arrays: returns `(letters, base)`, the grade letters and the base grades (0 = A,
+1 = B, 2 = C).
+
+### `confidence.compare(a, b, *, confirm_share=0.25)`
+
+Agreement of two results with labels (for example 30 m against 10 m terrain): one row per
+depression of `a` with `compared_share`, `covered_share`, `match_id`, `match_share`,
+`match_depth_m`, `depth_diff_m` and `confirmed` (`covered_share` ≥ `confirm_share`).
+`attrs["summary"]` counts matched, missed and extra depressions ([Confidence grade](confidence.md#comparing-two-terrains-compare)).
+
 ## Verification: `h3lowpoints.verify`
 
 See [Verification](verification.md) for what each check means.
@@ -377,6 +467,7 @@ See [Verification](verification.md) for what each check means.
 | `check_tables(depressions, cells, meta, catchments=None, depression_cells=None, susceptibility=None)` | The same for the tables (the susceptibility table with its index and drainage columns). |
 | `check_saved(folder, rows=500000)` | The same for a saved folder, reading the cell table `rows` at a time so any size can be checked; includes `check_storms`. |
 | `check_storms(folder, meta=None, rows=500000)` | Problems in a folder's storm tables: missing tables, depressions not in the depression table or listed twice, water not conserved, fills or hours out of bounds. |
+| `check_evidence(folder, meta=None, rows=500000)` | Problems in a folder's evidence: the water history and flood event tables (one row per depression, years and counts within their bounds and consistent, `flood_seen` adding up to `flood_events`) and the road-crossing columns (`breached_depth_m` between 0 and `max_depth_m`, `road_dam` matching it). Part of `check_saved`. |
 | `compare_results(a, b, rel=1e-9)` | Differences between two results of the same data (empty when they agree). |
 | `spot_check(dem_path, *, windows=3, size=600, tile=170, seed=0, **params)` | Cuts `windows` random `size` × `size` windows from a raster, analyzes each whole and tiled, and returns every disagreement or invariant failure. `params` go to both analyses (`res`, `min_depth`, ...). |
 
@@ -572,6 +663,79 @@ The URL of one of NOAA's zipped Atlas 14 grids.
 
 Reads an ESRI ASCII grid (the bytes of an `.asc` file, or of a zip holding one): returns
 `(values, west, north, cell)`, with NaN for no data.
+
+### `sources.jrc.read_layer(layer, bbox, *, year=None, month=None, source=None)`
+
+One layer of JRC Global Surface Water (1984-2021, 30 m, worldwide 80° N to 60° S) over a lon/lat
+box, as `(array, transform)` on the JRC grid (0.00025°). `layer` is `occurrence`, `recurrence`,
+`extent`, `yearly` (with `year`, 1984 to 2021) or `monthly_recurrence` (with `month`, 1 to 12);
+values in [Data sources](data-sources.md#jrc-global-surface-water). Only the 256 × 256 blocks the
+box needs are read from the JRC server, or from a folder of tiles (`source`). Where no tile
+exists the result is 0.
+
+### `sources.jrc.read_window(layer, row0, col0, rows, cols, *, year=None, month=None, source=None)`
+
+The same for a window of the global JRC grid (row and column offsets from 80° N, 180° W), as
+returned by `sources.jrc.grid_window(bbox)`.
+
+### `sources.jrc.grid_window(bbox)`
+
+`(row0, col0, rows, cols)`: the window of the global JRC grid that covers a lon/lat box, snapped
+outwards to whole pixels and clipped to the record. Raises `ValueError` for a box outside it.
+
+### `sources.jrc.local_path(source, layer, row_off, col_off, *, year=None, month=None)`, `sources.jrc.tile_url(layer, row_off, col_off, *, year=None, month=None, base=...)`
+
+Where one tile lives in a local folder laid out as on the server, and its URL on the JRC
+server: for downloading the tiles of a large region once.
+
+### `sources.gfm.search(bbox, start, end, *, min_flooded_pixels=None, page=500)`
+
+Copernicus GFM catalogue items (Sentinel-1 radar flood maps, 2015 onwards) touching a lon/lat box
+between two dates, from EODC's STAC catalogue (no account). One row per item (one scene cut to one
+300 km tile): `item`, `datetime`, `tile`, `flooded_pixels` (of the whole scene),
+`floodable_pixels`, `anomaly_detected`, `version`, `geometry` (lon/lat outline) and the URLs of
+the `flood`, `exclusion`, `reference` and `advisory` layers. `min_flooded_pixels` keeps only
+scenes with at least that many flooded 20 m pixels (filtered by the catalogue). Sorted by item id.
+
+### `sources.gfm.read_scene(item, bbox=None, *, crs=None, opener=None, advisory=False)`
+
+One item as a coded map on GFM's 20 m grid: 1 flooded, 0 observed and dry, 255 not observed
+(outside the image, excluded, normally water, and with `advisory=True` under an advisory flag).
+`bbox` limits the read (lon/lat, or in `crs`). Returns `(codes, transform, crs)`; `codes` is
+`None` when the box misses the tile. Raises `ValueError` when a layer is missing or the layers
+are not on one grid.
+
+### `sources.gfm.write_flood_map(item, bbox, out_path)`
+
+Write an item's coded map inside a lon/lat box to a GeoTIFF (nodata 255), the form
+`validate --flood-map` and `flood_events` take. Returns the path, or `None` when the box misses
+the tile.
+
+### `sources.gfm.missing_layers(item, advisory=False)`
+
+The layers an item has no file for (an item with any missing cannot be judged).
+
+### `sources.gfm.credit(datetimes)`
+
+The acknowledgement CEMS asks for, with the years of the scenes used.
+
+### `sources.osm.fetch_lines(bbox, *, cache_dir, extract=None)`
+
+OpenStreetMap roads, railways and streams in a lon/lat box, for the road-crossing fix. Downloads
+the smallest Geofabrik extract that holds the box once into `cache_dir` (under its dated name)
+and reads the lines in the box. `extract` names a Geofabrik URL or a local `.pbf` instead.
+`lines.attrs["extract"]` holds the extract's file name (which carries its date) and
+`attrs["credit"]` the ODbL credit. Which lines count: [Confidence grade](confidence.md#the-road-crossing-fix).
+
+### `sources.osm.split_lines(lines)`
+
+`(barriers, streams, bridges)` from the lines of `fetch_lines`, the three layers
+`breach_crossings` also accepts as a tuple.
+
+### `sources.osm.extract_for(bbox, *, cache_dir)`
+
+`(id, url)` of the smallest Geofabrik extract whose area holds the whole box (Geofabrik's index
+is kept in `cache_dir`). Raises `ValueError` when none does.
 
 ## Context: `h3lowpoints.context.readers` (needs the `sources` extra)
 

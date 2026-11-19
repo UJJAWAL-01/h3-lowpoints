@@ -49,6 +49,11 @@ It inherits every limit above, and adds its own:
   reports than those needing rarer storms, and drained depressions more than landlocked ones (see
   [Susceptibility](susceptibility.md#evidence-against-flood-reports)). Farmland, other climates
   and how long water stands are untested.
+- **Against observed water nationally, the index points the wrong way.** Over the lower 48,
+  depressions satellites saw wet (1984-2021) or radar saw flooded need *more* rain to fill, not
+  less; within depressions of similar size the index points the expected way. Do not read the
+  index as a prediction of which depressions hold water
+  ([Evidence, study 3](evidence.md#study-3-observed-water-and-the-confidence-grade-lower-48)).
 
 ## Storms in time
 
@@ -71,7 +76,13 @@ did equally well, and every uniform drain rule made the ranking worse.
 - **Bridges, culverts and overpasses act as dams.** Bare-earth models often keep a road
   embankment across a stream but not the culvert under it, or keep a bridge deck. The fill then
   ponds water upstream of the road: a false depression, sometimes large. Inspect large depressions
-  that end at a road or rail line.
+  that end at a road or rail line, or run the road-crossing fix (`breach_crossings`), which flags
+  them as `road_dam` where the map has the stream and the road ([Confidence grade](confidence.md#the-road-crossing-fix)).
+- **Observed water has blind spots.** Landsat misses short floods and water under cloud, trees and
+  in cities; radar flood maps are mostly river floods. "Never seen wet" is not "never wet"
+  ([Seen wet and seen flooded](water-history.md)).
+- **The confidence grade is not validated.** It summarises fixed checks; in the national test it
+  did not clearly separate depressions finer terrain confirms ([Confidence grade](confidence.md)).
 - **Buildings.** In lidar, ground under buildings is interpolated and can leave false pits;
   `buildings=` flags depressions mostly under footprints (`likely_building_artifact`). Surface
   models (Copernicus GLO-30) include roofs, so walls and courtyards make depressions that are not

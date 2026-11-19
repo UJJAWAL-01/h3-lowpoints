@@ -107,7 +107,22 @@ Each step is finished, tested and documented before the next starts.
    susceptibility index and drainage flags with version 0.3, 0.5.0 storms in time and the
    [evidence](evidence.md) of phase 5. The explorer app follows.
 
+7. **Observed water and a confidence grade** (0.6.0). Each depression joined to 38 years of
+   Landsat water (JRC) and to Sentinel-1 radar flood maps (Copernicus GFM), a road-crossing fix
+   from OpenStreetMap, and a grade from A to D ([Seen wet and seen flooded](water-history.md),
+   [Confidence grade](confidence.md)). Run on the whole lower 48 and, unchanged, on four regions
+   abroad on GLO-30 ([Outside the US](abroad.md)). A third study fixed in advance tested the fill
+   index and the grade nationally: the index points the wrong way over all depressions and the
+   expected way within depressions of similar size; the grade is not validated
+   ([Evidence](evidence.md#study-3-observed-water-and-the-confidence-grade-lower-48)). The tables
+   are version 0.4 of the dataset (in preparation).
+
 ## Also planned
+
+- **A test of the fill index within size classes**, with its rules fixed in advance (Study 3
+  showed size drives the pooled result).
+- **Bare-earth terrain abroad.** On GLO-30 most grade-A depressions in cities and forests sit on
+  roofs or trees ([Outside the US](abroad.md)); a corrected global model would remove much of that.
 
 - **Deferred from phase 5** (each needs its own study or check first): a national storm-timing
   layer (it ranks places like the published index); publishing the storm and report catalogue
@@ -121,8 +136,8 @@ Each step is finished, tested and documented before the next starts.
 - **Continental scale beyond one machine.** The border graph of the exact tiling grows with the
   number of tile-border pixels; a hierarchical version (blocks of tiles joined the same way) would
   remove that last limit for continents.
-- More data readers: other national lidar programs, FABDEM, water masks (JRC Global Surface
-  Water).
+- More data readers: other national lidar programs, FABDEM (JRC Global Surface Water is read
+  since 0.6.0).
 - **Faster curve numbers at national scale.** The national curve numbers take about 4 hours on a
   4-core laptop, limited by the processor (8 regions at once keep it fully busy): decoding the
   10 m soil grid, combining it with land cover, and labelling about 4 million pixels per region

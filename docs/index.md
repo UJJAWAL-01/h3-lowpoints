@@ -34,6 +34,9 @@ fills ([Susceptibility](susceptibility.md)), is published as open data:
 | Know how results are checked, and check your own | [Verification](verification.md) |
 | Test the depressions against observed flooding | [Validation](validation.md) |
 | Know how easily each depression fills in a storm | [Susceptibility](susceptibility.md) |
+| Know whether satellites saw water in each depression | [Seen wet and seen flooded](water-history.md) |
+| Grade depressions and fix road embankments | [Confidence grade](confidence.md) |
+| See the method run outside the US | [Outside the US](abroad.md) |
 | See what has been tested against real floods, and what failed | [Evidence](evidence.md) |
 | See example maps of three test areas | [Example maps](example-maps.md) |
 | Know what the results cannot tell you | [Accuracy and limits](limitations.md) |
@@ -63,13 +66,19 @@ fills ([Susceptibility](susceptibility.md)), is published as open data:
     fills it, and design storms.
 13. [Storms in time](storms.md): how long it rains: storms of any duration and their rarity,
     how the rain falls, two runoff methods, seepage, assumed drains, and how long water stands.
-14. [Evidence](evidence.md): every study against real floods and terrain, with what worked and
+14. [Seen wet and seen flooded](water-history.md): 38 years of satellite water and radar flood
+    maps, joined to every depression.
+15. [Confidence grade](confidence.md): a grade from A to D for every depression, the
+    road-crossing fix, and comparing two terrains.
+16. [Outside the US](abroad.md): the same code on Copernicus GLO-30 in the Netherlands, the
+    Ganges delta, Lagos and the Pampas, and what a surface model changes.
+17. [Evidence](evidence.md): every study against real floods and terrain, with what worked and
     what did not.
-15. [Example maps](example-maps.md): interactive maps of three test areas (Houston, North Dakota,
+18. [Example maps](example-maps.md): interactive maps of three test areas (Houston, North Dakota,
     the Central Valley), a preview of the explorer.
-16. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
-17. [Glossary](glossary.md): terms used across these pages.
-18. [Roadmap](roadmap.md): what is done and what comes next.
+19. [Accuracy and limits](limitations.md): what the results can and cannot be used for.
+20. [Glossary](glossary.md): terms used across these pages.
+21. [Roadmap](roadmap.md): what is done and what comes next.
 
 The [changelog](../CHANGELOG.md) lists every change, and [contributing](../CONTRIBUTING.md) explains
 how to help.

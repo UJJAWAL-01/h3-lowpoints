@@ -2,8 +2,10 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/explorer/</loc></url>
+  <url><loc>https://ujjawal-01.github.io/h3-lowpoints/abroad.html</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/cli.html</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/concepts.html</loc></url>
+  <url><loc>https://ujjawal-01.github.io/h3-lowpoints/confidence.html</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/data-sources.html</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/definition.html</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/evidence.html</loc></url>
@@ -21,4 +23,5 @@
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/susceptibility.html</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/validation.html</loc></url>
   <url><loc>https://ujjawal-01.github.io/h3-lowpoints/verification.html</loc></url>
+  <url><loc>https://ujjawal-01.github.io/h3-lowpoints/water-history.html</loc></url>
 </urlset>

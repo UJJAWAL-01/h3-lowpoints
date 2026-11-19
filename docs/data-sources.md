@@ -304,6 +304,98 @@ Limits: only *permanent* water (2021) is masked, not seasonal flooding; water na
 half a pixel (15 m at 30 m) is not seen; WorldCover's own classification errors carry over.
 Elevation grids on NAD83 and WorldCover on WGS 84 differ by about a metre, far below a pixel.
 
+## JRC Global Surface Water
+
+- **What:** where Landsat saw open water, in every image from March 1984 to December 2021, at
+  30 m (European Commission Joint Research Centre and Google; Pekel et al. 2016,
+  doi:10.1038/nature20584; version 1.4).
+- **Where:** the world from 80° N to 60° S.
+- **Licence:** CC BY 4.0 (the copyright notice on the JRC server). Credit "Source: EC JRC/Google"
+  and the paper.
+- **Format:** 10° × 10° GeoTIFF tiles of 40,000 × 40,000 pixels of 0.00025° in WGS 84, on the
+  JRC open-data server (`jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/GSWE`).
+- **Library:** `sources.jrc.read_layer` and `read_window` (windows read by range requests),
+  `water.water_history` and `water.WaterHook` ([Seen wet and seen flooded](water-history.md)).
+
+| Layer | Values |
+|---|---|
+| `occurrence` | per cent of clear observations with water, 0 to 100 |
+| `recurrence` | per cent of years in which water came back, 0 to 100 |
+| `extent` | 1 where water was seen at least once, else 0 |
+| `yearly` (1984-2021) | 1 not water, 2 seasonal water, 3 permanent water, 0 no data |
+| `monthly_recurrence` (months 1-12) | per cent of years with water in that month, inside the extent |
+
+Things learnt while testing (checked against the files in November 2026):
+
+- **The yearly files hold 0 for "no data" and for every pixel outside the maximum water extent.**
+  They are masked to the extent before export, so a 0 outside it says nothing about whether the
+  satellite saw the pixel. The library therefore judges clear years per area
+  ([how](water-history.md#clear-years)).
+- **Pixels first mapped as water after 2014 hold 0 in every earlier year**, so the share of an
+  area's pixels holding data drops before 2015 even in good years.
+- **Open sea is coded 255** in `extent` and `occurrence` (seen on a Pacific tile); only
+  `extent` = 1 counts as inside the extent, and an `occurrence` of 255 counts as 0.
+- **Size:** a small region reads a few megabytes. For the whole lower 48, download the tiles
+  once (about 24.5 GB) and pass the folder as `source`; reading windows from the server is far
+  too slow at that size.
+
+## Copernicus Global Flood Monitoring (GFM)
+
+- **What:** flooded land mapped on every Sentinel-1 radar image worldwide at 20 m, since 2015, by
+  the Copernicus Emergency Management Service (run by EODC). Radar sees through cloud.
+- **Where:** the world, on the days Sentinel-1 passes (not every day: a flood between passes is
+  missed).
+- **Licence:** the Terms of use of the CEMS Early Warning Data Store (rev. 11, 6 July 2023, read
+  in November 2026) name the Global Flood Monitoring product among the systems they cover and
+  allow reproduction, distribution, communication to the public, and adaptation, modification and
+  combination with other data, informing recipients of the source. Modified data carry
+  "Contains modified Copernicus Emergency Management Service information [years]"
+  (`sources.gfm.credit` writes it). Two points the page leaves open: its free-access sentence
+  names only EFAS and GloFAS, and it does not mention commercial use. The GFM wiki's own terms
+  page did not load as text. Check the current terms for your use.
+- **Format:** EODC's STAC catalogue (`stac.eodc.eu/api/v1`, collection `GFM`, no account), one
+  item per Sentinel-1 scene and 300 km Equi7 tile, with cloud-optimized GeoTIFF layers.
+- **Library:** `sources.gfm.search`, `read_scene`, `write_flood_map`; `floods.flood_events` and
+  `floods.FloodHook`.
+
+| Layer | Used as |
+|---|---|
+| ensemble flood extent | 1 flooded, 0 not flooded, 255 outside the image |
+| exclusion mask | where GFM cannot judge (cities, dense forest, radar shadow, sand): not observed |
+| reference water | water normally there (permanent or seasonal for the month): not observed |
+| advisory flags | 1 low backscatter over a region (snow, ice, dry soil), 2 rough water (wind), 3 both: not observed with `advisory=True` |
+
+Things learnt while testing:
+
+- **`flooded_pixels` belongs to the whole Sentinel-1 scene**, not the tile: every tile of one
+  scene carries the same number. Count scenes (acquisition times), not items, to avoid
+  overstating events.
+- **Advisory flags matter.** In development regions in North Dakota and the Texas High Plains,
+  most radar "floods" lay under flag 1 in dry or frozen months; counting flagged pixels as not
+  observed kept 97% of flooded events in Houston but 17-18% in the other two.
+- **Some items have no advisory file**, and a few list a wildcard pattern instead of a file name
+  (the server answers 404). Such items cannot be judged under `advisory=True` and are skipped and
+  listed.
+- **The catalogue was unavailable for about a day in November 2026** (HTTP 500 and 502); requests
+  are retried, but a long outage stops a run.
+
+## OpenStreetMap (Geofabrik extracts)
+
+- **What:** roads, railways, streams and bridges, for the road-crossing fix
+  ([Confidence grade](confidence.md#the-road-crossing-fix)).
+- **Where:** the world; completeness varies by country (culverts and small streams are often
+  missing).
+- **Licence:** Open Database Licence. Credit "© OpenStreetMap contributors", and say which
+  extract date was used.
+- **Format:** daily `.osm.pbf` extracts per country, state or region from Geofabrik
+  (`download.geofabrik.de`), no account.
+- **Library:** `sources.osm.fetch_lines` (picks the smallest extract that holds the box,
+  downloads it once under its dated name, reads the lines in the box with GDAL's OSM driver),
+  `split_lines`, `extract_for`.
+
+The extracts of the lower 48 states are about 12.3 GB in all. The extract's file name carries its
+date (`north-dakota-261113.osm.pbf` is 13 November 2026) and is recorded in `meta["breach"]`.
+
 ## NOAA Atlas 14 design rainfall
 
 - **What:** how much rain falls in a storm of a given duration (5 minutes to 60 days) and rarity

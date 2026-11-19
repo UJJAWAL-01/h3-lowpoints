@@ -23,6 +23,10 @@ is on one side.
 | Curve numbers (A) or Green-Ampt (B)? | Equal | No difference |
 | Does finer terrain help? | 10 m better than 30 m against lidar and, slightly, against reports; 1 m not better than 10 m against reports | 10 m: supported; 1 m: inconclusive |
 | Does machine learning beat the physical score in unseen cities? | Not the model tested; a simple logistic baseline did, as an untested lead | Not kept |
+| Are depressions that fill easily the ones satellites saw wet (38 years, lower 48)? | No over all depressions: the opposite; yes within depressions of similar size | Contradicted (pooled) |
+| Are they the ones radar saw flooded? | No: the opposite (mostly river floods) | Contradicted |
+| Does the confidence grade predict which depressions finer terrain confirms? | A > B > C, but D not the lowest | Inconclusive |
+| Does the road-crossing flag mark depressions finer terrain does not confirm? | No measurable difference; the test cannot tell | Inconclusive |
 
 ## Study 1: the susceptibility layer against flood reports
 
@@ -76,10 +80,62 @@ the model under test, and part of its gain may come from where people report (pa
 rather than where water stands. It is a lead for a future study, not a result. No prediction
 layer is published.
 
+## Study 3: observed water and the confidence grade (lower 48)
+
+This project's first test over the whole lower 48. The rules (populations, measures, thresholds, seeds, and three dated
+deviations made on development regions only) were frozen on 2026-11-10, before any of the
+national data was opened; three development regions (Houston, the Devils Lake potholes, Texas
+High Plains playas) were used to build the method and are left out of every score. All four
+hypotheses were computed in one go and are reported as they came out. Inputs: the national
+30 m run (10,502,712 depressions in the scored area), its water history
+([Seen wet and seen flooded](water-history.md)), 394 radar scenes, and the fill index
+`rain_to_fill_upstream_mm` of dataset 0.3 ([Susceptibility](susceptibility.md)), joined by
+lowest point for 99.4% of depressions. AUC here is the chance that a depression seen wet (or
+flooded) needs less rain to fill than one never seen wet (or not flooded).
+
+| Hypothesis | Result | 95% interval | Reading |
+|---|---|---|---|
+| H1: depressions seen wet in 38 years of Landsat fill more easily | AUC 0.456 | 0.444 to 0.467 | contradicted |
+| H2: depressions flooded in a radar scene fill more easily (mean over 65 scenes) | AUC 0.387 | 0.344 to 0.428 | contradicted |
+| H3: grade A is confirmed by 10 m terrain more often than grade D | +9.9 points | -3.2 to +23.2 | inconclusive |
+| H4: unflagged depressions are confirmed more often than road dams | -5.9 points | -16.8 to +6.3 | inconclusive |
+
+**H1, by size.** 6,790,656 depressions, 303,153 seen wet; intervals by block bootstrap over H3
+resolution-4 cells. Over all of them the index points the wrong way. Within each fifth of the
+depressions by area it points the right way, with AUC from 0.524 to 0.596, all supported. The share
+seen wet rises from 0.6% in the smallest fifth to 11.9% in the largest: 30 m water pixels see big
+depressions far more often, and big depressions sit on the "harder to fill" side of the index.
+This confound was named in the study rules before the data was opened. The result to quote is the
+pooled one; the size groups say the index carries signal **within depressions of similar size**,
+not that it predicts which depressions hold water. Landlocked depressions follow the index (AUC
+0.563, supported); drained ones run against it (0.422). Developed land: 0.395. The secondary
+measure `fills_in_years` gives the same picture (0.463, contradicted).
+
+**H2.** Only 65 of the 394 scenes had at least 20 flooded and 20 not-flooded scored depressions.
+As stated before scoring, most radar-mapped floods are river floods, which an index of how
+easily a depression fills from its own catchment does not model. Developed land had 3 such
+scenes, too few to read.
+
+**H3 and H4.** 300 random H3 resolution-6 cells, re-analysed on 3DEP 10 m with the same
+settings; 16,606 national depressions compared. A depression counts as confirmed when 10 m
+depressions cover at least 25% of it. Confirmed: A 68.0% (2,582), B 55.9% (5,047), C 49.7%
+(8,695), D 58.2% (282). The 10 m and 30 m products come from the same survey data, so this
+measures the effect of resolution and of the grade's rules, not independent ground truth. For
+H4 the limit is stronger: the 10 m terrain shows the same road embankments, so it "confirms" a
+road-held pond; this test cannot tell road dams from natural depressions. A secondary check
+against 1 m lidar was planned and not done (tens of hours of computing).
+
+**What follows.** The water history and radar tables are observations and are published as such.
+The fill index is not described as predicting observed water, and the confidence grade is not
+described as validated ([Confidence grade](confidence.md)). A test of the index within size
+classes, with its rules fixed in advance, is a candidate for a later study.
+
 ## What none of this shows
 
 - Reports and claims record where people noticed and reported flooding, not where water stood.
 - Storm drains, sewers and pumps are in none of the layers; in cities they decide much of what
   floods.
 - Ten storms in six cities are few; readings were made without correction for multiple tests.
+- Satellites see water only when they pass and, for Landsat, when there is no cloud: "never seen
+  wet" is not "never wet", and radar floods are mostly river floods.
 - Association is not cause. See [Accuracy and limits](limitations.md).

@@ -1,5 +1,7 @@
 # Glossary
 
+**Advisory flags.** GFM's marks on radar pixels whose flood result is doubtful: low backscatter over a region (snow, ice, dry soil) or rough water (wind). With `advisory=True` they count as not observed. See [Seen wet and seen flooded](water-history.md#radar-flood-events-copernicus-gfm-and-your-own-maps).
+
 **Analysis resolution.** The H3 resolution of a result's cell table (`Result.res`). Coarser
 resolutions are derived from it by roll-up.
 
@@ -18,11 +20,15 @@ in degrees.
 
 **Cell.** In this documentation, an H3 hexagon. The squares of a raster are called *pixels*.
 
+**Clear year.** A year in which Landsat saw a depression's area well enough to say whether it held water. See [Seen wet and seen flooded](water-history.md#clear-years).
+
 **Closed depression.** An area from which water cannot flow out until it fills to the lowest
 point of its rim. Also called a sink, pit or low point.
 
 **Cloud-optimized GeoTIFF (COG).** A GeoTIFF arranged so programs can read just the part they
 need over the internet.
+
+**Confidence grade.** A letter from A to D for each depression, from its depth against the data's error, flags for road dams and artefacts, and support from observed water. Not validated. See [Confidence grade](confidence.md).
 
 **Control points.** In validation, points standing for where observations could have come from
 (addresses, buildings), against which observations are compared.
@@ -124,6 +130,8 @@ together to bound memory.
 **Priority-flood.** The algorithm that computes the fill exactly by always growing the water from
 its lowest edge.
 
+**Radar flood map.** A map of flooded land from a radar satellite (Sentinel-1, through Copernicus GFM); radar sees through cloud. See [Seen wet and seen flooded](water-history.md).
+
 **Rain to fill.** The uniform rain depth that fills a depression, from its own catchment alone
 (`rain_to_fill_mm`) or with the overflow from upstream (`rain_to_fill_upstream_mm`). See
 [Susceptibility](susceptibility.md#rain-to-fill).
@@ -139,11 +147,15 @@ storm depths for return periods of 1 to 1000 years.
 **Ring (H3).** The cells at exactly k steps from a cell form its k-th ring; "within k rings"
 means at most k steps away. One step is about 131 m at resolution 10.
 
+**Road dam.** A depression that goes, or becomes shallower than `min_depth`, once road and railway embankments are cut where streams cross them: most likely water held back by an embankment whose culvert the elevation model does not show. See [Confidence grade](confidence.md#the-road-crossing-fix).
+
 **Roll-up.** Computing a coarser cell table from a finer one: maximum of depths, sums of areas,
 volumes and counts.
 
 **Runoff.** The part of the rain that flows over the ground rather than soaking in; here from
 the SCS curve number method. See [Susceptibility](susceptibility.md#runoff-curve-numbers).
+
+**Seen wet.** A depression whose water history class is `permanent`, `seasonal` or `some_years`: Landsat saw water in it in at least one clear year, 1984-2021. *Seen flooded*: flooded in at least one radar flood map.
 
 **Spill point.** The lowest point of a depression's rim, where it overflows when full. With
 `catchments=True` it is reported (`spill_lat`, `spill_lon`), with the depression the overflow

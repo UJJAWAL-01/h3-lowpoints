@@ -10,12 +10,15 @@ from rasterio.transform import from_origin
 
 from h3lowpoints import analyze_array, read_result
 from h3lowpoints.cli import build_parser
-from h3lowpoints.pipeline import (BUILDING_COLUMNS, CATCHMENT_COLUMNS, CATCHMENT_TABLE, CELL_TABLE,
+from h3lowpoints.pipeline import (BREACH_COLUMNS, BUILDING_COLUMNS, CATCHMENT_COLUMNS, CATCHMENT_TABLE, CELL_TABLE,
                                   CORE_COLUMNS, DEPRESSION_CELL_TABLE, DETAIL_COLUMNS,
                                   DRAIN_COLUMNS)
+from h3lowpoints.confidence import GRADE_COLUMNS
 from h3lowpoints.drainage import DRAINAGE_COLUMNS
+from h3lowpoints.floods import SEEN_COLUMNS, SUMMARY_COLUMNS
 from h3lowpoints.storms import STORM_COLUMNS
 from h3lowpoints.susceptibility import BASE_COLUMNS
+from h3lowpoints.water import WATER_COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted((ROOT / "docs").glob("*.md")) + [ROOT / "README.md", ROOT / "CONTRIBUTING.md"]
@@ -87,11 +90,13 @@ def test_every_documented_function_exists():
 
 def test_every_column_is_documented():
     text = (ROOT / "docs" / "outputs.md").read_text(encoding="utf-8")
-    for column in (CORE_COLUMNS + DRAIN_COLUMNS + BUILDING_COLUMNS + CATCHMENT_COLUMNS + CELL_TABLE
+    for column in (CORE_COLUMNS + DRAIN_COLUMNS + BUILDING_COLUMNS + BREACH_COLUMNS
+                   + CATCHMENT_COLUMNS + CELL_TABLE
                    + CATCHMENT_TABLE + DETAIL_COLUMNS + DEPRESSION_CELL_TABLE + BASE_COLUMNS
                    + ["fill_ratio", "fill_ratio_2yr", "fill_ratio_10yr", "fill_ratio_100yr",
                       "fills_in_years"] + DRAINAGE_COLUMNS + STORM_COLUMNS
-                   + ["curve_number", "seepage_mm_h", "drain_mm_h", "soil_fallback_share"]):
+                   + ["curve_number", "seepage_mm_h", "drain_mm_h", "soil_fallback_share"]
+                   + WATER_COLUMNS + SUMMARY_COLUMNS + SEEN_COLUMNS + GRADE_COLUMNS):
         assert f"`{column}`" in text, f"column {column} is not described in outputs.md"
 
 
@@ -105,7 +110,7 @@ def test_every_metadata_field_is_documented(tmp_path):
     # `params` is documented field by field; tiled runs add `tiling`, `build` adds `build`, and
     # a susceptibility table adds `susceptibility`
     fields = ((set(meta) - {"params"}) | {f"params.{k}" for k in meta["params"]}
-              | {"tiling", "build", "susceptibility"})
+              | {"tiling", "build", "susceptibility", "breach"})
     for field in fields:
         assert f"`{field}`" in text, f"meta field {field} is not described in outputs.md"
 

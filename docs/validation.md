@@ -222,6 +222,41 @@ used:
 | `block` | Its bootstrap block (H3 cell at `block_res`). |
 | `class` | With `classes` only: the class of that nearest depressed ground; empty when farther than `max_rings`. |
 
+## Flood maps
+
+A flood map (a radar or optical image classified into flooded and dry land) can stand in for
+points. Its flooded pixels become the observations and the dry pixels **the same map observed**
+become the controls, so the controls come from the same image, the same day and the same sensor.
+Pixels the map could not judge are never used, so cities, forests and radar shadow that a radar
+map excludes do not count as dry.
+
+```python
+from h3lowpoints.sources import gfm
+from h3lowpoints.validation import validate_flood_map
+
+box = (-95.8, 29.5, -95.0, 30.1)
+item = gfm.search(box, "2017-08-29", "2017-08-31", min_flooded_pixels=25_000).iloc[0]
+gfm.write_flood_map(item, box, "harvey.tif")         # 1 flooded, 0 observed dry, 255 not observed
+v = validate_flood_map("us48_30m_water", "harvey.tif", boundary="houston.gpkg")
+```
+
+```
+h3lowpoints validate us48_30m_water --flood-map harvey.tif --boundary houston.gpkg --out harvey.json
+```
+
+The map must be a raster coded **1 flooded, 0 observed and dry, anything else not observed**
+(`gfm.write_flood_map` writes a GFM scene in that form; set your own maps to the same codes).
+Up to `n` (default 20,000, `--map-points`) flooded and as many dry pixels are drawn at random
+(`seed`), each with a chance in proportion to its ground area, so pixels in degrees count fairly
+at any latitude. The rest is `validate` exactly as above, and the report gains a `flood_map`
+section with the map's path, its counts of flooded, dry and not-observed pixels, the number
+sampled and the seed.
+
+Read a lift from a flood map with its source in mind: radar maps mostly show **river** floods,
+which reach depressions on a floodplain whether or not they hold their own rain. To ask whether
+each depression was flooded, rather than whether flooded land lies near depressions, use
+`flood_events` ([Seen wet and seen flooded](water-history.md)).
+
 ## What this cannot tell you
 
 - **Cause.** Depressions sit where the land is flat and low, which is also where rivers, old
