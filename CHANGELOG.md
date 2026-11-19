@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.6.0 (unreleased)
+
+From "could hold water" to "did": observed water, radar floods and a confidence grade for every
+depression, at any scale. See [Seen wet and seen flooded](docs/water-history.md),
+[Confidence grade](docs/confidence.md) and Study 3 in [Evidence](docs/evidence.md).
+
+### Added
+- **Water history** (`water.water_history`, `water.water_history_by_cells`, `water.WaterHook`):
+  per depression, how often Landsat saw water from 1984 to 2021 (JRC Global Surface Water 1.4):
+  clear years judged per H3 area, wet and permanent years, first and last wet year, occurrence,
+  wettest month, a Theil-Sen trend with its Mann-Kendall p-value, and a class (`permanent`,
+  `seasonal`, `some_years`, `never_seen_wet`, `too_small`, `too_few_views`).
+- **Radar flood events** (`floods.flood_events`, `floods.FloodHook`): per depression, in how many
+  flood maps it was covered, observed and flooded (Copernicus GFM Sentinel-1 scenes, or your own
+  coded rasters), and a long table per depression and map. `advisory=True` counts pixels under
+  GFM's advisory flags as not observed.
+- **Confidence grade** (`confidence.confidence`, `confidence.grade`): A to D from depth against the
+  data's vertical error (`ERROR_3DEP_30M` = 1.0 m, `ERROR_GLO30` = 2.0 m), flags for road dams and
+  artefacts, and support from observed water, with one column per reason. Not validated: see
+  Study 3.
+- **Comparing two terrains** (`confidence.compare`): match the depressions of two analyses of the
+  same place (for example 30 m against 10 m), with covered shares and depth differences.
+- **Road-crossing fix** (`breach_crossings=`, `breach_radius_m=` in `analyze`, `analyze_array`
+  and `analyze_tiled`): road and railway embankments are cut where OpenStreetMap streams cross
+  them, and each depression gets `breached_depth_m`, `road_dam` and `bridge_crossing`;
+  `meta["breach"]` counts lines, crossings and flags. Tiled runs cut the same pixels.
+- **Tiled hooks** (`analyze_tiled(hooks=[...])`): steps run on every tile, whose tables
+  (`Result.tables`) equal those of the whole region, are saved next to the depression table,
+  carried by `clip`, and checked by `verify` (`check_evidence`). Their settings are in
+  `meta["tables"]`.
+- **Validation against flood maps** (`validation.validate_flood_map`,
+  `h3lowpoints validate --flood-map FILE --map-points N`): flooded pixels as observations and
+  pixels the same map saw dry as controls.
+- Data sources: `sources.jrc` (JRC Global Surface Water, read by range requests), `sources.gfm`
+  (the GFM catalogue through EODC's STAC, coded maps, credit), `sources.osm` (Geofabrik extracts,
+  roads, railways, streams and bridges).
+- The `[water]` extra (geopandas, pyogrio, shapely) for the OpenStreetMap lines and radar scene
+  outlines.
+- Docs: [Seen wet and seen flooded](docs/water-history.md), [Confidence grade](docs/confidence.md),
+  [Outside the US](docs/abroad.md) (the same code on GLO-30 in four regions), flood maps in
+  [Validation](docs/validation.md#flood-maps), Study 3 in [Evidence](docs/evidence.md).
+
+### Found by the national run and fixed before release
+- `breached_depth_m` is capped at `max_depth_m`: a cut could lower one stream pixel inside a
+  depression that still holds water, leaving a pit deeper than the depression (1,461 of 10.5
+  million nationally). `road_dam` is unchanged by the cap.
+- A permanent year must also be a wet year. A 1-2 pixel depression could reach the permanent
+  share but not the 2-pixel wet minimum (744 nationally, all `too_small`).
+
 ## 0.5.1 (3 November 2026)
 
 ### Fixed

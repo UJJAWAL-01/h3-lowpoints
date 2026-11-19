@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "h3-lowpoints"
-version = "0.5.1"
+version = "0.6.0"
 description = "Find closed depressions in elevation models and map them on H3 cells at any resolution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,6 +41,7 @@ dependencies = [
 sources = ["geopandas", "pyogrio", "shapely"]   # reading drain and building files
 viz = ["pydeck"]
 parquet = ["pyarrow>=14"]                       # writing and reading .parquet results
+water = ["geopandas", "pyogrio", "shapely"]     # road-crossing lines (OpenStreetMap) and radar scene outlines
 dev = ["pytest", "ruff", "shapely", "pyarrow>=14"]
 
 [project.scripts]

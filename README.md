@@ -35,7 +35,8 @@ depression in the lower 48 states, a rain simulator and 3D views, with nothing t
 3. **Scales** to regions far larger than memory with an exact tiled method: the answer never
    depends on the tile size, and tables are written to disk as they are produced.
 4. **Fetches** open data for any box: USGS 3DEP (US, 30 m, 10 m and 1 m lidar), Copernicus GLO-30
-   (worldwide), land cover and design rainfall.
+   (worldwide), land cover, design rainfall, satellite water (JRC), radar flood maps (GFM) and
+   OpenStreetMap roads and streams.
 5. **Shows** results as a self-contained, shareable 3D web map.
 6. **Verifies** any result, anywhere, with checks that need no reference answer.
 7. **Validates** against observations: do flood reports, claims or high-water marks fall in or
@@ -47,6 +48,13 @@ depression in the lower 48 states, a rain simulator and 3D views, with nothing t
 9. **Follows** a storm in time: when each depression fills, how deep it gets, where its water goes
    and how long it stands, for any NOAA Atlas 14 storm or rain depth
    ([storms in time](https://ujjawal-01.github.io/h3-lowpoints/storms)).
+10. **Joins observed water** to every depression: how often Landsat saw it wet from 1984 to 2021
+    (JRC Global Surface Water) and whether Sentinel-1 radar flood maps (Copernicus GFM) saw it
+    flooded ([seen wet and seen flooded](https://ujjawal-01.github.io/h3-lowpoints/water-history)).
+11. **Grades** each depression from A to D by fixed checks, including a road-crossing fix that cuts
+    embankments where OpenStreetMap streams pass under roads
+    ([confidence grade](https://ujjawal-01.github.io/h3-lowpoints/confidence)). The grade is a
+    transparent summary, not a validated probability ([evidence](https://ujjawal-01.github.io/h3-lowpoints/evidence)).
 
 ## Install
 
@@ -55,6 +63,7 @@ Python 3.10 or newer:
 ```
 pip install h3-lowpoints                          # core
 pip install "h3-lowpoints[viz,sources,parquet]"   # + notebook maps, drain/building files, Parquet output
+pip install "h3-lowpoints[water,parquet]"         # + road-crossing fix and radar flood maps
 ```
 
 ## National dataset
