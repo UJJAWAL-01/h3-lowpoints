@@ -24,6 +24,19 @@ out: it is never measured from sea level. Elevations come from the USGS 3DEP 30 
 model (NAVD 88), whose vertical error is about 0.5 to 1 m; depressions shallower than 0.5 m are
 not in the dataset. How depressions are found: [Definition](definition.md).
 
+**Colour by: Depth, Seen wet, Seen flooded, Grade.** Besides depth, the hexagons can be shaded by
+what satellites saw and by the confidence grade (dataset 0.4,
+[Seen wet and seen flooded](water-history.md), [Confidence grade](confidence.md)):
+
+| Colour by | Zoomed in (levels 8-10): the depression with most area in the hexagon | Zoomed out (levels 4-6) |
+|---|---|---|
+| Seen wet | Its Landsat water class, 1984-2021: permanent, wet in at least half the years, wet in some years, never seen wet, or too small / too seldom seen to tell | Share of the hexagon's depressions seen wet |
+| Seen flooded | Flooded in at least one sampled radar scene (2015-2025), seen by radar but never flooded, or not seen by any sampled scene | Share of the hexagon's depressions seen flooded |
+| Grade | A, B, C or D | Share graded A or B |
+
+About 1% of depressions have no evidence (they were not found exactly the same in the run that
+collected it) and are drawn pale. The 3D views keep the depth colours.
+
 ## A depression
 
 Click a hexagon to open its depression. The panel gives, in plain words first:
@@ -38,6 +51,7 @@ Click a hexagon to open its depression. The panel gives, in plain words first:
 | Land draining into it, curve number | Its catchment, and how much rain runs off it (SCS curve number, 0-100) |
 | Where it overflows | The overflow path, depression to depression, drawn straight between lowest points (blue arrows); depressions overflowing into it (grey dotted lines) |
 | Nearest major road | From its lowest point, US Census TIGER/Line 2024 primary and secondary roads |
+| What satellites saw | In how many clear years Landsat saw it wet (first and last year, wettest month), or why the record cannot tell; in how many sampled radar scenes it was seen and flooded, with the dates; its grade and the reasons (depth against the terrain's 1 m error, road-dam and bridge flags, water seen). Text only: Landsat gives years, not dates, and flood-day photos are mostly cloud |
 
 Badges:
 
@@ -49,10 +63,11 @@ Badges:
 - **Landlocked**: no sign of drainage in mapped lines (not proof that none exists).
 - **Shallow**: less than 1 m deep, within the elevation model's error.
 
-**Show: All depressions / Hide likely drained.** The second hides the likely drained and the road
-features at city and street scale (the country summaries count every depression). Hidden
-depressions still take part in the rain simulator's flow; they are only left out of the map and
-its counts.
+**Show: All depressions / Hide likely drained / Grade A or B only.** The second hides the likely
+drained and the road features; the third shows only depressions graded A or B (those without
+evidence are hidden). Both apply at city and street scale (the country summaries count every
+depression). Hidden depressions still take part in the rain simulator's flow; they are only left
+out of the map and its counts.
 
 ## 3D views
 
@@ -244,7 +259,8 @@ Everything you see is in the link (after `#`), so Copy link shares it exactly:
 | `map=zoom/lat/lon[/bearing/pitch]` | The view |
 | `d=region.id` | The selected depression (H3 resolution-4 region and dataset id) |
 | `v=columns` or `v=wells`, `x=1` or `x=5` | The 3D view and its factor (×10 when absent) |
-| `show=undrained` | Hide likely drained |
+| `show=undrained` or `show=ab` | Hide likely drained; grade A or B only |
+| `colour=wet`, `colour=flooded` or `colour=grade` | What the hexagons are shaded by (depth when absent) |
 | `s=r.10.24` or `s=a.130.6` | A storm: by rarity (years, hours) or by amount (mm, hours) |
 | `g=dry` or `g=wet`, `t=0` to `t=16` | Ground before the storm (average when absent); the step (the end when absent) |
 
@@ -262,10 +278,12 @@ numbers on the clipboard.
 | `packs.bin`, `index.json` | 4,576 packs (format 2), one per H3 resolution-4 region: depressions, their resolution-10 cells, spill links across packs, water from neighbouring areas | The national dataset v0.3 |
 | `rarity.bin`, `rarity_index.json` | NOAA Atlas 14 depths for 1 to 48 hours and 1 to 1,000 years per resolution-7 cell | NOAA Atlas 14 |
 | `extras.bin`, `extras_index.json` | Rim and lowest ground (NAVD 88), distance to the nearest major road and road class, per depression | Dataset v0.3, Census TIGER/Line 2024 |
+| `evidence.bin`, `evidence_index.json` | Per depression: Landsat water class and years, radar scenes that saw and flooded it with the flood days, grade, road-dam and bridge flags, depth after the road fix | Dataset v0.4 (JRC Global Surface Water, Copernicus GFM, OpenStreetMap) |
 | `data/overview_*.bin`, `data/places.json` | Country summaries at levels 4-6; the place search | Dataset v0.3; Census 2024 Gazetteer |
+| `data/overview_evidence_*.bin` | Per level-4-6 hexagon: depressions with evidence, seen wet, seen and flooded by radar, grades A-D, road dams | Dataset v0.4 |
 | `data/temporal.json` | NOAA Atlas 14 temporal distributions: 29 regions, the region at each resolution-5 cell, median curves for 6, 12, 24, 96 h | NOAA Atlas 14 |
 
-The first three are hosted on Hugging Face (`h3-lowpoints/explorer-data`, pinned to one commit) with
+The first four are hosted on Hugging Face (`h3-lowpoints/explorer-data`, pinned to one commit) with
 Zenodo as the fallback ([doi.org/10.5281/zenodo.23896025](https://doi.org/10.5281/zenodo.23896025));
 the app reads one pack at a time with HTTP range requests. The others ship with the app. The tools
 that build and check every file are in `app/tools/` in the repository.
@@ -280,6 +298,7 @@ Every check below runs in a real browser (headless Chrome) against the same data
 | Result panel = engine, engine = library for whole views, rarity readout = library rule | `app/tools/storm_test.mjs` with `storm_cases.py` |
 | Timing curves = library, region lookup, exact fill share = library, fill times | `storm_test.mjs` with `timing_cases.py` |
 | Elevations and road classes = dataset; the filter hides exactly the drained and road features | `app/tools/extras_test.mjs` |
+| Evidence = dataset 0.4 for every depression (`evidence.py check`) and in the browser for 70 of every kind; grade A or B only leaves no other depression; overview counts = national totals; colour switch, link and legend | `app/tools/evidence.py`, `evidence_test.mjs` with `evidence_cases.py` |
 | 3D heights = depth × factor; views keep the selection and storm | `app/tools/view3d_test.mjs` |
 | Levels while zooming; overview columns only at overview levels | `app/tools/zoom_test.mjs` |
 | Abuse while a storm plays (spam, map moves, views, phone, soak) | `app/tools/storm_stress.mjs` |

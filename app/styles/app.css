@@ -155,6 +155,13 @@ a:hover { color: var(--water); }
 .ramp span { display: block; }
 .ramp-labels { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; font: 500 12.5px/1 var(--sans); color: var(--muted); font-variant-numeric: tabular-nums; }
 .ramp-labels span:not(:first-child) { margin-left: -4px; }
+/* legend of classes (the evidence views zoomed in) */
+.legend.classes ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.legend.classes li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: center; font-size: 13.5px; color: var(--ink-2); }
+.legend.classes i { display: block; width: 22px; height: 13px; border: var(--rule); }
+/* what satellites saw, in the depression panel */
+.evidence { display: grid; gap: 6px; background: var(--paper); padding: 10px 12px; }
+.evidence .say { margin: 0; }
 
 /* ---------------------------------------------------------------- map controls */
 .levels {

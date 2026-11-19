@@ -1,7 +1,7 @@
 // What the side panel (or bottom sheet) says. Plain sentences first, the numbers below them.
 
 import { EARTH } from "../map/heights.js";
-import { legendHtml } from "../map/layers.js";
+import { evidenceLegendHtml, legendHtml } from "../map/layers.js";
 import * as f from "./format.js";
 import { WATER } from "../map/water.js";
 import { STEPS, fallen } from "./storm-bar.js";
@@ -13,7 +13,7 @@ const both = (x) => `${f.esc(x.main)}${x.alt ? ` <small>${f.esc(x.alt)}</small>`
 const inline = (x) => `${f.esc(x.main)}${x.alt ? ` (${f.esc(x.alt)})` : ""}`;
 const CLOSE = `<button class="close" data-act="close" aria-label="Close details"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.6"/></svg></button>`;
 
-export function intro(nat, mode, res, heightNote = "", earth = false, show = "all") {
+export function intro(nat, mode, res, heightNote = "", earth = false, show = "all", colour = "depth") {
   const n = nat
     ? `<div class="stats" role="list">
         <div role="listitem"><span class="label">Depressions</span><span class="v">${f.int(nat.depressions)}</span></div>
@@ -31,7 +31,8 @@ export function intro(nat, mode, res, heightNote = "", earth = false, show = "al
     <p class="lede">Every closed depression on land in the lower 48 US states: low ground that water flows into but not out of.</p>
     <p class="notice">For exploration and learning only. Not a flood map, forecast or advice. <button class="btn link" data-act="disclaimer">Disclaimer</button></p>
     ${n}
-    ${legendHtml(res === 10 ? "depth" : "share", f.units.us, res === 10 && earth ? EARTH : undefined)}
+    ${colour === "depth" || earth ? legendHtml(res === 10 ? "depth" : "share", f.units.us, res === 10 && earth ? EARTH : undefined) : evidenceLegendHtml(colour, res < 8)}
+    ${colourControl(colour, earth)}
     ${heightNote ? `<p class="note"><strong>3D:</strong> ${f.esc(heightNote)}</p>` : ""}
     <p class="note">${hint}</p>
     ${mode === "detail" ? '<div class="row"><button class="btn primary" data-act="storm-open">Run a storm here</button></div>' : ''}
@@ -62,6 +63,11 @@ export function overviewCell(p, res) {
       <dt>Water held when all are full</dt><dd>${both(f.volume(p.v))}</dd>
       <dt>Cell</dt><dd><button class="copy" data-copy="${f.esc(p.h)}" title="Copy">${f.esc(p.h)}</button></dd>
     </dl>
+    ${p.eh != null ? `<dl class="facts evidence">
+      <dt>Seen wet by Landsat <small>(1984-2021)</small></dt><dd>${f.int(p.ewc)} <small>of ${f.int(p.eh)}</small></dd>
+      <dt>Seen flooded by radar <small>(sample of 394 scenes, 2015-2025)</small></dt><dd>${f.int(p.efc)} <small>of ${f.int(p.eoc)} the radar saw</small></dd>
+      <dt>Grade A · B · C · D</dt><dd>${f.int(p.eA)} · ${f.int(p.eB)} · ${f.int(p.eC)} · ${f.int(p.eD)}</dd>
+      <dt>Likely held by a road embankment</dt><dd>${f.int(p.er)}</dd></dl>` : ""}
     <p class="note">Counts are of depressions whose lowest point lies in this hexagon. Hexagons at coasts and borders are partly outside the data.</p>
     <div class="row"><button class="btn primary" data-act="zoom-cell">Zoom in here</button></div>
     ${source("cell")}`;
@@ -95,6 +101,7 @@ export function depression(d, extra = "") {
     <div class="row">${road}${status}${shallow}</div>
     <p class="say">Water can stand up to <strong>${inline(deep)}</strong> deep over <strong>${inline(wide)}</strong>. ${fills}</p>
     <p class="say">${where}</p>
+    ${evidenceBlock(d)}
     ${extra}
     ${mapKey(d)}
     <dl class="facts">
@@ -138,6 +145,36 @@ function mapKey(d) {
   return `<div class="mapkey"><span class="label">On the map</span><ul>${rows.join("")}</ul>${how}</div>`;
 }
 
+// What satellites saw, and the grade (dataset 0.4). Text only: years and dates, no images.
+const MONTHS = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+const WCLASS = ["", "too small for the satellite record to tell (under 3 Landsat pixels)", "seen too seldom to tell (fewer than 20 clear years)",
+  "never seen wet", "seen wet in some years", "seen wet in at least half the years", "permanent water"];
+function evidenceBlock(d) {
+  if (!d.evidence) return "";
+  if (!d.wclass && !d.grade) return `<div class="evidence"><span class="label">What satellites saw</span>
+    <p class="note">No evidence for this depression: it was not found exactly the same in the run that collected it (about 1% of depressions).</p></div>`;
+  const wet = d.wclass >= 4
+    ? `Seen wet by Landsat in <strong>${f.int(d.wetYears)} of ${f.int(d.clearYears)}</strong> clear years (first ${d.firstWet}, last ${d.lastWet})${d.wettestMonth ? `; water came back most often in ${MONTHS[d.wettestMonth]}` : ""}.`
+    : d.wclass === 3 ? `Never seen wet by Landsat in ${d.clearYears != null ? `${f.int(d.clearYears)} clear years` : "the years it was seen"} (1984-2021). Short floods between passes and under cloud are missed: never seen wet is not never wet.`
+    : `Landsat: ${WCLASS[d.wclass]}.`;
+  const days = d.floodDays.map((x) => new Date(x + "T00:00:00Z").toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }));
+  const radar = d.radarFlooded
+    ? `Seen <strong>flooded</strong> by radar ${d.radarObserved === 1 ? "in the one scene that saw it" : `in ${f.int(d.radarFlooded)} of the ${f.int(d.radarObserved)} scenes that saw it`}: ${days.map(f.esc).join(", ")}.`
+    : d.radarObserved ? `Seen by radar in ${f.int(d.radarObserved)} scene${d.radarObserved === 1 ? "" : "s"}, never flooded.`
+    : "No sampled radar scene saw it.";
+  const base = ["", "at least twice", "between one and two times", "less than"][d.baseGrade];
+  const why = [`depth ${f.esc(f.depth(d.depth).main)}, ${base} the terrain's 1 m error`];
+  if (d.roadDam) why.push(`likely held by a road embankment: cutting it where a mapped stream passes under ${d.breachedM ? `leaves ${f.esc(f.depth(d.breachedM).main)}` : "drains it"}`);
+  if (d.bridge) why.push("a bridge passes over it");
+  if (d.wclass >= 4 || d.radarFlooded) why.push("water was seen there, which raises the grade one level");
+  const grade = d.grade ? `<strong>Grade ${"ABCD"[d.grade - 1]}</strong>: ${why.join("; ")}.` : "";
+  return `<div class="evidence"><span class="label">What satellites saw</span>
+    <p class="say">${wet}</p><p class="say">${radar}</p>${grade ? `<p class="say">${grade}</p>` : ""}
+    <p class="note">Landsat: JRC Global Surface Water, 1984-2021, yearly. Radar: Copernicus GFM, a random sample of 394 scenes, 2015-2025; radar floods are mostly river floods.
+      The grade sums up fixed checks and is not a validated probability. <a href="https://ujjawal-01.github.io/h3-lowpoints/water-history.html" target="_blank" rel="noopener">How</a> ·
+      <a href="https://ujjawal-01.github.io/h3-lowpoints/confidence.html" target="_blank" rel="noopener">The grade</a></p></div>`;
+}
+
 // Where every number comes from, under every view
 export function source(kind) {
   if (kind === "storm") return `<div class="source"><span class="label">Source</span>
@@ -168,10 +205,22 @@ function showControl(show) {
   return `<div class="show"><span class="label">Show</span>
     <div class="seg" role="group" aria-label="Which depressions to show">
       <button data-act="show-all" aria-pressed="${show === "all"}">All depressions</button>
-      <button data-act="show-undrained" aria-pressed="${show === "undrained"}">Hide likely drained</button></div>
+      <button data-act="show-undrained" aria-pressed="${show === "undrained"}">Hide likely drained</button>
+      <button data-act="show-ab" aria-pressed="${show === "ab"}">Grade A or B only</button></div>
     <p class="note">Likely drained: a mapped stream, ditch or canal within 30 m of the lowest point, a major road within 30 m of
-      where it overflows, or a road cut or underpass (lowest point on a major road). Applies at city and street scale; the
-      country summaries count every depression.</p></div>`;
+      where it overflows, or a road cut or underpass (lowest point on a major road). Grade A or B: deeper than the terrain's
+      error, or seen wet, with no road-dam or bridge flag (depressions without evidence are hidden). Applies at city and
+      street scale; the country summaries count every depression.</p></div>`;
+}
+
+// Shade by depth, or by what satellites saw (dataset 0.4)
+function colourControl(colour, earth) {
+  const b = (k, l) => `<button data-act="colour-${k}" aria-pressed="${colour === k}">${l}</button>`;
+  return `<div class="show"><span class="label">Colour by</span>
+    <div class="seg" role="group" aria-label="What the hexagons are shaded by">${b("depth", "Depth")}${b("wet", "Seen wet")}${b("flooded", "Seen flooded")}${b("grade", "Grade")}</div>
+    <p class="note">${earth && colour !== "depth" ? "The 3D views keep the depth colours; switch to Flat to see this shading. " : ""}Seen wet: Landsat, 1984-2021 (JRC Global
+      Surface Water). Seen flooded: radar flood maps, a sample of 394 scenes, 2015-2025 (Copernicus GFM). Grade: fixed checks, not a
+      validated probability. Zoomed out, the share of each hexagon's depressions.</p></div>`;
 }
 
 // ------------------------------------------------------------------ the rain simulator

@@ -65,7 +65,16 @@ async function readOverview(res) {
   const f = new Float32Array(buf.buffer, buf.byteOffset + 8 * n, 3 * n);
   const u = new Uint32Array(buf.buffer, buf.byteOffset + 20 * n, 3 * n);
   const o = { n, cells, covered: f.subarray(0, n), depressed: f.subarray(n, 2 * n), volume: f.subarray(2 * n),
-    count: u.subarray(0, n), fills2: u.subarray(n, 2 * n), landlocked: u.subarray(2 * n) };
+    count: u.subarray(0, n), fills2: u.subarray(n, 2 * n), landlocked: u.subarray(2 * n), ev: null };
+  // evidence counts per cell, same order (app/tools/evidence.py): with evidence, seen wet, observed by
+  // radar, flooded, grades A, B, C, D, road dams. Missing file: no evidence views zoomed out.
+  try {
+    const re = await fetch(`${local}overview_evidence_${res}.bin`);
+    if (re.ok) {
+      const ev = new Uint32Array((await gunzip(new Uint8Array(await re.arrayBuffer()))).slice().buffer);
+      if (ev.length === 9 * n) o.ev = ev;
+    }
+  } catch { o.ev = null; }
   if (res > 4) {                                    // cells of each res-4 region, for drawing a view
     o.byRegion = new Map();
     for (let i = 0; i < n; i++) {
@@ -134,6 +143,11 @@ async function overviewCells(res, box) {
         f: c ? o.fills2[i] / c : 0, l: c ? o.landlocked[i] / c : 0, v: o.volume[i], a: o.depressed[i] },
     };
     features[k].properties.hc = Math.round(columnHeight(res, features[k].properties));
+    if (o.ev) {                                      // shares of the depressions with evidence
+      const E = (j) => o.ev[j * o.n + i], has = E(0), pr = features[k].properties;
+      pr.eh = has; pr.ewc = E(1); pr.eoc = E(2); pr.efc = E(3); pr.eA = E(4); pr.eB = E(5); pr.eC = E(6); pr.eD = E(7); pr.er = E(8);
+      pr.ew = has ? E(1) / has : -1; pr.ef = has ? E(3) / has : -1; pr.eg = has ? (E(4) + E(5)) / has : -1;
+    }
   }
   return { type: "FeatureCollection", features };
 }
@@ -176,7 +190,7 @@ async function getPack(region) {
 // mode "all", or "undrained": without the likely drained (see hidden())
 function levelCells(v, level, mode = "all") {
   const key = `${level}:${mode}`;
-  return v.levels[key] || (v.levels[key] = groupCells(v.pack, level, mode === "undrained" ? hidden(v) : null));
+  return v.levels[key] || (v.levels[key] = groupCells(v.pack, level, skipMask(v, mode)));
 }
 
 function cellAreas(v, level, mode = "all") {
@@ -203,18 +217,18 @@ function lowLatLng(v) {
 async function pack(region, level, mode = "all") {
   const v = await getPack(region);
   if (!v) return { region, empty: true };
-  const ex = await extrasOf(v);
+  const ex = await extrasOf(v), ev = await evidenceOf(v);
   // the last two levels drawn for this pack are kept: zooming back and forth costs nothing
   v.drawn = v.drawn || new Map();
-  const key = `${level}:${mode}:${ex ? 1 : 0}`;
+  const key = `${level}:${mode}:${ex ? 1 : 0}:${ev ? 1 : 0}`;
   if (v.drawn.has(key)) { const hit = v.drawn.get(key); v.drawn.delete(key); v.drawn.set(key, hit); return hit; }
-  const out = buildPack(v, ex, level, mode);
+  const out = buildPack(v, ex, ev, level, mode);
   v.drawn.set(key, out);
   while (v.drawn.size > 2) v.drawn.delete(v.drawn.keys().next().value);
   return out;
 }
 
-function buildPack(v, ex, level, mode) {
+function buildPack(v, ex, ev, level, mode) {
   const L = levelCells(v, level, mode);
   // level 10: lowest ground in each hexagon above sea level = its depression's rim - the depth there
   let ground = null;
@@ -236,6 +250,9 @@ function buildPack(v, ex, level, mode) {
       : { h, s: L.area[k] / cellArea(h, "m2"), d: Math.round(L.depth[k] * 100) / 100, a: Math.round(L.area[k]), dep: L.dep[k], n: L.n[k] };
     if (level !== 10) p.hc = Math.round(columnHeight(level, p) * 10) / 10;   // share columns (m); level 10 = d x chosen factor
     if (ground && Number.isFinite(ground[k])) { p.g = Math.round(ground[k] * 10) / 10; p.rim = Math.round(ex.rim[L.dep[k]] * 10) / 10; p.rc = ex.road[L.dep[k]]; }
+    // evidence of the depression with most area in the hexagon: water class, radar (0 not observed,
+    // 1 observed dry, 2 flooded), grade (0 none, 1-4 = A-D)
+    if (ev) { const d = L.dep[k]; p.ew = ev.wclass[d]; p.ef = ev.fl[d] ? 2 : ev.obs[d] ? 1 : 0; p.eg = ev.grade[d]; }
     features[k] = {
       type: "Feature", id: k,
       geometry: { type: "Polygon", coordinates: [ring(h)] },
@@ -288,6 +305,7 @@ async function depression(region, i) {
     catchment: pk.catch[i], curveNumber: pk.cn[i], rainToFill: pk.rain_to_fill[i],
     fillsInYears: pk.fills_in_years[i], drained: (pk.flags[i] & 1) === 1, landlocked: (pk.flags[i] & 2) === 2,
     ...(await extrasFields(v, i)),
+    ...(await evidenceFields(v, i)),
     target: t, targetRegion: t >= 0 ? path.regions[1] : null, targetLowLngLat: t >= 0 ? chain[1] : null,
     chainSteps: chain.length - 1, chainLeaves: leaves, chainIdx, chainRegions: path.regions, chainIds: path.ids,
     chainOtherAreas: path.packs, chainCut: path.cut, cellCount: cells.length,
@@ -427,7 +445,7 @@ async function stormLevel(region, level, storm, mode = "all") {
   const run = await stormRun(region, storm);
   if (!run) return { region, level, empty: true };
   const v = packs.get(region) || await getPack(region);
-  if (mode !== "all") await extrasOf(v);
+  if (mode !== "all") await prepare(v, mode);
   const values = levelWater(v.pack, levelCells(v, level, mode), run, level, cellAreas(v, level, mode));
   return { region, level, steps: STEPS, values, ms: run.ms };
 }
@@ -444,9 +462,9 @@ async function stormSummary(regions, box, stormIn, mode = "all") {
     const run = await stormRun(region, storm);
     if (!run) continue;
     const v = await getPack(region), ll = lowLatLng(v);
-    await extrasOf(v);
+    await prepare(v, mode);
     const likely = hidden(v);                       // drained flag or a road feature
-    const hide = mode === "undrained" ? likely : null;
+    const hide = skipMask(v, mode);
     const pick = (i) => (!hide || !hide[i]) && ll[2 * i] >= s && ll[2 * i] <= n && ll[2 * i + 1] >= w && ll[2 * i + 1] <= e;
     const sm = summarise(v.pack, run, pick, (i) => likely[i] === 1, run.rain);
     for (const k of ["depressions", "unknown", "fill", "fillLikelyDrained", "overflow", "holdWater", "wetAreaM2", "heldM3"]) total[k] += sm[k];
@@ -532,7 +550,7 @@ async function stormLines(regions, box, stormIn, mode = "all") {
     const run = await stormRun(region, storm);
     if (!run) continue;
     const v = await getPack(region), pk = v.pack, ll = lowLatLng(v);
-    const hide = mode === "undrained" ? (await extrasOf(v), hidden(v)) : null;
+    const hide = mode !== "all" ? (await prepare(v, mode), skipMask(v, mode)) : null;
     for (let i = 0; i < pk.n; i++) {
       if (run.spillStep[i] < 0 || (hide && hide[i])) continue;
       const la = ll[2 * i], lo = ll[2 * i + 1];
@@ -571,7 +589,7 @@ const INSET = 0.86;
 async function waterMesh(region, level, box, mode = "all", kind = "flat") {
   const v = await getPack(region);
   if (!v) return null;
-  if (mode !== "all") await extrasOf(v);
+  if (mode !== "all") await prepare(v, mode);
   const L = levelCells(v, level, mode), C = centresOf(v, level, mode), [w, s, e, n] = box;
   const ox = mercX((w + e) / 2), oy = mercY((s + n) / 2), tri = [];
   for (let k = 0; k < L.cell.length; k++) {
@@ -607,7 +625,7 @@ async function waterMesh(region, level, box, mode = "all", kind = "flat") {
 async function wellMesh(region, box, mode = "all") {
   const v = await getPack(region);
   if (!v) return null;
-  if (mode !== "all") await extrasOf(v);
+  if (mode !== "all") await prepare(v, mode);
   const L = levelCells(v, 10, mode);
   const C = centresOf(v, 10, mode), [w, s, e, n] = box;
   const ox = mercX((w + e) / 2), oy = mercY((s + n) / 2);
@@ -730,4 +748,71 @@ async function extrasFields(v, i) {
   if (!ex) return { extras: false };
   const rim = ex.rim[i];
   return { extras: true, rimM: rim, groundM: rim - full(v.pack, i, v.pack.depths), roadM: ex.roadM[i], road: ex.road[i] };
+}
+
+// ------------------------------------------------------------------ evidence: observed water, radar, grade
+// From evidence.bin beside the packs (app/tools/evidence.py, dataset 0.4): per depression its
+// Landsat water class and years (JRC 1984-2021), radar scenes that observed and flooded it
+// (Copernicus GFM) with the flood days, and its confidence grade with the road-crossing flags.
+// Hosts without the file: null, and the app works without the evidence views.
+const EV_FIELDS = ["wclass", "wet", "clear", "first", "last", "month", "obs", "fl", "grade", "flags"];
+let evidenceIndex, evidenceIndexPromise;
+async function evidenceOf(v) {
+  if (v.evidence !== undefined) return v.evidence;
+  if (!v.evidencePromise) {
+    v.evidencePromise = (async () => {
+      try {
+        if (evidenceIndex === undefined) {
+          evidenceIndexPromise = evidenceIndexPromise || hosts.json("evidence_index.json").catch(() => null);
+          evidenceIndex = await evidenceIndexPromise;
+        }
+        const e = evidenceIndex?.regions?.[v.region];
+        if (!e) return (v.evidence = null);
+        const [off, len, n] = e;
+        const raw = await gunzip(await hosts.range(evidenceIndex.file, off, len));
+        if (n !== v.pack.n) throw new Error("evidence does not match the pack");
+        const buf = raw.slice();                    // own, aligned copy
+        const ev = {};
+        EV_FIELDS.forEach((k, j) => { ev[k] = new Uint8Array(buf.buffer, j * n, n); });
+        ev.breachCm = new Uint16Array(buf.buffer, 10 * n, n);
+        const m = new DataView(buf.buffer).getUint32(12 * n, true);
+        ev.dayDep = new Uint32Array(buf.buffer.slice(12 * n + 4, 12 * n + 4 + 4 * m));
+        ev.day = new Uint16Array(buf.buffer.slice(12 * n + 4 + 4 * m, 12 * n + 4 + 6 * m));
+        v.evidence = ev;
+      } catch { v.evidence = null; }
+      return v.evidence;
+    })();
+  }
+  return v.evidencePromise;
+}
+
+// everything a mode needs before cells are grouped: extras for "undrained", evidence for "ab"
+async function prepare(v, mode) {
+  await extrasOf(v);
+  if (mode === "ab") await evidenceOf(v);
+}
+
+// depressions left out in a mode: likely drained ("undrained"), or not graded A or B ("ab");
+// without the evidence file the "ab" mode leaves none out (the panel says so)
+function skipMask(v, mode) {
+  if (mode === "undrained") return hidden(v);
+  if (mode !== "ab" || !v.evidence) return null;
+  if (v.notAB) return v.notAB;
+  const g = v.evidence.grade, h = new Uint8Array(v.pack.n);
+  for (let i = 0; i < h.length; i++) h[i] = g[i] === 1 || g[i] === 2 ? 0 : 1;
+  return (v.notAB = h);
+}
+
+const DAY0 = Date.UTC(2015, 0, 1);
+async function evidenceFields(v, i) {
+  const ev = await evidenceOf(v);
+  if (!ev) return { evidence: false };
+  const days = [];
+  for (let k = 0; k < ev.dayDep.length; k++) if (ev.dayDep[k] === i) days.push(new Date(DAY0 + ev.day[k] * 86400000).toISOString().slice(0, 10));
+  const yr = (x) => (x ? 1983 + x : null);
+  return { evidence: true, wclass: ev.wclass[i], wetYears: ev.wet[i], clearYears: ev.clear[i] === 255 ? null : ev.clear[i],
+    firstWet: yr(ev.first[i]), lastWet: yr(ev.last[i]), wettestMonth: ev.month[i], radarObserved: ev.obs[i],
+    radarFlooded: ev.fl[i], floodDays: days, grade: ev.grade[i], baseGrade: (ev.flags[i] >> 2) & 3,
+    roadDam: (ev.flags[i] & 1) === 1, bridge: (ev.flags[i] & 2) === 2,
+    breachedM: ev.breachCm[i] === 65535 ? null : ev.breachCm[i] / 100 };
 }

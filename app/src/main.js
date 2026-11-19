@@ -5,7 +5,7 @@ import { PMTiles, Protocol } from "pmtiles";
 import { AUTO_LEVELS, BASEMAP_URL, DETAIL_LEVELS, DETAIL_ZOOM, HOME, LOCAL, MAX_REGION_SOURCES, OVERVIEW_LEVELS, VERSION, packHosts } from "./config.js";
 import { DataClient } from "./data/client.js";
 import { RedirectSource } from "./data/redirects.js";
-import { addBaseLayers, addPackLayers, empty, removePackLayers, setVisible } from "./map/layers.js";
+import { addBaseLayers, addPackLayers, empty, removePackLayers, setColour as paintColour, setVisible } from "./map/layers.js";
 import { basemapStyle, swapBasemap } from "./map/style.js";
 import { viewBox } from "./map/viewbox.js";
 import { createGuide, seenGuide } from "./ui/guide.js";
@@ -35,7 +35,8 @@ const state = {
   view: "intro",           // what the panel shows: intro | cell | depression
   selected: null,          // {region, index, data}
   cell: null,              // {props, res}
-  show: "all",             // all | undrained (hide likely drained)
+  show: "all",             // all | undrained (hide likely drained) | ab (grade A or B only)
+  colour: "depth",         // depth | wet | flooded | grade: what the hexagons are shaded by
   gauge: null,             // {key, data}: the selected depression in the storm
 };
 
@@ -59,7 +60,9 @@ function unsupported(why) {
 
 // ------------------------------------------------------------------ map
 const START_VIEW = param("map");
-if (param("show") === "undrained") state.show = "undrained";          // read before the map writes its own position
+if (["undrained", "ab"].includes(param("show"))) state.show = param("show");   // read before the map writes its own position
+if (["wet", "flooded", "grade"].includes(param("colour"))) state.colour = param("colour");
+paintColour(null, state.colour, []);                                  // layers made later take it
 maplibregl.setWorkerUrl(new URL("maplibre-gl-worker.js", location.href).href);
 const protocol = new Protocol({ metadata: false });
 protocol.add(new PMTiles(new RedirectSource(BASEMAP_URL)));
@@ -239,7 +242,18 @@ function setShow(mode) {
   views.resetData();
   renderPanel();
   refresh();
-  toast(mode === "all" ? "Showing all depressions" : "Hiding likely drained depressions");
+  toast(mode === "all" ? "Showing all depressions" : mode === "ab" ? "Showing depressions graded A or B only" : "Hiding likely drained depressions");
+}
+
+// Shade the hexagons by depth (default) or by the evidence: seen wet, seen flooded, grade
+function setColour(colour) {
+  if (colour === state.colour) return;
+  state.colour = colour;
+  setParam("colour", colour === "depth" ? null : colour);
+  paintColour(map, colour, ["overview", ...[...state.regions.keys()].map((r) => `pk-${r}`)]);
+  renderPanel();
+  toast({ depth: "Shaded by depth", wet: "Shaded by water seen by Landsat, 1984-2021",
+    flooded: "Shaded by radar flood maps, 2015-2025", grade: "Shaded by confidence grade" }[colour]);
 }
 
 function prune(want) {
@@ -470,7 +484,7 @@ function renderPanel() {
   else if (state.view === "cell" && state.cell) body.innerHTML = panelView.overviewCell(state.cell.props, state.cell.res);
   else {
     const res = state.res ?? autoRes(map.getZoom());
-    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res, views.note(), views.effective !== "flat", state.show);
+    body.innerHTML = panelView.intro(state.nat, isDetail(res) ? "detail" : "overview", res, views.note(), views.effective !== "flat", state.show, state.colour);
   }
   measure();
 }
@@ -486,7 +500,8 @@ $("panel").addEventListener("click", async (e) => {
   if (act === "close") clearSelection();
   else if (act === "about") openAbout();
   else if (act === "disclaimer") openAbout("disclaimer");
-  else if (act === "show-all" || act === "show-undrained") setShow(act === "show-all" ? "all" : "undrained");
+  else if (act === "show-all" || act === "show-undrained" || act === "show-ab") setShow(act.slice(5));
+  else if (act.startsWith("colour-")) setColour(act.slice(7));
   else if (act === "storm-open") stormBar.open();
   else if (act === "storm-close") stormBar.close();
   else if (act === "open-dep") selectDepression(el.dataset.r, Number(el.dataset.i), { fly: true });
@@ -500,7 +515,7 @@ $("panel").addEventListener("click", async (e) => {
     try { await navigator.clipboard.writeText(location.href); toast("Link copied."); } catch { toast(location.href); }
   } else if (act === "retry" && state.selected) selectDepression(state.selected.region, state.selected.index);
   else if (act === "python-dep" && state.selected?.data) openPython("depression", state.selected.data);
-  else if (act === "tour" && TOURS[el.dataset.k]) { hideInvite(); tour.start(el.dataset.k); }
+  else if (act === "tour" && TOURS[el.dataset.k]) { hideInvite(); setColour("depth"); tour.start(el.dataset.k); }
   else if (act === "python-storm" && stormBar.summary?.box) openPython("storm", stormBar.summary.box);
 });
 
@@ -703,7 +718,7 @@ const guide = createGuide([
     text: "Type a city or town and pick it from the list. The search runs on your device: nothing you type is sent anywhere." },
   { title: "The panel explains the map", target: () => $("panel"),
     before: async () => { if (state.view !== "intro") clearSelection(); },
-    text: "It shows the key numbers and the legend. Darker hexagons have more low ground in them; zoomed right in, darker means deeper water when full." },
+    text: "It shows the key numbers and the legend. Darker hexagons have more low ground in them; zoomed right in, darker means deeper water when full. Under the legend, Colour by switches to what satellites saw (water seen 1984-2021, radar floods) or to the confidence grade." },
   { title: "Choose the hexagon size", target: () => $("levels-desktop"), skip: () => sheet.phone,
     text: "Auto picks the size from your zoom. Sizes 4 to 6 summarise large areas; 8 to 10 show single depressions. Click a number to choose one yourself." },
   { title: "See it in 3D", target: () => (sheet.phone ? $("view3d") : $("views-desktop")),

@@ -21,7 +21,7 @@ const step = (prop, b) => ["step", ["get", prop], INK[0], b[0], INK[1], b[1], IN
 export function addBaseLayers(map) {
   map.addSource("overview", { type: "geojson", data: empty(), tolerance: 0.2 });
   map.addLayer({ id: "overview-fill", type: "fill", source: "overview", paint: {
-    "fill-color": step("s", SHARE.breaks),
+    "fill-color": fillColour(currentColour, "overview"),
     "fill-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0.9, 8, 0.84, 10, 0.82],
     "fill-opacity-transition": { duration: 300 } } }, LABELS_FROM);
   map.addLayer({ id: "overview-line", type: "line", source: "overview", paint: {
@@ -65,7 +65,7 @@ export function addPackLayers(map, region) {
   if (map.getSource(src)) return;
   map.addSource(src, { type: "geojson", data: empty(), tolerance: 0.1, buffer: 32 });
   map.addLayer({ id: `${src}-fill`, type: "fill", source: src, paint: {
-    "fill-color": ["case", ["has", "s"], step("s", SHARE.breaks), step("d", DEPTH.breaks)],
+    "fill-color": fillColour(currentColour, "pack"),
     "fill-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.84, 15, 0.8, 18, 0.74],
     "fill-opacity-transition": { duration: 250 } } }, HEX_TOP);
   map.addLayer({ id: `${src}-line`, type: "line", source: src, minzoom: 11.5, paint: {
@@ -143,6 +143,72 @@ export function setVisible(map, ids, on) {
 
 export function empty() {
   return { type: "FeatureCollection", features: [] };
+}
+
+// ------------------------------------------------------------------ evidence views (dataset 0.4)
+// Colour by: depth (the default above), seen wet, seen flooded, grade. Blue stays for water; the
+// grade uses ink, darkest for A. Zoomed in, each hexagon takes the evidence of the depression with
+// most area in it (properties ew, ef, eg); zoomed out, the share of the hexagon's depressions
+// (properties ew, ef, eg as shares; -1 where none has evidence).
+export const BLUE = ["#eef2fa", "#c9d5f1", "#a0b4e5", "#7491d6", "#4d6ec4", "#2c4fa6", "#163780"];
+const NONE = "#f4f4f2";
+export const EVIDENCE = {
+  wet: { title: "Seen wet by Landsat, 1984-2021",
+    classes: [["#e9ebe7", "Too small or too seldom seen to tell", [1, 2]], ["#b3b9b5", "Never seen wet", [3]],
+      ["#a0b4e5", "Wet in some years", [4]], ["#4d6ec4", "Wet in at least half the years", [5]], ["#163780", "Permanent water", [6]]],
+    share: { breaks: [0.005, 0.01, 0.02, 0.05, 0.1, 0.2], labels: ["0", "0.5", "1", "2", "5", "10", "20%+"],
+      title: "Share of depressions seen wet (%)" } },
+  flooded: { title: "Seen flooded by radar, 2015-2025",
+    classes: [["#e9ebe7", "No radar scene saw it", [0]], ["#8f9692", "Seen, never flooded", [1]], ["#163780", "Flooded in at least one scene", [2]]],
+    share: { breaks: [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02], labels: ["0", "0.05", "0.1", "0.2", "0.5", "1", "2%+"],
+      title: "Share of depressions seen flooded (%)" } },
+  grade: { title: "Confidence grade",
+    classes: [["#202422", "A", [1]], ["#69706c", "B", [2]], ["#b3b9b5", "C", [3]], ["#c9a27a", "D (road dam or bridge)", [4]]],
+    share: { breaks: [0.2, 0.3, 0.4, 0.5, 0.6, 0.7], labels: ["0", "20", "30", "40", "50", "60", "70%+"],
+      title: "Share of depressions graded A or B (%)" } },
+};
+const EV_PROP = { wet: "ew", flooded: "ef", grade: "eg" };
+
+function classColour(colour) {
+  const prop = EV_PROP[colour], e = ["match", ["get", prop]];
+  for (const [c, , codes] of EVIDENCE[colour].classes) e.push(codes.length === 1 ? codes[0] : codes, c);
+  e.push(NONE);
+  return ["case", ["has", prop], e, NONE];
+}
+
+function shareColour(colour) {
+  const prop = EV_PROP[colour], b = EVIDENCE[colour].share.breaks, ramp = colour === "grade" ? INK : BLUE;
+  return ["case", ["all", ["has", prop], [">=", ["get", prop], 0]],
+    ["step", ["get", prop], ramp[0], b[0], ramp[1], b[1], ramp[2], b[2], ramp[3], b[3], ramp[4], b[4], ramp[5], b[5], ramp[6]], NONE];
+}
+
+// fill colour for a source in a colour mode ("depth" = the original shading)
+export function fillColour(colour, kind) {
+  if (!EVIDENCE[colour]) return kind === "overview" ? step("s", SHARE.breaks) : ["case", ["has", "s"], step("s", SHARE.breaks), step("d", DEPTH.breaks)];
+  if (kind === "overview") return shareColour(colour);
+  return ["case", ["has", "s"], classColour(colour), classColour(colour)];
+}
+
+let currentColour = "depth";                     // packs added later take the colour mode in force
+export function setColour(map, colour, sources) {
+  currentColour = colour;
+  for (const src of sources) {
+    const kind = src === "overview" ? "overview" : "pack";
+    if (map.getLayer(`${src}-fill`)) map.setPaintProperty(`${src}-fill`, "fill-color", fillColour(colour, kind));
+  }
+}
+
+export function evidenceLegendHtml(colour, zoomedOut) {
+  const E = EVIDENCE[colour];
+  if (zoomedOut) {
+    const ramp = colour === "grade" ? INK : BLUE;
+    return `<div class="legend" aria-label="${E.share.title}"><span class="label">${E.share.title}</span>
+      <div class="ramp">${ramp.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
+      <div class="ramp-labels">${E.share.labels.map((l) => `<span>${l}</span>`).join("")}</div></div>`;
+  }
+  return `<div class="legend classes" aria-label="${E.title}"><span class="label">${E.title}</span><ul>
+    ${E.classes.map(([c, l]) => `<li><i style="background:${c}" aria-hidden="true"></i>${l}</li>`).join("")}
+    <li><i style="background:${NONE}" aria-hidden="true"></i>No evidence (about 1% of depressions)</li></ul></div>`;
 }
 
 export function legendHtml(kind, us, colours = INK) {
