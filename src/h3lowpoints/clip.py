@@ -20,6 +20,7 @@ from pathlib import Path
 import h3
 import numpy as np
 
+from .pipeline import EXTRA_TABLES
 from .store import (CHUNK_ROWS, TableWriter, check_format, ids_to_int, iter_table, read_meta,
                     remove_other_formats, table_path, write_meta)
 
@@ -107,7 +108,8 @@ def clip_result(folder, boundary, out_dir, *, format=None, name=None, rows=CHUNK
         w.close(empty=empty)
     wanted = np.sort(np.concatenate(wanted)) if wanted else np.zeros(0, dtype=np.int64)
     storms = list((read_meta(folder).get("storms") or {}))
-    for table in ("catchments", "depression_cells", "susceptibility", *(f"storm_{n}" for n in storms)):
+    for table in ("catchments", "depression_cells", "susceptibility", *EXTRA_TABLES,
+                  *(f"storm_{n}" for n in storms)):
         if not table_path(folder, table):
             continue
         # a kept depression keeps its whole catchment and all its cells, also beyond the boundary

@@ -24,6 +24,7 @@ CELL_TABLE = ["h3", "max_depth_m", "depress_area_m2", "depress_volume_m3", "n_lo
               "covered_area_m2", "coverage", "depressed_share"]
 DRAIN_COLUMNS = ["dist_to_drain_m", "drain_at_core"]
 BUILDING_COLUMNS = ["building_overlap", "likely_building_artifact"]
+BREACH_COLUMNS = ["breached_depth_m", "road_dam", "bridge_crossing"]
 CATCHMENT_COLUMNS = ["catchment_area_m2", "spill_to", "spill_lat", "spill_lon"]
 CATCHMENT_TABLE = ["id", "h3", "area_m2"]
 DETAIL_COLUMNS = (["ground_m", "water_level_m", "length_m", "width_m", "orientation_deg"]
@@ -32,7 +33,10 @@ DETAIL_COLUMNS = (["ground_m", "water_level_m", "length_m", "width_m", "orientat
 DEPRESSION_CELL_TABLE = (["id", "h3", "area_m2", "volume_m3", "max_depth_m"]
                          + [f"area_{n}_down_m2" for n in ("10cm", "25cm", "50cm", "1m", "2m", "5m")])
 TEXT_COLUMNS = {"h3", "h3_lowpoint", "h3_lowpoint_15"}
-BOOL_COLUMNS = {"edge", "deeper_than_wide", "drain_at_core", "likely_building_artifact"}
+# tables that optional steps add, saved and read under these names (see `Result.tables`)
+EXTRA_TABLES = ("water_history", "flood_events", "flood_seen")
+BOOL_COLUMNS = {"edge", "deeper_than_wide", "drain_at_core", "likely_building_artifact",
+                "road_dam", "bridge_crossing"}
 
 
 def deeper_than_wide(max_depth_m, area_m2):
@@ -83,6 +87,8 @@ class Result:
                  runoff, the rain that fills it and how full design storms leave it
     path         the folder holding the tables, when they were written to disk instead of
                  returned (`analyze_tiled(out_dir=...)`); `load()` reads them back
+    tables       tables made by optional steps of a tiled run (`analyze_tiled(hooks=...)`), by
+                 name: water_history, flood_events, flood_seen
     """
     depressions: pd.DataFrame
     cells: pd.DataFrame
@@ -96,6 +102,7 @@ class Result:
     catchments: pd.DataFrame = None
     depression_cells: pd.DataFrame = None
     susceptibility: pd.DataFrame = None
+    tables: dict = None
 
     def at_resolution(self, res):
         """Cell table at a coarser H3 resolution, rolled up without re-analysis.
@@ -141,6 +148,8 @@ class Result:
             write_table(self.depression_cells, out / f"depression_cells.{format}", format)
         if self.susceptibility is not None:
             write_table(self.susceptibility, out / f"susceptibility.{format}", format)
+        for name, table in (self.tables or {}).items():
+            write_table(table, out / f"{name}.{format}", format)
         write_meta(out, {**self.meta, "output": {"format": format, "n_cells": len(self.cells)}})
         return out
 
@@ -152,7 +161,7 @@ class Result:
         return Result(loaded.depressions, loaded.cells, self.meta, transform=self.transform,
                       crs=self.crs, footprint=self.footprint, path=self.path,
                       catchments=loaded.catchments, depression_cells=loaded.depression_cells,
-                      susceptibility=loaded.susceptibility)
+                      susceptibility=loaded.susceptibility, tables=loaded.tables)
 
 
 def rollup_saved(folder, res, rows=None):
@@ -188,8 +197,9 @@ def read_result(folder):
         raise FileNotFoundError(f"{folder} is missing {', '.join(missing)}")
     optional = {name: read_table(folder, name) if table_path(folder, name) else None
                 for name in ("catchments", "depression_cells", "susceptibility")}
+    extra = {name: read_table(folder, name) for name in EXTRA_TABLES if table_path(folder, name)}
     return Result(read_table(folder, "depressions"), read_table(folder, "cells"), read_meta(folder),
-                  path=Path(folder), **optional)
+                  path=Path(folder), tables=extra or None, **optional)
 
 
 def add_coverage(cells, footprint):
@@ -235,12 +245,55 @@ def _package_version():
         return "unknown"
 
 
-def dep_columns(has_drains, has_buildings, has_catchments=False, has_details=False):
+def dep_columns(has_drains, has_buildings, has_catchments=False, has_details=False,
+                has_breach=False):
     """Columns of the depression table. Optional layers add columns only when they were used."""
     return (CORE_COLUMNS + (DRAIN_COLUMNS if has_drains else [])
             + (BUILDING_COLUMNS if has_buildings else [])
+            + (BREACH_COLUMNS if has_breach else [])
             + (CATCHMENT_COLUMNS if has_catchments else [])
             + (DETAIL_COLUMNS if has_details else []))
+
+
+def breach_summary(crossings, rec, n_lowered, deps):
+    """`meta["breach"]`: what the road-crossing fix used and did."""
+    return {**{k: crossings.info.get(k) for k in ("radius_m", "n_barriers", "n_streams")},
+            "n_bridges": len(crossings.bridges), "n_crossings": len(crossings.cuts),
+            "n_crossings_cut": int((rec["lowered_m"] > 0).sum()),
+            "n_pixels_lowered": int(n_lowered),
+            "n_road_dam": int(deps["road_dam"].sum()),
+            "n_bridge_crossing": int(deps["bridge_crossing"].sum()),
+            "lines": crossings.info.get("lines")}
+
+
+def add_breach(deps, labels, arr_valid, invalid, transform, crs, lines, radius_m, min_depth):
+    """The depression table with the road-crossing columns (see `hydro.crossings`), and a
+    summary for `meta["breach"]`.
+
+    breached_depth_m: the depression's deepest point after the embankments are cut (0 when it
+    is gone), never more than `max_depth_m` (a cut can leave a lowered stream pixel inside a
+    depression that still holds water; that pit is not counted as extra depth); road_dam: that
+    is below `min_depth`; bridge_crossing: a bridge line passes over it.
+    """
+    from .hydro.crossings import breach, line_mask, prepare
+
+    crossings = prepare(lines, crs, radius_m)
+    cut, rec = breach(arr_valid, invalid, transform, crs, crossings.cuts)
+    work, filled, _ = fill_from_array(cut, invalid)
+    depth = filled - work
+    depth[invalid] = 0.0
+    ids = deps["id"].to_numpy()
+    n = int(labels.max()) + 1
+    rr, cc = np.nonzero(labels)
+    after = np.zeros(n)
+    np.maximum.at(after, labels[rr, cc], depth[rr, cc])
+    on_bridge = np.zeros(n, dtype=bool)
+    mask = line_mask(crossings.bridges, transform, labels.shape)
+    on_bridge[np.unique(labels[mask & (labels > 0)])] = True
+    after = np.minimum(after[ids], deps["max_depth_m"].to_numpy(float))
+    deps = deps.assign(breached_depth_m=after, road_dam=after < min_depth,
+                       bridge_crossing=on_bridge[ids])
+    return deps, breach_summary(crossings, rec, (cut < arr_valid).sum(), deps)
 
 
 def plan_analysis(crs, transform, height, res, min_depth):
@@ -273,7 +326,8 @@ def base_meta(source, crs, shape, size, tier, geographic, res, min_depth, drain_
 
 def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings=None, res="auto",
                   min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8, mask=None,
-                  catchments=False, details=False, workers=1, source="array", _plan=None):
+                  catchments=False, details=False, breach_crossings=None, breach_radius_m=100.0,
+                  workers=1, source="array", _plan=None):
     """Analyze an in-memory DEM.
 
     drains_xy: optional (n, 2) drain locations in the DEM's CRS. Adds `dist_to_drain_m` and
@@ -286,6 +340,11 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         columns and the `catchments` table.
     details: also describe each depression further (see `hydro.details`): ground and water
         levels, shape, the fill curve, and the `depression_cells` table.
+    breach_crossings: road and railway lines and stream lines (`sources.osm.fetch_lines`, or a
+        tuple of layers, see `hydro.crossings.prepare`). The fill is run again with every embankment cut
+        where a stream crosses it (`hydro.crossings`), within `breach_radius_m` of the crossing.
+        The depressions are those of the uncut DEM; this adds `breached_depth_m`, `road_dam`
+        (below `min_depth` once cut) and `bridge_crossing`.
     workers: label pixels with H3 cells in this many processes (same answer, less time).
     """
     has_drains = drains_xy is not None and len(drains_xy) > 0
@@ -307,7 +366,8 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
     meta = base_meta(source, crs, arr.shape, size, tier, geographic, res, min_depth,
                      drain_radius_m, drain_core_frac, drains_xy if has_drains else None, buildings,
                      res_requested=requested)
-    columns = dep_columns(has_drains, buildings is not None, catchments, details)
+    has_breach = breach_crossings is not None
+    columns = dep_columns(has_drains, buildings is not None, catchments, details, has_breach)
     if len(ids) == 0:
         meta.update({"n_depressions": 0, "n_edge": 0})
         footprint = Footprint.from_array(invalid, transform, crs)
@@ -337,6 +397,9 @@ def analyze_array(arr, transform, crs, nodata=None, *, drains_xy=None, buildings
         deps["building_overlap"] = building_overlap(
             labels, ids, buildings, transform, arr.shape, min_area=0.0 if geographic else 20.0)
         deps["likely_building_artifact"] = deps["building_overlap"] >= 0.5
+    if has_breach:
+        deps, meta["breach"] = add_breach(deps, labels, work, invalid, transform, crs,
+                                          breach_crossings, breach_radius_m, min_depth)
     catchment_table = detail_table = None
     if details:
         deps, detail_table = add_details(deps, labels, depth, work, filled, rows, cols, row_areas,
@@ -418,7 +481,7 @@ def add_catchments(deps, ground, valid, filled, depth, row_areas, transform, crs
 
 def analyze(dem_path, *, drains_xy=None, buildings=None, res="auto", min_depth=0.15,
             drain_radius_m=5.0, drain_core_frac=0.8, mask=None, catchments=False, details=False,
-            workers=1):
+            breach_crossings=None, breach_radius_m=100.0, workers=1):
     """Find closed depressions in a DEM file and describe them on H3 cells.
 
     drains_xy: optional (n, 2) array of drain locations in the DEM's CRS.
@@ -427,6 +490,9 @@ def analyze(dem_path, *, drains_xy=None, buildings=None, res="auto", min_depth=0
     res: H3 resolution of the cell table, or "auto" (the default) for the finest the DEM supports.
     catchments: also route the water: catchment areas, spill links and the `catchments` table.
     details: also levels, shape, fill curve and the `depression_cells` table.
+    breach_crossings: road, railway and stream lines: also flag depressions made by road
+        embankments over streams (`road_dam`, see `analyze_array`). breach_radius_m: how far
+        along the stream each side of a crossing the cut reaches.
     workers: label pixels with H3 cells in this many processes (same answer, less time).
     """
     with rasterio.open(dem_path) as src:
@@ -434,4 +500,5 @@ def analyze(dem_path, *, drains_xy=None, buildings=None, res="auto", min_depth=0
     return analyze_array(arr, transform, crs, nodata, drains_xy=drains_xy, buildings=buildings,
                          res=res, min_depth=min_depth, drain_radius_m=drain_radius_m,
                          drain_core_frac=drain_core_frac, mask=mask, catchments=catchments,
-                         details=details, workers=workers, source=str(dem_path))
+                         details=details, breach_crossings=breach_crossings,
+                         breach_radius_m=breach_radius_m, workers=workers, source=str(dem_path))

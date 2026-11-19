@@ -27,6 +27,7 @@ from .coverage import (Footprint, file_opener, invalid_block_flags, pack_invalid
                        unpack_invalid)
 from .geometry import crs_info, nearest_distance_m, pixel_areas_m2
 from .h3agg.aggregate import h3_ids, lonlat, pixel_centers
+from .hydro.crossings import apply_cuts, cut_levels, side_minima
 from .hydro.depressions import EIGHT
 from .hydro.tiled import (flood_from_seeds, neighbour_pairs, region_edges, solve_levels,
                           tile_seeds)
@@ -250,7 +251,8 @@ def _tile_records(depth, box, width, areas, bmask, near, min_depth, labels=None,
 def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, tile=4096,
                   res="auto", min_depth=0.15, drain_radius_m=5.0, drain_core_frac=0.8,
                   verbose=False, out_dir=None, format="csv", hours=None, catchments=False,
-                  details=False, workers=1):
+                  details=False, workers=1, hooks=None, breach_crossings=None,
+                  breach_radius_m=100.0):
     """Analyze a large DEM in tiles. The result equals `analyze` on the same DEM.
 
     tile: tile edge in cells. It only trades memory for speed; it never changes the result.
@@ -270,6 +272,13 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
         `analyze(..., details=True)`; with `out_dir` the table is written as
         `depression_cells.<fmt>`.
     workers: label pixels with H3 cells in this many processes (same answer, less time).
+    hooks: optional steps that measure each depression against other data as the tiles go by,
+        without keeping pixel labels: `water.WaterHook` (the satellite water record) and
+        `floods.FloodHook` (flood maps). Their tables land in `Result.tables` (or, with
+        `out_dir`, as files named after them) and equal what the in-memory functions give.
+    breach_crossings, breach_radius_m: the road-crossing fix, as in `analyze`; also takes a
+        `hydro.crossings.Crossings` made beforehand (for example state by state). The second
+        fill runs through both passes like the first, so the columns equal `analyze`'s.
     Other arguments are as in `analyze`. `Result.labels` and `Result.depth` are not returned,
     and `id` numbers the depressions 1..n in raster-scan order of their first cell.
     """
@@ -288,20 +297,25 @@ def analyze_tiled(dem_path, *, drains_xy=None, buildings=None, mask_path=None, t
         geographic, _ = crs_info(crs)
         areas = pixel_areas_m2(transform, crs, height)
         mask_src = rasterio.open(mask_path) if mask_path else None
+        breach = None
+        if breach_crossings is not None:
+            breach = _breach_setup(breach_crossings, crs, transform, (height, width), tile,
+                                   breach_radius_m)
         try:
             if mask_src is not None and mask_src.shape != src.shape:
                 raise ValueError(f"mask {mask_src.shape} and DEM {src.shape} differ in shape")
             return _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size,
                         tier, geographic, areas, drains, buildings, tile, res, min_depth,
                         drain_radius_m, drain_core_frac, verbose, requested, out_dir, format, hours,
-                        catchments, workers, details)
+                        catchments, workers, details, list(hooks or []), breach)
         finally:
             if mask_src is not None:
                 mask_src.close()
 
 
 def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radius_m,
-              drain_core_frac, drains, buildings, mask_path, catchments=False, details=False):
+              drain_core_frac, drains, buildings, mask_path, catchments=False, details=False,
+              hooks=(), breach=None):
     """What a resumed run must share with the run it continues."""
     import hashlib
 
@@ -316,7 +330,8 @@ def _settings(dem_path, shape, transform, crs, tile, res, min_depth, drain_radiu
         "mask": None if mask_path is None else str(mask_path),
         "mask_id": None if mask_path is None else _fingerprint(mask_path),
         "package_version": _package_version(), "catchments": bool(catchments),
-        "details": bool(details),
+        "details": bool(details), "hooks": [h.settings() for h in hooks],
+        "breach": None if breach is None else breach["fingerprint"],
         "checkpoint_format": 2}                     # 2: one outlet node per tile
 
 
@@ -343,23 +358,24 @@ def _fingerprint(path):
 def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size, tier,
          geographic, areas, drains, buildings, tile, res, min_depth, drain_radius_m,
          drain_core_frac, verbose, requested, out_dir, fmt, hours, catchments=False, workers=1,
-         details=False):
+         details=False, hooks=(), breach=None):
     work = None
     if out_dir is not None:
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         work = Checkpoints(out_dir / "_work", _settings(
             dem_path, (height, width), transform, crs, tile, res, min_depth, drain_radius_m,
-            drain_core_frac, drains, buildings, mask_path, catchments, details))
+            drain_core_frac, drains, buildings, mask_path, catchments, details, hooks, breach))
     ctx = {"src": src, "mask_src": mask_src, "height": height, "width": width, "crs": crs,
            "transform": transform, "areas": areas, "buildings": buildings, "geographic": geographic,
            "res": res, "min_depth": min_depth, "radius": metres_to_cells(drain_radius_m, size),
            "drain_rc": drain_pixels(drains, transform, (height, width)) if drains is not None else None,
            "deadline": None if hours is None else time.monotonic() + hours * 3600,
            "verbose": verbose, "invalid": {}, "catchments": catchments, "workers": workers,
-           "details": details,
+           "details": details, "hooks": hooks, "breach": breach,
            "spacing": pixel_spacing_m(transform, crs, height) if catchments or details else None}
     boxes = list(_tile_boxes(height, width, tile))
+    ctx["box_k"] = {box: k for k, box in enumerate(boxes, 1)}
     blocks = np.zeros((-(-height // 16), -(-width // 16)), dtype=bool)   # blocks holding invalid pixels
     pieces, graph = _two_passes(boxes, blocks, ctx, work)
 
@@ -367,7 +383,8 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
                      drain_radius_m, drain_core_frac, drains, buildings, res_requested=requested)
     meta["tiling"] = {"tile": tile, "n_tiles": len(boxes), **graph}
     has_buildings = buildings is not None
-    columns = dep_columns(drains is not None, has_buildings, catchments, details)
+    columns = dep_columns(drains is not None, has_buildings, catchments, details,
+                          breach is not None)
     # coverage reads which pixels are valid from the records pass 1 kept, not from the DEM again
     # (a streamed DEM would be read over the internet once per partly covered cell)
     footprint = Footprint((height, width), transform, crs, blocks,
@@ -377,10 +394,10 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
     cparts = (CellParts(res, None if out_dir is None else out_dir / "_spill_catchments",
                         fields=("area",)) if catchments else None)
     try:
-        records, rings = _Records(), []
+        records, rings, hook_parts = _Records(), [], []
         routing = _RoutingParts() if catchments else None
         for piece in pieces:                     # tile by tile, in order: identical ids every time
-            _add_piece(piece, records, rings, parts, routing, cparts)
+            _add_piece(piece, records, rings, parts, routing, cparts, hook_parts)
         if records.n == 0:
             out, lowpoints = None, np.zeros(0, dtype=np.uint64)
             comp, kept = np.zeros(0, dtype=np.int64), np.zeros(0, dtype=bool)
@@ -388,8 +405,23 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         else:
             out, lowpoints, comp, kept, dep_comp = _join_pieces(
                 records, rings, width, height, transform, crs, res, min_depth, drains,
-                has_buildings, drain_core_frac, ctx["spacing"] if details else None)
+                has_buildings, drain_core_frac, ctx["spacing"] if details else None,
+                {**{c: how for h in hooks for c, how in h.wide.items()},
+                 **(_BREACH_COLS if breach is not None else {})})
         del records, rings
+        if breach is not None:
+            out = _breach_columns(out, min_depth)
+            meta["breach"] = _breach_meta(breach, out)
+        tables = {}
+        if hooks:
+            id_of_comp = np.full(len(kept), -1, dtype=np.int64)
+            if out is not None:
+                id_of_comp[dep_comp] = out["id"].to_numpy()
+            for h in hooks:
+                tables.update(h.finish(out, comp, id_of_comp, hook_parts))
+            del hook_parts
+            # the tables' settings (rules, years, credit) travel in meta.json
+            meta["tables"] = {name: t.attrs.get("settings") for name, t in tables.items()}
         catchment_chunks = catch_area = None
         if catchments:
             out, ends, id_of_comp = _settle_routing(routing, out, comp, kept, dep_comp, width,
@@ -408,7 +440,7 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
         cells = _cell_chunks(parts, comp, kept, lowpoints, footprint, id_of_comp=comp_ids)
         if out_dir is not None:
             result = _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs,
-                            footprint, catchment_chunks, details, catch_area)
+                            footprint, catchment_chunks, details, catch_area, tables)
             work.remove()                        # finished: the checkpoints are no longer needed
             footprint._opener = file_opener(dem_path, mask_path)   # their records went with them
             return result
@@ -427,7 +459,7 @@ def _run(src, mask_src, dem_path, mask_path, height, width, crs, transform, size
             dcells = (pd.concat(parts_dc, ignore_index=True) if parts_dc
                       else empty_depression_cells())
         return Result(deps, table, meta, transform=transform, crs=crs, footprint=footprint,
-                      catchments=catch, depression_cells=dcells)
+                      catchments=catch, depression_cells=dcells, tables=tables or None)
     finally:
         parts.close()
         if cparts is not None:
@@ -448,6 +480,8 @@ def _two_passes(boxes, blocks, ctx, work):
         say(f"resuming: both passes were finished earlier ({n} tiles)", flush=True)
         for k, box in enumerate(boxes, 1):
             _mark_blocks(blocks, work.load("p1", k, keys=["blk_r", "blk_c", "blk"]))
+        if ctx["breach"] is not None:
+            ctx["breach"]["summary"] = work.load_json("bsummary")
         return (_unpack_piece(work.load("p2", k)) for k in range(1, n + 1)), graph
     if work is not None and graph is not None and work.count("lv") == n:
         # pass 1 and the border levels finished earlier: pass 2 loads each tile's seeds and
@@ -461,6 +495,8 @@ def _two_passes(boxes, blocks, ctx, work):
             ctx["borders"] = _border_lookup(
                 [work.load("p1", k, keys=["keys"])["keys"] for k in range(1, n + 1)],
                 [work.load("lv", k)["lv"] for k in range(1, n + 1)])
+        if ctx["breach"] is not None:
+            _breach_levels(boxes, None, ctx, work, say)
         return _pass2(boxes, None, None, ctx, work, say), graph
 
     # ---- pass 1: flood every tile from its border and keep only the crossings
@@ -490,6 +526,8 @@ def _two_passes(boxes, blocks, ctx, work):
         for k, lv in enumerate(levels, 1):
             work.save("lv", k, {"lv": lv})
         work.save_json("graph", graph)          # last: its presence means every level is saved
+    if ctx["breach"] is not None:
+        _breach_levels(boxes, tiles, ctx, work, say)
     return _pass2(boxes, tiles, levels, ctx, work, say), graph
 
 
@@ -512,7 +550,8 @@ def _pass2(boxes, tiles, levels, ctx, work, say):
         else:
             t, lv = tiles[k - 1], levels[k - 1]
             tiles[k - 1] = levels[k - 1] = None      # release this tile's pass-1 data once used
-        piece = _pass2_tile(box, lv, ctx) if int(t["n_seeds"]) else None
+        piece = (_pass2_tile(box, lv, ctx) if int(t["n_seeds"])
+                 else _hooks_only_tile(box, ctx))
         if work is not None:
             work.save("p2", k, _pack_piece(piece))
             _check_time(ctx, work, n)
@@ -558,6 +597,22 @@ def _pass1_tile(box, ctx):
     r0, r1, c0, c1 = box
     height, width = ctx["height"], ctx["width"]
     work, valid = _read_tile(ctx["src"], ctx["mask_src"], box)
+    extra = {}
+    b = ctx["breach"]
+    if b is not None:
+        part = _trace_in(b, box)
+        if ctx.get("cut"):                        # the second fill: the cut ground
+            ground = work
+            work = apply_cuts(ground, valid, part, b["level"], offset=(r0, c0))
+            ok = valid[part["row"] - r0, part["col"] - c0]
+            gmax = np.full(b["n"], -np.inf)
+            np.maximum.at(gmax, part["cut"][ok], ground[part["row"][ok] - r0, part["col"][ok] - c0])
+            idx = np.flatnonzero(np.isfinite(gmax))
+            extra = {"b_low": np.int64((work < ground).sum()), "b_gi": idx, "b_gv": gmax[idx]}
+        else:                                     # the first: lowest ground beside each cut
+            mins = side_minima(part, work, valid, b["n"], offset=(r0, c0))
+            idx = np.flatnonzero(np.isfinite(mins).any(axis=1))
+            extra = {"bk_idx": idx, "bk_min": mins[idx]}
     br, bc, flags = invalid_block_flags(~valid, (r0, c0))
     rows, cols, pinned, border = tile_seeds(valid, (r0 == 0, r1 == height, c0 == 0, c1 == width))
     z = work[rows, cols]
@@ -588,7 +643,7 @@ def _pass1_tile(box, ctx):
             "ea": a[first], "eb": b[first], "ew": ew[first], "n_seeds": np.int64(len(z)),
             "invalid_border_keys": (bad_r + r0).astype(np.int64) * width + (bad_c + c0),
             "blk_r": np.int64(br), "blk_c": np.int64(bc), "blk": flags,
-            **dict(zip(("inv_any", "inv_z"), pack_invalid(~valid)))}
+            **dict(zip(("inv_any", "inv_z"), pack_invalid(~valid))), **extra}
 
 
 def _pass2_tile(box, lv, ctx):
@@ -629,13 +684,23 @@ def _pass2_tile(box, lv, ctx):
     labels, n_lab = ndimage.label(depth > 0, structure=EIGHT)
     out = _tile_records(depth, box, width, ctx["areas"][r0:r1], bmask, near, ctx["min_depth"],
                         labels, n_lab, *((work, filled) if ctx["details"] else (None, None)))
+    if out is not None and ctx["breach"] is not None:
+        _breach_pieces(out[0], labels, n_lab, work, valid, rows, cols, border, box, ctx)
     lab2rec = np.full(n_lab + 1, -1, dtype=np.int64)
     if out is not None:
         lab2rec[out[0]["lab"].to_numpy()] = np.arange(len(out[0]))
     route = (_route_tile(ework, evalid, filled, labels, n_lab, lab2rec, box, win, ctx)
              if ctx["catchments"] else None)
+    hooked = _tile_hooks(ctx, box, window_transform, labels, None if out is None else out[0])
     if out is None:
-        return None if route is None else {"agg": None, "route": route}
+        if route is None and not hooked:
+            return None
+        piece = {"agg": None}
+        if route is not None:
+            piece["route"] = route
+        if hooked:
+            piece["hooks"] = hooked
+        return piece
     agg, pixels, labels = out
     # border pixels, to join pieces of one depression across tile borders
     ring = np.zeros((h, w), dtype=bool)
@@ -656,7 +721,177 @@ def _pass2_tile(box, lv, ctx):
              "ring_rec": lab2rec[labels[pr, pc]], "cells": cells}
     if route is not None:
         piece["route"] = route
+    if hooked:
+        piece["hooks"] = hooked
     return piece
+
+
+_BREACH_COLS = {"breach__depth": "max", "breach__bridge": "max"}
+
+
+def _breach_setup(lines, crs, transform, shape, tile, radius_m):
+    """The road-crossing fix for a tiled run: the crossings, their pixels on the whole grid, and
+    an index of those pixels by tile."""
+    import hashlib
+
+    from .hydro.crossings import prepare, trace_cuts, trace_lines
+
+    crossings = prepare(lines, crs, radius_m)
+    trace = trace_cuts(crossings.cuts, transform, shape)
+    _, br, bc = trace_lines(crossings.bridges, transform, shape)
+    ntc = -(-shape[1] // tile)
+
+    def index(rows, cols):
+        key = (rows // tile) * ntc + cols // tile
+        order = np.argsort(key, kind="stable")
+        return order, key[order]
+    t_order, t_key = index(trace["row"], trace["col"])
+    b_order, b_key = index(br, bc)
+    h = hashlib.sha256()
+    for name in ("cut", "side", "row", "col"):
+        h.update(trace[name].tobytes())
+    h.update(br.tobytes())
+    h.update(bc.tobytes())
+    return {"crossings": crossings, "trace": trace, "n": len(crossings.cuts), "tile": tile,
+            "ntc": ntc, "t_order": t_order, "t_key": t_key, "bridge": (br, bc),
+            "b_order": b_order, "b_key": b_key, "level": None, "lv": None, "summary": None,
+            "fingerprint": {"radius_m": radius_m, "n_cuts": len(crossings.cuts),
+                            "n_bridges": len(crossings.bridges), "pixels": h.hexdigest()}}
+
+
+def _tile_key(b, box):
+    return (box[0] // b["tile"]) * b["ntc"] + box[2] // b["tile"]
+
+
+def _trace_in(b, box):
+    """The cut pixels inside one tile."""
+    k = _tile_key(b, box)
+    sel = b["t_order"][np.searchsorted(b["t_key"], k):np.searchsorted(b["t_key"], k, "right")]
+    return {name: v[sel] for name, v in b["trace"].items()}
+
+
+def _breach_levels(boxes, tiles, ctx, work, say):
+    """The cut levels (from the side minima pass 1 recorded), then pass 1 and the border solve
+    of the second fill, on the cut ground. Checkpointed like the first fill."""
+    b = ctx["breach"]
+    n = len(boxes)
+    if work is not None and work.has("bl", 1):
+        b["level"] = work.load("bl", 1)["level"]
+    else:
+        minima = np.full((b["n"], 2), np.inf)
+        for k in range(1, n + 1):
+            t = (tiles[k - 1] if tiles is not None and tiles[k - 1] is not None
+                 else work.load("p1", k, keys=["bk_idx", "bk_min"]))
+            minima[t["bk_idx"]] = np.minimum(minima[t["bk_idx"]], t["bk_min"])
+        b["level"] = cut_levels(minima)
+        if work is not None:
+            work.save("bl", 1, {"level": b["level"]})
+    cctx = {**ctx, "cut": True, "invalid": {}}
+    graph = work.load_json("bgraph") if work is not None else None
+    if graph is not None and work.count("bv") == n:
+        b["lv"] = lambda k: work.load("bv", k)["lv"]
+        b["summary"] = work.load_json("bsummary")
+        return
+    vt = []
+    for k, box in enumerate(boxes, 1):
+        if work is not None and work.has("b1", k):
+            t = work.load("b1", k)
+        else:
+            t = _pass1_tile(box, cctx)
+            if work is not None:
+                work.save("b1", k, t)
+            _check_time(ctx, work, n)
+        say(f"cut ground, pass 1, tile {k}/{n}", flush=True)
+        vt.append(t)
+    gmax = np.full(b["n"], -np.inf)
+    for t in vt:
+        gmax[t["b_gi"]] = np.maximum(gmax[t["b_gi"]], t["b_gv"])
+    made = np.isfinite(b["level"])
+    lowered = np.where(made, np.maximum(gmax - np.nan_to_num(b["level"], nan=np.inf), 0.0), 0.0)
+    b["summary"] = {"n_crossings_cut": int((lowered[made] > 0).sum()),
+                    "n_pixels_lowered": int(sum(int(t["b_low"]) for t in vt))}
+    levels, _ = _solve_borders(vt, ctx["width"], ctx["height"])
+    del vt
+    if work is not None:
+        for k, lv in enumerate(levels, 1):
+            work.save("bv", k, {"lv": lv})
+        work.save_json("bsummary", b["summary"])
+        work.save_json("bgraph", {"n": n})       # last: every cut level is saved
+    b["lv"] = lambda k: levels[k - 1]
+
+
+def _breach_pieces(agg, labels, n_lab, work, valid, rows, cols, border, box, ctx):
+    """Add to each piece its greatest depth on the cut ground and whether a bridge crosses it."""
+    b = ctx["breach"]
+    r0, c0 = box[0], box[2]
+    lv = b["lv"](ctx["box_k"][box])
+    cut = apply_cuts(work, valid, _trace_in(b, box), b["level"], offset=(r0, c0))
+    levels = cut[rows, cols]
+    if int(border.sum()) != len(lv) - 1:
+        raise RuntimeError("the cut ground has different border seeds than the ground")
+    levels[border] = lv[:-1]
+    filled, _ = flood_from_seeds(cut, valid, rows, cols, levels)
+    depth = np.where(valid, filled - cut, 0.0)
+    rr, cc = np.nonzero(labels)
+    deepest = np.zeros(n_lab + 1)
+    np.maximum.at(deepest, labels[rr, cc], depth[rr, cc])
+    k = _tile_key(b, box)
+    sel = b["b_order"][np.searchsorted(b["b_key"], k):np.searchsorted(b["b_key"], k, "right")]
+    bridged = np.zeros(n_lab + 1)
+    if len(sel):
+        bl = labels[b["bridge"][0][sel] - r0, b["bridge"][1][sel] - c0]
+        bridged[bl[bl > 0]] = 1.0
+    labs = agg["lab"].to_numpy()
+    agg["breach__depth"] = deepest[labs]
+    agg["breach__bridge"] = bridged[labs]
+
+
+def _breach_columns(out, min_depth):
+    if out is None:
+        return out
+    depth = out.pop("breach__depth").to_numpy()
+    depth = np.minimum(depth, out["max_depth_m"].to_numpy(float))   # as pipeline.add_breach
+    bridge = out.pop("breach__bridge").to_numpy()
+    return out.assign(breached_depth_m=depth, road_dam=depth < min_depth,
+                      bridge_crossing=bridge > 0)
+
+
+def _breach_meta(b, out):
+    c = b["crossings"]
+    s = b["summary"] or {}
+    return {**{k: c.info.get(k) for k in ("radius_m", "n_barriers", "n_streams")},
+            "n_bridges": len(c.bridges), "n_crossings": len(c.cuts),
+            "n_crossings_cut": s.get("n_crossings_cut"),
+            "n_pixels_lowered": s.get("n_pixels_lowered"),
+            "n_road_dam": 0 if out is None else int(out["road_dam"].sum()),
+            "n_bridge_crossing": 0 if out is None else int(out["bridge_crossing"].sum()),
+            "lines": c.info.get("lines")}
+
+
+def _tile_hooks(ctx, box, window_transform, labels, agg):
+    """Run the hooks on one tile. Their per-piece columns are added to `agg` (one value per
+    piece, in its order); their other arrays come back as one flat dict, names prefixed by the
+    hook. Arrays named `...rec` hold piece numbers within the tile."""
+    flat = {}
+    for h in ctx["hooks"]:
+        labs = np.zeros(0, dtype=np.int64) if agg is None else agg["lab"].to_numpy()
+        wide, other = h.tile(ctx["crs"], box, window_transform, labels, labs)
+        if agg is not None:
+            for c, values in wide.items():
+                agg[c] = values
+        flat.update({f"{h.name}__{k}": v for k, v in other.items()})
+    return flat
+
+
+def _hooks_only_tile(box, ctx):
+    """A tile without a single valid pixel: no depressions, but the hooks still count it."""
+    if not ctx["hooks"]:
+        return None
+    r0, r1, c0, c1 = box
+    labels = np.zeros((r1 - r0, c1 - c0), dtype=np.int32)
+    wt = ctx["src"].window_transform(Window(c0, r0, c1 - c0, r1 - r0))
+    hooked = _tile_hooks(ctx, box, wt, labels, None)
+    return {"agg": None, "hooks": hooked} if hooked else None
 
 
 _CELL_PARTS = ("c_rec", "c_cell", "c_depth", "c_area", "c_volume")
@@ -667,6 +902,7 @@ def _pack_piece(piece):
     if piece is None:
         return {"empty": np.bool_(True)}
     arrays = {"empty": np.bool_(False), "has_agg": np.bool_(piece["agg"] is not None)}
+    arrays.update({f"hk__{k}": v for k, v in piece.get("hooks", {}).items()})
     if "route" in piece:
         arrays.update({f"rt__{k}": v for k, v in piece["route"].items()})
     if piece["agg"] is None:
@@ -684,6 +920,7 @@ def _unpack_piece(arrays):
     if bool(arrays["empty"]):
         return None
     route = {k[4:]: v for k, v in arrays.items() if k.startswith("rt__")}
+    hooked = {k[4:]: v for k, v in arrays.items() if k.startswith("hk__")}
     piece = {"agg": None}
     if bool(arrays.get("has_agg", True)):
         agg = pd.DataFrame({c: arrays[f"agg__{c}"] for c in arrays["agg_columns"]})
@@ -693,14 +930,19 @@ def _unpack_piece(arrays):
                  "cells": tuple(arrays[k] for k in (*_CELL_PARTS, *extra))}
     if route:
         piece["route"] = route
+    if hooked:
+        piece["hooks"] = hooked
     return piece
 
 
-def _add_piece(piece, records, rings, parts, routing=None, cparts=None):
+def _add_piece(piece, records, rings, parts, routing=None, cparts=None, hook_parts=None):
     """Number a tile's pieces after those of the tiles before it and collect them."""
     if piece is None:
         return
     offset = records.n
+    if hook_parts is not None and "hooks" in piece:
+        hook_parts.append({k: v + offset if k.endswith("rec") else v
+                           for k, v in piece["hooks"].items()})
     agg = piece["agg"]
     if agg is not None:
         records.add(agg)
@@ -726,11 +968,11 @@ class _Records:
             self.columns = {c: [] for c in agg.columns}
         for c in agg.columns:
             if c not in self.columns:                  # first seen in this tile: earlier had none
-                self.columns[c] = [np.full(self.n, self._MISSING[c])]
+                self.columns[c] = [np.full(self.n, self._MISSING.get(c, 0.0))]
             self.columns[c].append(agg[c].to_numpy(copy=True))
         for c in self.columns:
             if c not in agg.columns:
-                self.columns[c].append(np.full(len(agg), self._MISSING[c]))
+                self.columns[c].append(np.full(len(agg), self._MISSING.get(c, 0.0)))
         self.n += len(agg)
 
     def has(self, name):
@@ -745,7 +987,7 @@ class _Records:
 
 
 def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, drains,
-                 has_buildings, drain_core_frac, spacing=None):
+                 has_buildings, drain_core_frac, spacing=None, hook_cols=None):
     """Join the pieces of each depression across tile borders and apply min_depth to the whole.
 
     Returns the depression table without its H3 id columns, the integer id of each lowest
@@ -792,6 +1034,8 @@ def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, 
         stats["bsum"] = per_comp(records.take("bsum"), "sum")
     if drains is not None:
         stats["near_max"] = per_comp(records.take("near_max"), "max")
+    hooked = {c: per_comp(records.take(c), how) for c, how in (hook_cols or {}).items()
+              if records.has(c)}
     detail = {}
     if spacing is not None:
         detail["water_level_m"] = per_comp(records.take("level"), "first")
@@ -827,6 +1071,8 @@ def _join_pieces(records, rings, width, height, transform, crs, res, min_depth, 
                  *AREA_DOWN, *VOLUME_DOWN):
         if name in detail:
             out[name] = detail.pop(name)[dep_comp]
+    for name, values in hooked.items():           # the hooks' columns, read by their finish()
+        out[name] = values[dep_comp]
     kept = np.zeros(n_comp, dtype=bool)
     kept[dep_comp] = True
     return out, h3_ids(lat, lon, res), comp, kept, dep_comp
@@ -841,9 +1087,14 @@ def _with_ids(out, lowpoints):
 
 
 def _write(out_dir, fmt, out, lowpoints, res, columns, cells, meta, transform, crs, footprint,
-           catchment_chunks=None, details=False, catch_area=None):
+           catchment_chunks=None, details=False, catch_area=None, tables=None):
     """Write the tables piece by piece; return a `Result` that points at them."""
     remove_other_formats(out_dir, fmt)
+    for name, table in (tables or {}).items():
+        with TableWriter(out_dir / f"{name}.{fmt}", fmt) as w:
+            for s in range(0, len(table), CHUNK_ROWS):
+                w.write(table.iloc[s:s + CHUNK_ROWS])
+            w.close(empty=table.iloc[:0])
     if catchment_chunks is not None:                 # first: it sums the catchment areas
         with TableWriter(out_dir / f"catchments.{fmt}", fmt) as w:
             for chunk in catchment_chunks:

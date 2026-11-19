@@ -747,3 +747,58 @@ def _records(frame):
         out.append({c: (None if isinstance(v, float) and math.isnan(v)
                         else v.item() if hasattr(v, "item") else v) for c, v in row.items()})
     return out
+
+
+FLOOD_MAP_POINTS = 20_000   # flooded and dry pixels sampled from a flood map (each)
+
+
+def flood_map_points(flood_map, *, n=FLOOD_MAP_POINTS, seed=0):
+    """(observations, controls, info) from a coded flood map: a raster coded 1 flooded, 0
+    observed and dry, anything else not observed (as `sources.gfm.write_flood_map` writes).
+
+    Up to `n` flooded pixels become the observations and up to `n` dry pixels the controls,
+    drawn at random (seed) with chances in proportion to pixel area. Pixels not observed are
+    never used, so a place the map could not judge never counts as dry.
+    """
+    import rasterio
+
+    from .geometry import pixel_areas_m2
+    from .h3agg.aggregate import lonlat, pixel_centers
+
+    with rasterio.open(flood_map) as src:
+        a = src.read(1)
+        transform, crs, nodata = src.transform, src.crs, src.nodata
+    if nodata is not None and nodata in (0, 1):
+        a = np.where(a == nodata, 255, a)
+    row_area = pixel_areas_m2(transform, crs, a.shape[0])
+    rng = np.random.default_rng(seed)
+
+    def draw(value):
+        rows, cols = np.nonzero(a == value)
+        if len(rows) > n:
+            # weighted sampling without replacement: the n largest log(u) / weight
+            keys = np.log(rng.random(len(rows))) / row_area[rows]
+            pick = np.sort(np.argpartition(keys, len(rows) - n)[len(rows) - n:])
+            rows, cols = rows[pick], cols[pick]
+        lon, lat = lonlat(crs, *pixel_centers(transform, rows, cols))
+        return pd.DataFrame({"point_id": np.arange(len(rows)), "lon": lon, "lat": lat})
+    n_flooded, n_dry = int((a == 1).sum()), int((a == 0).sum())
+    info = {"flood_map": str(flood_map), "flooded_pixels": n_flooded, "dry_pixels": n_dry,
+            "not_observed_pixels": int(a.size - n_flooded - n_dry), "sampled_each": n,
+            "seed": seed}
+    return draw(1), draw(0), info
+
+
+def validate_flood_map(result, flood_map, *, n=FLOOD_MAP_POINTS, seed=0, **kwargs):
+    """`validate` with a flood map instead of points: are flooded pixels nearer depressed ground
+    than dry pixels the same map observed? Points come from `flood_map_points`; other arguments
+    are those of `validate`. The report gains a `flood_map` section."""
+    obs, ctl, info = flood_map_points(flood_map, n=n, seed=seed)
+    if len(obs) == 0:
+        raise ValueError(f"{flood_map} has no flooded pixels (coded 1)")
+    if len(ctl) == 0:
+        raise ValueError(f"{flood_map} has no observed dry pixels (coded 0)")
+    out = validate(result, obs, ctl, seed=seed, **kwargs)
+    out.report["controls"]["source"] = "observed dry pixels of the flood map"
+    out.report["flood_map"] = info
+    return out

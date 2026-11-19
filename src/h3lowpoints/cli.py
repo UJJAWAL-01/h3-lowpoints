@@ -131,8 +131,14 @@ def build_parser():
     val = sub.add_parser("validate", help="do observations (flood reports, claims, ...) fall in or near "
                                           "depressions more often than chance?")
     val.add_argument("results", help="folder written by 'analyze', 'build' or 'clip'")
-    val.add_argument("--observations", required=True,
+    val.add_argument("--observations",
                      help="observed locations: CSV with lon/lat columns, or a vector file")
+    val.add_argument("--flood-map", metavar="FILE",
+                     help="instead of --observations: a flood map raster coded 1 flooded, 0 "
+                          "observed dry, anything else not observed; flooded pixels are the "
+                          "observations and dry pixels the controls")
+    val.add_argument("--map-points", type=int, default=20000, metavar="N",
+                     help="with --flood-map: flooded and dry pixels sampled, each (default 20000)")
     val.add_argument("--controls", help="where observations could have come from (addresses, "
                                         "buildings), in the same forms")
     val.add_argument("--boundary", help="the area studied (vector file): points outside are left "
@@ -469,15 +475,25 @@ def _verify(args):
 def _validate(args):
     import warnings
 
-    from .validation import validate
+    from .validation import validate, validate_flood_map
 
+    if (args.observations is None) == (args.flood_map is None):
+        print("error: give either --observations or --flood-map")
+        return 2
+    if args.flood_map and args.controls:
+        print("error: --flood-map takes its controls from the map's dry pixels; drop --controls")
+        return 2
+    common = dict(boundary=args.boundary, max_rings=args.max_rings, classes=args.classes,
+                  class_order=args.class_order and args.class_order.split(","),
+                  block_res=args.block_res, n_boot=args.boot, seed=args.seed,
+                  exclude_suspect=not args.keep_suspect)
     with warnings.catch_warnings():              # printed below, once, from the report
         warnings.simplefilter("ignore", UserWarning)
-        result = validate(args.results, args.observations, args.controls, boundary=args.boundary,
-                          n_random=args.n_random, max_rings=args.max_rings, classes=args.classes,
-                          class_order=args.class_order and args.class_order.split(","),
-                          block_res=args.block_res, n_boot=args.boot, seed=args.seed,
-                          exclude_suspect=not args.keep_suspect)
+        if args.flood_map:
+            result = validate_flood_map(args.results, args.flood_map, n=args.map_points, **common)
+        else:
+            result = validate(args.results, args.observations, args.controls,
+                              n_random=args.n_random, **common)
     print(result.summary())
     for note in result.warnings:
         print(f"\nwarning: {note}")

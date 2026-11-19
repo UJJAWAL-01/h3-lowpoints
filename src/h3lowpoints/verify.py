@@ -17,6 +17,7 @@ from pathlib import Path
 
 import h3
 import numpy as np
+import pandas as pd
 import rasterio
 from rasterio.windows import Window
 
@@ -507,7 +508,81 @@ def check_saved(folder, rows=CHUNK_ROWS):
     meta = read_meta(folder)
     problems = _check(iter_table(folder, "depressions", rows=rows), iter_table(folder, "cells", rows=rows),
                       meta, *optional)
-    return problems + check_storms(folder, meta, rows)
+    return problems + check_storms(folder, meta, rows) + check_evidence(folder, meta, rows)
+
+
+WATER_CLASSES = {"permanent", "seasonal", "some_years", "never_seen_wet", "too_small",
+                 "too_few_views"}
+
+
+def check_evidence(folder, meta=None, rows=CHUNK_ROWS):
+    """Problems in the evidence a saved result carries: the water_history, flood_events and
+    flood_seen tables (`analyze_tiled(hooks=...)`) and the road-crossing columns. Each table has
+    one row per depression of the depression table (flood_seen: rows for depressions in it only);
+    counts are within their bounds and agree with each other."""
+    meta = read_meta(folder) if meta is None else meta
+    deps = pd.concat(list(iter_table(folder, "depressions", rows=rows)), ignore_index=True)
+    ids = np.sort(deps["id"].to_numpy())
+    out = []
+
+    def same_ids(name, t):
+        got = np.sort(t["id"].to_numpy())
+        if len(got) != len(np.unique(got)):
+            out.append(f"{name}: a depression has more than one row")
+        if len(got) != len(ids) or not np.array_equal(got, ids):
+            out.append(f"{name}: its depressions are not those of the depression table")
+
+    if "breached_depth_m" in deps:
+        d = deps
+        if ((d["breached_depth_m"] < -1e-12) | (d["breached_depth_m"] > d["max_depth_m"] + 1e-9)).any():
+            out.append("breached_depth_m outside 0 to max_depth_m")
+        min_depth = meta.get("params", {}).get("min_depth")
+        if min_depth is not None and (d["road_dam"] != (d["breached_depth_m"] < min_depth)).any():
+            out.append("road_dam does not match breached_depth_m < min_depth")
+    if table_path(folder, "water_history"):
+        w = pd.concat(list(iter_table(folder, "water_history", rows=rows)), ignore_index=True)
+        same_ids("water_history", w)
+        if not set(w["water_class"]) <= WATER_CLASSES:
+            out.append("water_history: unknown water_class")
+        cy = w["clear_years"]
+        if (w["wet_years"] < 0).any() or (cy.notna() & (w["wet_years"] > cy)).any():
+            out.append("water_history: wet_years outside 0 to clear_years")
+        if (w["permanent_years"] > w["wet_years"]).any():
+            out.append("water_history: permanent_years above wet_years")
+        wet = w["wet_years"] > 0
+        if ((wet & (w["first_wet_year"] > w["last_wet_year"]))
+                | (~wet & ((w["first_wet_year"] != -1) | (w["last_wet_year"] != -1)))).any():
+            out.append("water_history: first and last wet years do not fit wet_years")
+        if (w["extent_pixels"] > w["jrc_pixels"] + 1e-9).any() or (w["extent_pixels"] < 0).any():
+            out.append("water_history: extent_pixels outside 0 to jrc_pixels")
+        for c in ("max_wet_share", "ever_wet_share"):
+            v = w[c].dropna()
+            if ((v < -1e-12) | (v > 1 + 1e-12)).any():
+                out.append(f"water_history: {c} outside 0 to 1")
+    if table_path(folder, "flood_events"):
+        f = pd.concat(list(iter_table(folder, "flood_events", rows=rows)), ignore_index=True)
+        same_ids("flood_events", f)
+        if ((f["scenes_flooded"] > f["scenes_observed"]) | (f["scenes_observed"] > f["scenes_covered"])
+                | (f["scenes_flooded"] < 0)).any():
+            out.append("flood_events: not 0 <= scenes_flooded <= scenes_observed <= scenes_covered")
+        if ((f["max_flooded_share"] < 0) | (f["max_flooded_share"] > 1 + 1e-12)).any():
+            out.append("flood_events: max_flooded_share outside 0 to 1")
+        if table_path(folder, "flood_seen"):
+            seen = pd.concat(list(iter_table(folder, "flood_seen", rows=rows)), ignore_index=True)
+            if not set(seen["id"]) <= set(ids):
+                out.append("flood_seen: depressions that are not in the depression table")
+            if ((seen["observed_share"] < 0.5 - 1e-12) | (seen["observed_share"] > 1 + 1e-12)
+                    | (seen["flooded_share"] < 0) | (seen["flooded_share"] > 1 + 1e-12)).any():
+                out.append("flood_seen: a share outside its bounds")
+            per = seen.groupby("id").agg(n=("scene", "size"), fl=("flooded", "sum"))
+            ff = f.set_index("id")
+            n_obs = ff["scenes_observed"].reindex(per.index)
+            n_fl = ff["scenes_flooded"].reindex(per.index)
+            if (per["n"] != n_obs).any() or (per["fl"] != n_fl).any():
+                out.append("flood_seen does not add up to flood_events")
+            if int(ff["scenes_observed"].sum()) != len(seen):
+                out.append("flood_events counts observations flood_seen does not hold")
+    return out
 
 
 def check_storms(folder, meta=None, rows=CHUNK_ROWS):
