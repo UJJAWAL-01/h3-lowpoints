@@ -98,7 +98,7 @@ a:hover { color: var(--water); }
   transition: opacity .2s var(--ease);
 }
 .panel .handle { display: none; }
-.panel-body { padding: 18px 18px 16px; display: grid; gap: 14px; }
+.panel-body { padding: 18px 18px 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .panel h1, .panel h2 { font: 600 22px/1.2 var(--sans); margin: 0; letter-spacing: -.01em; text-wrap: balance; }
 .panel h1 em, .panel h2 em { font-style: normal; color: var(--water); }
 .panel p { margin: 0; color: var(--ink-2); }
@@ -160,8 +160,8 @@ a:hover { color: var(--water); }
 .legend.classes li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: center; font-size: 13.5px; color: var(--ink-2); }
 .legend.classes i { display: block; width: 22px; height: 13px; border: var(--rule); }
 /* what satellites saw, in the depression panel */
-.evidence { display: grid; gap: 6px; background: var(--paper); padding: 10px 12px; }
-.evidence .say { margin: 0; }
+div.evidence { display: grid; gap: 6px; background: var(--paper); padding: 10px 12px; }
+div.evidence .say { margin: 0; }
 
 /* ---------------------------------------------------------------- map controls */
 .levels {
@@ -382,7 +382,9 @@ table.evidence td:last-child { white-space: nowrap; font-weight: 500; }
 .view-note .btn { justify-self: start; }
 
 .show { display: grid; gap: 6px; }
-.show .seg { border: var(--rule-soft); width: max-content; max-width: 100%; flex-wrap: wrap; }
+/* equal columns that share the panel's width; a long label wraps instead of widening the panel */
+.show .seg { border: var(--rule-soft); display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.show .seg button { height: auto; min-height: 38px; min-width: 0; padding: 6px 8px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
 .show .seg button:first-child { border-left: 0; }
 .show .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 
