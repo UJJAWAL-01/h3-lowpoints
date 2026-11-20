@@ -284,7 +284,7 @@ numbers on the clipboard.
 | `data/temporal.json` | NOAA Atlas 14 temporal distributions: 29 regions, the region at each resolution-5 cell, median curves for 6, 12, 24, 96 h | NOAA Atlas 14 |
 
 The first four are hosted on Hugging Face (`h3-lowpoints/explorer-data`, pinned to one commit) with
-Zenodo as the fallback ([doi.org/10.5281/zenodo.23896025](https://doi.org/10.5281/zenodo.23896025));
+Zenodo as the fallback ([doi.org/10.5281/zenodo.24383110](https://doi.org/10.5281/zenodo.24383110));
 the app reads one pack at a time with HTTP range requests. The others ship with the app. The tools
 that build and check every file are in `app/tools/` in the repository.
 

@@ -104,6 +104,7 @@ try {
     if (k !== "depth") await page.screenshot({ path: join(outDir, `colour_${k}.png`) });
   }
   const fc = cases.find((c) => c.group === "flooded");
+  if (fc) {
   const f = await call("findDepression", fc.region, fc.id);
   await page.evaluate((lon, lat) => window.__lowpoints.map.jumpTo({ center: [lon, lat], zoom: 15, pitch: 0, bearing: 0 }), fc.lon, fc.lat);
   await sleep(500);
@@ -114,6 +115,7 @@ try {
   page_.panel = await page.evaluate(() => document.querySelector("#panel-body .evidence")?.innerText || "");
   page_.panelHasYear = fc.days.every((d) => page_.panel.includes(d.slice(0, 4)));
   await page.screenshot({ path: join(outDir, "panel_flooded.png") });
+  } else page_.panel = "(no flooded case in this run)";
   report.page = page_;
 } finally {
   await browser.close();

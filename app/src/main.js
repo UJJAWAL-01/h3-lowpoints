@@ -47,7 +47,7 @@ function unsupported(why) {
   box.setAttribute("role", "alert");
   box.innerHTML = `<h2>This map cannot run in this browser</h2><p>${why}</p>
     <p>Please try a current version of Chrome, Edge, Firefox or Safari. The data can also be downloaded from
-    <a href="https://doi.org/10.5281/zenodo.23731345">Zenodo</a>.</p>`;
+    <a href="https://doi.org/10.5281/zenodo.24382887">Zenodo</a>.</p>`;
   document.body.appendChild(box);
 }
 (() => {
@@ -633,7 +633,7 @@ $("about-open").onclick = openAbout;
 $("about-close").onclick = () => $("about").close();
 $("about").addEventListener("click", (e) => { if (e.target === $("about")) $("about").close(); });
 $("about-evidence").innerHTML = evidenceHtml();
-$("about-version").textContent = `Explorer ${VERSION} · dataset 0.3 · packs doi:10.5281/zenodo.23896025`;
+$("about-version").textContent = `Explorer ${VERSION} · dataset 0.4 · packs doi:10.5281/zenodo.24383110`;
 
 setupSearch({ input: $("search"), list: $("results"), onPick: (p) => {
   clearSelection();

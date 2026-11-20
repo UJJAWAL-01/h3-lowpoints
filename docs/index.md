@@ -15,8 +15,9 @@ running a GIS desktop application.
 
 **National dataset:** every closed depression on land in the lower 48 US states (USGS 3DEP
 30 m, open water masked), on H3, with catchments, spill links, fill curves and how easily each
-fills ([Susceptibility](susceptibility.md)), is published as open data:
-[doi.org/10.5281/zenodo.23731345](https://doi.org/10.5281/zenodo.23731345).
+fills ([Susceptibility](susceptibility.md)), and how often satellites saw water in it with a
+confidence grade ([Seen wet and seen flooded](water-history.md)), is published as open data:
+[doi.org/10.5281/zenodo.24382887](https://doi.org/10.5281/zenodo.24382887).
 
 ## Where to start
 

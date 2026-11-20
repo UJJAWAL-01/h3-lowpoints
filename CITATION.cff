@@ -22,8 +22,8 @@ references:
     authors:
       - family-names: "Patel"
         given-names: "Ujjawal"
-    doi: "10.5281/zenodo.23731345"
-    version: "0.3"
+    doi: "10.5281/zenodo.24382887"
+    version: "0.4"
 keywords:
   - H3
   - DEM

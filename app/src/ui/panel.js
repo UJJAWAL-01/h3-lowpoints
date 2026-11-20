@@ -178,14 +178,14 @@ function evidenceBlock(d) {
 // Where every number comes from, under every view
 export function source(kind) {
   if (kind === "storm") return `<div class="source"><span class="label">Source</span>
-    <p>Run in your browser with the same equations as the open-source h3-lowpoints library (checked to agree within 1e-6), on the national dataset version 0.3, <a href="https://doi.org/10.5281/zenodo.23731345" target="_blank" rel="noopener">doi:10.5281/zenodo.23731345</a>. Storm depths: NOAA Atlas 14.</p>
+    <p>Run in your browser with the same equations as the open-source h3-lowpoints library (checked to agree within 1e-6), on the national dataset version 0.4, <a href="https://doi.org/10.5281/zenodo.24382887" target="_blank" rel="noopener">doi:10.5281/zenodo.24382887</a>. Storm depths: NOAA Atlas 14.</p>
     <p><a href="https://ujjawal-01.github.io/h3-lowpoints/limitations.html" target="_blank" rel="noopener">Limits</a> ·
       <button class="btn link" data-act="disclaimer">Not advice: disclaimer</button></p>${noteHtml("storm")}</div>`;
   const what = kind === "depression"
     ? "Computed by the open-source h3-lowpoints library from the USGS 3DEP 30 m elevation model, with land cover (Annual NLCD 2024), soils (USDA gNATSGO) and storms (NOAA Atlas 14)."
     : "Summed from every depression in the national dataset, computed from the USGS 3DEP 30 m elevation model.";
   return `<div class="source"><span class="label">Source</span>
-    <p>${what} Dataset version 0.3, <a href="https://doi.org/10.5281/zenodo.23731345" target="_blank" rel="noopener">doi:10.5281/zenodo.23731345</a>.</p>
+    <p>${what} Dataset version 0.4, <a href="https://doi.org/10.5281/zenodo.24382887" target="_blank" rel="noopener">doi:10.5281/zenodo.24382887</a>.</p>
     <p><a href="https://ujjawal-01.github.io/h3-lowpoints/definition.html" target="_blank" rel="noopener">Method</a> ·
       <a href="https://ujjawal-01.github.io/h3-lowpoints/limitations.html" target="_blank" rel="noopener">Limits</a> ·
       <button class="btn link" data-act="disclaimer">Not advice: disclaimer</button></p>${noteHtml(kind)}</div>`;
