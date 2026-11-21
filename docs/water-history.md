@@ -174,7 +174,7 @@ suits `h3lowpoints validate --flood-map` ([Validation](validation.md#flood-maps)
 ## In the US national tables
 
 The national run (lower 48 states, USGS 3DEP 30 m, 10,527,850 depressions after clipping;
-dataset 0.4 in preparation) used the outline method on the whole JRC record and a fixed random
+dataset 0.4, [doi.org/10.5281/zenodo.24382887](https://doi.org/10.5281/zenodo.24382887)) used the outline method on the whole JRC record and a fixed random
 sample of 400 GFM items (2015-2025, scenes with at least 25,000 flooded pixels), of which 394 had
 every layer, advisory flags as not observed.
 

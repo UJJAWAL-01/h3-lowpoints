@@ -115,7 +115,7 @@ Each step is finished, tested and documented before the next starts.
    index and the grade nationally: the index points the wrong way over all depressions and the
    expected way within depressions of similar size; the grade is not validated
    ([Evidence](evidence.md#study-3-observed-water-and-the-confidence-grade-lower-48)). The tables
-   are version 0.4 of the dataset (in preparation).
+   are version 0.4 of the dataset ([doi.org/10.5281/zenodo.24382887](https://doi.org/10.5281/zenodo.24382887)).
 
 ## Also planned
 

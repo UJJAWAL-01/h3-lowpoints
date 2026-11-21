@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0 (unreleased)
+## 0.6.0 (19 November 2026)
 
 From "could hold water" to "did": observed water, radar floods and a confidence grade for every
 depression, at any scale. See [Seen wet and seen flooded](docs/water-history.md),
